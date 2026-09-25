@@ -8,6 +8,7 @@ D3：独立包名共存。基线 = C12 HEAD。
 
 - release APK：`PASEO_GO=1` 全链路构建（签名=debug keystore 亦可，BUILD.md 记录复用方式）；产物存 `paseo-go/release/`（不 commit APK，commit BUILD 更新）
 - 冒烟清单全跑（对照 DESIGN §4-§8 逐条）：双主机连接→会话列表→长按置顶拖拽→进会话发消息→文件浏览→apk 下载分享→收藏→快捷指令执行→导入→搜索→通知→壳设置开关回官方 IA 再回壳
+- **C3 遗留人工项**：置顶拖拽在 C3 新 hook（use-shell-row-drag-menu）下 adb 注入无法复现换位（JS 触摸滞后伪影），须**真人手指**拖一次置顶行验证落位+持久化（平板在，5 秒的事），截图存证
 - 版本号策略：`paseo-go/VERSION`（0.1.0），关于页显示
 
 ## 范围
