@@ -118,6 +118,9 @@ npx tsx packages/cli/src/index.js delete <agentId> --json   # 用完删
 - ⚠ 软键盘弹出/收起会移动弹层坐标——**提交前重新 dump 一次**再点
 - ⚠ `KEYCODE_BACK` 可能直接退出 app（回桌面/其他 app），导航优先用 app 内 UI 元素
 - 华为实测：`adb install` 无拦截无弹窗；`screencap` 正常
+- ⚠（C3 实测）dev 壳包名是 `app.paseo.shell.debug`（D3 独立包名），force-stop/am start 用它，不是上表的 `sh.paseo.debug`
+- ⚠（C3 实测）`input swipe` 线性注入 + JS 触摸分发有 ~290ms 滞后：长按拖拽（180ms 静止后移动）用 ≤25px/s 的慢速注入会被仲裁判成"静止长按"而弹菜单（人手拖拽 300px/s+ 不会）。测拖拽用 ≥50px/s（如 350px/7000ms）；`input motionevent` 分段注入会重置 downTime、断手势流，不可用
+- ⚠（C3 实测）`input text` 不进 RN 受控输入（onChangeText 不触发）——验证输入类 UI 到"页面渲染+提交动作发出"为止，逻辑正确性靠单测
 
 ## 5. 截图采集（对应证据契约 4）
 

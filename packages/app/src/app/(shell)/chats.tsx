@@ -1,19 +1,28 @@
-// 对话 tab (DESIGN §4, card C2): cross-host flat chat list over every connected
+// 对话 tab (DESIGN §4, cards C2+C3): cross-host flat chat list over every connected
 // host's agents. Groups 已置顶 → 需要处理 → 最近, then one greyed group per offline
 // host with retry; unread comes from the readState store, pin order from the pins
 // store, hiding from the archive store. Cold start shows the official sidebar
 // skeleton; pull-to-refresh re-pulls every host directory. Tapping a row pushes the
 // official agent route (temporary direct push until C4 rewires it to the workspace
 // route + open intent).
+//
+// C3: the list rides the official DraggableList wrapper so the 置顶 group can be
+// re-ordered by long-press-drag (only pinned rows arm the drag; the wrapper hides
+// the refresh control while a drag is live, the documented coexistence fix). Drops
+// persist through shellAgentActions.reorderPinned. The 顶栏 filter segment flips
+// between 进行中 and 已归档; the archived view reuses the same derivation with the
+// archived set inverted, and its rows carry the 取消归档/删除 menu.
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { FlatList, Pressable, RefreshControl, Text, View } from "react-native";
+import { Pressable, Text, View } from "react-native";
 import { router, type Href } from "expo-router";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useTranslation } from "react-i18next";
-import { StyleSheet, withUnistyles } from "react-native-unistyles";
+import { StyleSheet } from "react-native-unistyles";
 import { MessageCircle } from "lucide-react-native";
 import { SidebarAgentListSkeleton } from "@/components/sidebar-agent-list-skeleton";
 import { Button } from "@/components/ui/button";
+import { DraggableList } from "@/components/draggable-list";
+import type { DraggableRenderItemInfo } from "@/components/draggable-list.types";
 import { useToast } from "@/contexts/toast-context";
 import { useAggregatedAgents } from "@/hooks/use-aggregated-agents";
 import { useOpenAddProject } from "@/hooks/use-open-add-project";
@@ -26,12 +35,13 @@ import {
 } from "@/shell/chats/derive";
 import { ChatListRow, type ShellChatAgent } from "@/shell/components/chat-list-row";
 import { ChatSectionHeader } from "@/shell/components/chat-section-header";
-import { ChatsHeader } from "@/shell/components/chats-header";
+import { ChatsHeader, type ChatListFilter } from "@/shell/components/chats-header";
 import { SHELL_I18N_NAMESPACE } from "@/shell/i18n";
 import { OFFICIAL } from "@/shell/routes";
 import { usePaseoGoArchiveStore } from "@/shell/stores/archive";
 import { usePaseoGoPinsStore } from "@/shell/stores/pins";
 import { usePaseoGoReadStateStore } from "@/shell/stores/readState";
+import { useShellAgentActions } from "@/shell/shellAgentActions";
 import { deriveSidebarStateBucket } from "@/utils/sidebar-agent-state";
 import { useShellHostStatuses } from "@/shell/runtime/use-shell-host-statuses";
 
@@ -42,13 +52,6 @@ const SECTION_TITLE_KEY: Record<Exclude<ChatSectionKind, "offline">, string> = {
 };
 
 const REFRESH_SETTLE_MS = 700;
-
-// RefreshControl takes colors outside the style system; the withUnistyles mapping is
-// the ThemedStack idiom for theme-fed non-style props.
-const ThemedRefreshControl = withUnistyles(RefreshControl, (theme) => ({
-  tintColor: theme.colors.foregroundMuted,
-  colors: [theme.colors.accent],
-}));
 
 // Greyed offline-host group header: host label + single-host retry.
 function OfflineSectionHeader({
@@ -71,17 +74,27 @@ function OfflineSectionHeader({
 }
 
 // Empty state (DESIGN §4): illustration + 新建对话 guidance; with no hosts configured
-// the guidance is the official connect flow instead.
+// the guidance is the official connect flow instead. The archived filter gets a plain
+// quiet line instead — there is nothing to create from an empty archive.
 function ChatsEmptyState({
   hasHosts,
+  archivedOnly,
   onNewChat,
   onConnectHost,
 }: {
   hasHosts: boolean;
+  archivedOnly: boolean;
   onNewChat: () => void;
   onConnectHost: () => void;
 }) {
   const { t } = useTranslation(SHELL_I18N_NAMESPACE);
+  if (archivedOnly) {
+    return (
+      <View style={styles.empty} testID="shell-chats-empty-archived">
+        <Text style={styles.emptyHint}>{t("chats.emptyArchived")}</Text>
+      </View>
+    );
+  }
   return (
     <View style={styles.empty} testID="shell-chats-empty">
       <View style={styles.emptyIconWrap}>
@@ -118,17 +131,25 @@ export default function ShellChatsScreen() {
   const archivedIds = usePaseoGoArchiveStore((state) => state.archivedIds);
   const lastReadAt = usePaseoGoReadStateStore((state) => state.lastReadAt);
 
+  const actions = useShellAgentActions();
+  const [filter, setFilter] = useState<ChatListFilter>("active");
+  const archivedOnly = filter === "archived";
+
   const hostIds = useMemo(() => hosts.map((host) => host.serverId), [hosts]);
   const statuses = useShellHostStatuses(hostIds);
   const hostsById = useMemo(
     () => new Map(hosts.map((host) => [host.serverId, host] as const)),
     [hosts],
   );
+  const archivedSet = useMemo(() => new Set(archivedIds), [archivedIds]);
+  const pinnedSet = useMemo(() => new Set(pinnedIds), [pinnedIds]);
 
   // One pass over the directory into derivation inputs; grouping/sorting/unread are
-  // the pure derive module's job (and its unit tests' subject).
+  // the pure derive module's job (and its unit tests' subject). The archived filter
+  // inverts the membership: only archived rows enter, and neither the pin group nor
+  // the hiding rule applies to them.
   const items = useMemo(() => {
-    const inputs: ShellChatAgent[] = agents.map((agent) => ({
+    let inputs: ShellChatAgent[] = agents.map((agent) => ({
       key: `${agent.serverId}:${agent.id}`,
       serverId: agent.serverId,
       lastActivityAt: agent.lastActivityAt.getTime(),
@@ -141,17 +162,23 @@ export default function ShellChatsScreen() {
       }),
       agent,
     }));
+    if (archivedOnly) inputs = inputs.filter((agent) => archivedSet.has(agent.key));
     return flattenChatSections(
       deriveChatSections({
         agents: inputs,
-        pinnedIds,
-        archivedIds,
+        pinnedIds: archivedOnly ? [] : pinnedIds,
+        archivedIds: archivedOnly ? [] : archivedIds,
         lastReadAt,
         hostIds,
         hostStatuses: statuses,
       }),
     );
-  }, [agents, pinnedIds, archivedIds, lastReadAt, hostIds, statuses]);
+  }, [agents, archivedOnly, archivedSet, pinnedIds, archivedIds, lastReadAt, hostIds, statuses]);
+
+  const archivedCount = useMemo(
+    () => agents.filter((agent) => archivedSet.has(`${agent.serverId}:${agent.id}`)).length,
+    [agents, archivedSet],
+  );
 
   const [refreshing, setRefreshing] = useState(false);
   const refreshTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -168,6 +195,20 @@ export default function ShellChatsScreen() {
     [],
   );
 
+  // The library hands back the whole list reordered; only the pinned rows' relative
+  // order is its opinion we keep — headers and unpinned rows are re-derived anyway.
+  const handleDragEnd = useCallback(
+    (nextItems: ChatListItem<ShellChatAgent>[]) => {
+      const order: string[] = [];
+      for (const item of nextItems) {
+        if (item.type === "row" && pinnedSet.has(item.row.agent.key))
+          order.push(item.row.agent.key);
+      }
+      actions.reorderPinned(order);
+    },
+    [actions, pinnedSet],
+  );
+
   const handleRetryHost = useCallback(
     (serverId: string) => {
       void getHostRuntimeStore().runProbeCycleNow(serverId);
@@ -181,10 +222,13 @@ export default function ShellChatsScreen() {
   const handleImportPlaceholder = useCallback(() => toast.show(t("chats.importSoon")), [toast, t]);
 
   const renderItem = useCallback(
-    ({ item }: { item: ChatListItem<ShellChatAgent> }) => {
+    ({ item, drag, isActive }: DraggableRenderItemInfo<ChatListItem<ShellChatAgent>>) => {
       if (item.type === "section-header") {
         const { section } = item;
-        if (section.kind === "offline" && section.serverId) {
+        if (section.kind === "offline") {
+          // derive only emits offline groups with a serverId; the guard keeps the
+          // types honest and the empty cell is unreachable.
+          if (!section.serverId) return <View />;
           return (
             <OfflineSectionHeader
               title={hostsById.get(section.serverId)?.label ?? section.serverId}
@@ -193,36 +237,39 @@ export default function ShellChatsScreen() {
             />
           );
         }
-        if (section.kind !== "offline") {
-          return (
-            <ChatSectionHeader
-              title={t(SECTION_TITLE_KEY[section.kind])}
-              testID={`shell-section-${section.kind}`}
-            />
-          );
-        }
-        return null;
+        return (
+          <ChatSectionHeader
+            title={t(SECTION_TITLE_KEY[section.kind])}
+            testID={`shell-section-${section.kind}`}
+          />
+        );
       }
-      return <ChatListRow row={item.row} />;
+      const draggable = !archivedOnly && pinnedSet.has(item.row.agent.key);
+      return (
+        <ChatListRow
+          row={item.row}
+          actions={actions}
+          draggable={draggable}
+          drag={draggable ? drag : undefined}
+          isActive={isActive}
+        />
+      );
     },
-    [hostsById, handleRetryHost, t],
+    [actions, archivedOnly, hostsById, handleRetryHost, pinnedSet, t],
   );
 
   const keyExtractor = useCallback((item: ChatListItem<ShellChatAgent>) => item.key, []);
-  const refreshControl = useMemo(
-    () => <ThemedRefreshControl refreshing={refreshing} onRefresh={handleRefresh} />,
-    [refreshing, handleRefresh],
-  );
   const hasHosts = hosts.length > 0;
   const listEmpty = useMemo(
     () => (
       <ChatsEmptyState
         hasHosts={hasHosts}
+        archivedOnly={archivedOnly}
         onNewChat={handleNewChat}
         onConnectHost={handleConnectHost}
       />
     ),
-    [hasHosts, handleNewChat, handleConnectHost],
+    [archivedOnly, hasHosts, handleNewChat, handleConnectHost],
   );
 
   const showSkeleton = isInitialLoad || hostRegistryStatus === "loading";
@@ -237,6 +284,9 @@ export default function ShellChatsScreen() {
           onNewChat={handleNewChat}
           onImportChat={handleImportPlaceholder}
           onSearch={handleSearchPlaceholder}
+          filter={filter}
+          onFilterChange={setFilter}
+          archivedCount={archivedCount}
         />
       </View>
       {showSkeleton ? (
@@ -244,12 +294,14 @@ export default function ShellChatsScreen() {
           <SidebarAgentListSkeleton />
         </View>
       ) : (
-        <FlatList
+        <DraggableList
           data={items}
           keyExtractor={keyExtractor}
           renderItem={renderItem}
+          onDragEnd={handleDragEnd}
           contentContainerStyle={styles.listContent}
-          refreshControl={refreshControl}
+          refreshing={refreshing}
+          onRefresh={handleRefresh}
           ListEmptyComponent={listEmpty}
           testID="shell-chats-list"
         />

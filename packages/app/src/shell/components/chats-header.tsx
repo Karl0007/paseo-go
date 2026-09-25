@@ -1,7 +1,9 @@
 // 对话 tab top bar (DESIGN §4): 连接状态胶囊 (tap = per-host status sheet with
-// single-host retry) | 搜索 icon (placeholder until C9) | ＋菜单 (新建对话 = official
-// add-project flow, 导入 = placeholder until C10). Menus ride the official menu
-// engine in sheet presentation, the compact-native shape the composer already uses.
+// single-host retry) | 进行中/已归档 filter segment (C3: archived rows hide from the
+// live list; the filter reveals them and their 取消归档/删除 menu) | 搜索 icon
+// (placeholder until C9) | ＋菜单 (新建对话 = official add-project flow, 导入 =
+// placeholder until C10). Menus ride the official menu engine in sheet presentation,
+// the compact-native shape the composer already uses.
 import { useCallback, useMemo } from "react";
 import { Pressable, Text, View } from "react-native";
 import { StyleSheet } from "react-native-unistyles";
@@ -61,6 +63,45 @@ function HostMenuItem({
   );
 }
 
+// One side of the 进行中/已归档 segment. The archived side carries the count so the
+// hidden pile stays visible while it is hidden.
+function FilterSegment({
+  label,
+  selected,
+  onPress,
+  testID,
+}: {
+  label: string;
+  selected: boolean;
+  onPress: () => void;
+  testID: string;
+}) {
+  const accessibilityState = useMemo(() => ({ selected }), [selected]);
+  const segmentStyle = useCallback(
+    ({ pressed }: { pressed: boolean }) => [
+      styles.segment,
+      selected && styles.segmentSelected,
+      pressed && !selected && styles.segmentPressed,
+    ],
+    [selected],
+  );
+  return (
+    <Pressable
+      onPress={onPress}
+      accessibilityRole="button"
+      accessibilityState={accessibilityState}
+      testID={testID}
+      style={segmentStyle}
+    >
+      <Text style={[styles.segmentText, selected && styles.segmentTextSelected]} numberOfLines={1}>
+        {label}
+      </Text>
+    </Pressable>
+  );
+}
+
+export type ChatListFilter = "active" | "archived";
+
 export function ChatsHeader({
   hosts,
   statuses,
@@ -68,6 +109,9 @@ export function ChatsHeader({
   onNewChat,
   onImportChat,
   onSearch,
+  filter,
+  onFilterChange,
+  archivedCount,
 }: {
   hosts: readonly HostProfile[];
   statuses: ReadonlyMap<string, HostRuntimeConnectionStatus>;
@@ -75,6 +119,9 @@ export function ChatsHeader({
   onNewChat: () => void;
   onImportChat: () => void;
   onSearch: () => void;
+  filter: ChatListFilter;
+  onFilterChange: (filter: ChatListFilter) => void;
+  archivedCount: number;
 }) {
   const { t } = useTranslation(SHELL_I18N_NAMESPACE);
   const total = hosts.length;
@@ -89,6 +136,8 @@ export function ChatsHeader({
     ({ pressed }: { pressed: boolean }) => [styles.iconButton, pressed && styles.iconButtonPressed],
     [],
   );
+  const pickActive = useCallback(() => onFilterChange("active"), [onFilterChange]);
+  const pickArchived = useCallback(() => onFilterChange("archived"), [onFilterChange]);
 
   return (
     <View style={styles.header}>
@@ -122,6 +171,24 @@ export function ChatsHeader({
             )}
           </DropdownMenuContent>
         </DropdownMenu>
+        <View style={[styles.pill, styles.segmentGroup]} testID="shell-chat-filter">
+          <FilterSegment
+            label={t("chats.filter.active")}
+            selected={filter === "active"}
+            onPress={pickActive}
+            testID="shell-filter-active"
+          />
+          <FilterSegment
+            label={
+              archivedCount > 0
+                ? t("chats.filter.archivedCount", { count: archivedCount })
+                : t("chats.filter.archived")
+            }
+            selected={filter === "archived"}
+            onPress={pickArchived}
+            testID="shell-filter-archived"
+          />
+        </View>
         <View style={styles.spacer} />
         <Pressable
           onPress={onSearch}
@@ -227,5 +294,29 @@ const styles = StyleSheet.create((theme) => ({
   // Static color holder for the lucide glyphs (the schedule-row glyph idiom).
   iconColor: {
     color: theme.colors.foregroundMuted,
+  },
+  // Filter segment: the pill's chrome, split into two thumb-sized halves.
+  segmentGroup: {
+    padding: theme.spacing[0.5],
+    gap: theme.spacing[0.5],
+  },
+  segment: {
+    borderRadius: theme.borderRadius.full,
+    paddingVertical: theme.spacing[1],
+    paddingHorizontal: theme.spacing[3],
+  },
+  segmentSelected: {
+    backgroundColor: theme.colors.surface2,
+  },
+  segmentPressed: {
+    backgroundColor: theme.colors.surface1,
+  },
+  segmentText: {
+    fontSize: theme.fontSize.sm,
+    color: theme.colors.foregroundMuted,
+  },
+  segmentTextSelected: {
+    color: theme.colors.foreground,
+    fontWeight: theme.fontWeight.medium,
   },
 }));

@@ -15,6 +15,8 @@ interface PaseoGoReadStateState {
   lastReadAt: Record<string, number>;
   /** Row key is `${serverId}:${agentId}`; `at` defaults to now (epoch ms). */
   markRead: (key: string, at?: number) => void;
+  /** C3 delete cleanup: a deleted chat's read stamp must not outlive it. */
+  clear: (key: string) => void;
   clearAll: () => void;
 }
 
@@ -26,6 +28,13 @@ export const usePaseoGoReadStateStore = create<PaseoGoReadStateState>()(
         set((state) => ({
           lastReadAt: { ...state.lastReadAt, [key]: at ?? Date.now() },
         })),
+      clear: (key) =>
+        set((state) => {
+          if (!(key in state.lastReadAt)) return state;
+          const next = { ...state.lastReadAt };
+          delete next[key];
+          return { lastReadAt: next };
+        }),
       clearAll: () => set({ lastReadAt: {} }),
     }),
     {

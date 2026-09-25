@@ -39,7 +39,45 @@
     "emptyTitle": "还没有对话",
     "emptyAgentsHint": "点「新建对话」，让 agent 开始干活。",
     "emptyHostsHint": "还没有可连接的主机，先连接一台 daemon。",
-    "connectHost": "连接主机"
+    "connectHost": "连接主机",
+    "filter": {
+      "active": "进行中",
+      "archived": "已归档",
+      "archivedCount": "已归档 {{count}}"
+    },
+    "emptyArchived": "没有已归档的对话。",
+    "menu": {
+      "pin": "置顶",
+      "unpin": "取消置顶",
+      "rename": "重命名",
+      "renameTitle": "重命名",
+      "renamePlaceholder": "显示名称（留空恢复默认）",
+      "renameSave": "保存",
+      "renameClear": "恢复默认名称",
+      "archive": "归档",
+      "unarchive": "取消归档",
+      "stop": "停止",
+      "delete": "删除",
+      "deleteConfirmTitle": "删除会话？",
+      "deleteConfirmMessage": "「{{title}}」将从主机上删除，此操作无法撤销。",
+      "deleteConfirm": "删除",
+      "deleteCancel": "取消",
+      "more": "更多操作"
+    },
+    "toast": {
+      "pinned": "已置顶",
+      "unpinned": "已取消置顶",
+      "renamed": "已重命名",
+      "aliasCleared": "已恢复默认名称",
+      "archived": "已归档",
+      "unarchived": "已移出归档",
+      "stopped": "已停止运行",
+      "deleted": "已删除会话"
+    },
+    "errors": {
+      "actionFailed": "操作失败",
+      "hostOffline": "主机当前离线，无法完成该操作。"
+    }
   },
   "workspace": {
     "title": "工作区",

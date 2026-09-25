@@ -39,7 +39,45 @@
     "emptyTitle": "No conversations yet",
     "emptyAgentsHint": "Tap New chat and let an agent get to work.",
     "emptyHostsHint": "No host to connect to yet — pair or add a daemon first.",
-    "connectHost": "Connect a host"
+    "connectHost": "Connect a host",
+    "filter": {
+      "active": "Active",
+      "archived": "Archived",
+      "archivedCount": "Archived {{count}}"
+    },
+    "emptyArchived": "No archived conversations.",
+    "menu": {
+      "pin": "Pin",
+      "unpin": "Unpin",
+      "rename": "Rename",
+      "renameTitle": "Rename",
+      "renamePlaceholder": "Display name (empty resets)",
+      "renameSave": "Save",
+      "renameClear": "Reset to original name",
+      "archive": "Archive",
+      "unarchive": "Unarchive",
+      "stop": "Stop",
+      "delete": "Delete",
+      "deleteConfirmTitle": "Delete this chat?",
+      "deleteConfirmMessage": "“{{title}}” will be deleted from the host. This cannot be undone.",
+      "deleteConfirm": "Delete",
+      "deleteCancel": "Cancel",
+      "more": "More actions"
+    },
+    "toast": {
+      "pinned": "Pinned",
+      "unpinned": "Unpinned",
+      "renamed": "Renamed",
+      "aliasCleared": "Name reset",
+      "archived": "Archived",
+      "unarchived": "Restored from archive",
+      "stopped": "Run stopped",
+      "deleted": "Chat deleted"
+    },
+    "errors": {
+      "actionFailed": "Action failed",
+      "hostOffline": "The host is offline, so this action could not run."
+    }
   },
   "workspace": {
     "title": "Workspace",
