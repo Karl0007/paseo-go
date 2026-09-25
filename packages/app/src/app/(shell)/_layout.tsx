@@ -6,6 +6,7 @@ import { FolderTree, MessageCircle, User } from "lucide-react-native";
 import { useEffect, useMemo } from "react";
 import { useTranslation } from "react-i18next";
 import { StyleSheet, withUnistyles } from "react-native-unistyles";
+import { useShellNotifications } from "@/shell/notify/use-shell-notifications";
 import { ensureShellI18n, SHELL_I18N_NAMESPACE } from "@/shell/i18n";
 import { usePaseoGoSettingsStore, type ShellTab } from "@/shell/stores/settings";
 
@@ -106,6 +107,8 @@ export default function ShellTabsLayout() {
   const defaultTab = usePaseoGoSettingsStore((state) => state.defaultTab);
   const navigation = useNavigation();
 
+  // C11: attention watcher lives on the tabs layout, so it runs on every shell tab.
+  useShellNotifications();
   useEffect(() => {
     // Focused route, or null on a hidden push (files/commands) — those aren't tabs,
     // so they must not overwrite the remembered position.

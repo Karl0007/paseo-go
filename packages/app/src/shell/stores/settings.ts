@@ -13,13 +13,18 @@ export type ShellTab = "chats" | "workspace" | "me";
 const PaseoGoSettingsPersistedSchema = z.strictObject({
   shellMode: z.boolean().nullable(),
   defaultTab: z.enum(["chats", "workspace", "me"]),
+  // C11: default-on, and `.default` keeps pre-C11 payloads (no key) valid — the
+  // validated storage would otherwise discard the whole envelope.
+  notifications: z.boolean().default(true),
 });
 
 interface PaseoGoSettingsState {
   shellMode: boolean | null;
   defaultTab: ShellTab;
+  notifications: boolean;
   setShellMode: (shellMode: boolean) => void;
   setDefaultTab: (tab: ShellTab) => void;
+  setNotifications: (notifications: boolean) => void;
 }
 
 export const usePaseoGoSettingsStore = create<PaseoGoSettingsState>()(
@@ -27,13 +32,19 @@ export const usePaseoGoSettingsStore = create<PaseoGoSettingsState>()(
     (set) => ({
       shellMode: null,
       defaultTab: "chats",
+      notifications: true,
       setShellMode: (shellMode) => set({ shellMode }),
       setDefaultTab: (defaultTab) => set({ defaultTab }),
+      setNotifications: (notifications) => set({ notifications }),
     }),
     {
       name: "paseoGo.settings",
       storage: createValidatedPersistStorage(AsyncStorage, PaseoGoSettingsPersistedSchema),
-      partialize: (state) => ({ shellMode: state.shellMode, defaultTab: state.defaultTab }),
+      partialize: (state) => ({
+        shellMode: state.shellMode,
+        defaultTab: state.defaultTab,
+        notifications: state.notifications,
+      }),
     },
   ),
 );

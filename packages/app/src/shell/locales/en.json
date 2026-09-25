@@ -206,6 +206,12 @@
       "binary": "Binary file"
     }
   },
+  "notify": {
+    "channelName": "Chat alerts",
+    "needsInputBody": "Waiting for your approval — open to respond.",
+    "failedBody": "Ran into an error. Tap to review.",
+    "failedBodyWithError": "Ran into an error: {{error}}"
+  },
   "me": {
     "title": "Me",
     "overviewHeader": "Overview",
@@ -227,6 +233,8 @@
     "themeFailed": "Failed to save theme",
     "defaultTab": "Start tab",
     "defaultTabHint": "Tab the shell opens first; takes effect after restart.",
+    "notifications": "Chat notifications",
+    "notificationsHint": "System notification when an agent waits for approval or fails; tap to jump straight in. Lock-screen push needs the official push channel.",
     "clearData": "Clear local data",
     "clearDataHint": "Removes shell-owned data only (pins, archive, read state, favorites, commands, settings). Official data is untouched.",
     "clearConfirmTitle": "Clear local data?",

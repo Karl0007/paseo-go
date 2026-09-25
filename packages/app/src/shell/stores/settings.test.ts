@@ -26,7 +26,7 @@ const SETTINGS_KEY = "paseoGo.settings";
 
 beforeEach(async () => {
   await usePaseoGoSettingsStore.persist.clearStorage();
-  usePaseoGoSettingsStore.setState({ shellMode: null, defaultTab: "chats" });
+  usePaseoGoSettingsStore.setState({ shellMode: null, defaultTab: "chats", notifications: true });
 });
 
 describe("defaultTab resolution", () => {
@@ -65,5 +65,30 @@ describe("defaultTab resolution", () => {
     expect(usePaseoGoSettingsStore.getState().shellMode).toBe(false);
     usePaseoGoSettingsStore.setState({ shellMode: null });
     expect(usePaseoGoSettingsStore.getState().shellMode).toBeNull();
+  });
+});
+
+describe("notifications flag (C11)", () => {
+  it("is on by default and survives a simulated restart", async () => {
+    expect(usePaseoGoSettingsStore.getState().notifications).toBe(true);
+    usePaseoGoSettingsStore.getState().setNotifications(false);
+    const raw = await AsyncStorage.getItem(SETTINGS_KEY);
+    expect(JSON.parse(String(raw)).state.notifications).toBe(false);
+
+    usePaseoGoSettingsStore.setState({ notifications: true });
+    await AsyncStorage.setItem(SETTINGS_KEY, String(raw));
+    await usePaseoGoSettingsStore.persist.rehydrate();
+    expect(usePaseoGoSettingsStore.getState().notifications).toBe(false);
+  });
+
+  it("keeps pre-C11 payloads valid: no key rehydrates to the on default", async () => {
+    await AsyncStorage.setItem(
+      SETTINGS_KEY,
+      JSON.stringify({ state: { shellMode: true, defaultTab: "me" }, version: 0 }),
+    );
+    await usePaseoGoSettingsStore.persist.rehydrate();
+    // The envelope must NOT be discarded over the missing key — the C8 picks stand.
+    expect(usePaseoGoSettingsStore.getState().defaultTab).toBe("me");
+    expect(usePaseoGoSettingsStore.getState().notifications).toBe(true);
   });
 });

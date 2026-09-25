@@ -203,6 +203,12 @@
       "binary": "二进制文件"
     }
   },
+  "notify": {
+    "channelName": "会话提醒",
+    "needsInputBody": "正在等待你的批准，点击处理。",
+    "failedBody": "运行出错，点击查看。",
+    "failedBodyWithError": "运行出错：{{error}}"
+  },
   "me": {
     "title": "我的",
     "overviewHeader": "概览",
@@ -224,6 +230,8 @@
     "themeFailed": "主题保存失败",
     "defaultTab": "默认启动 tab",
     "defaultTabHint": "重启后壳首先打开的 tab，重启生效。",
+    "notifications": "会话通知",
+    "notificationsHint": "agent 等待批准或出错时发系统通知，点击直达会话。锁屏后台推送依赖官方推送通道。",
     "clearData": "清除本地数据",
     "clearDataHint": "只删壳自己的数据（置顶、归档、已读、收藏、快捷指令、设置），官方数据不受影响。",
     "clearConfirmMessage": "将删除壳的全部本地数据，无法恢复。主机连接与官方设置保留；重启应用后回到官方首页。",

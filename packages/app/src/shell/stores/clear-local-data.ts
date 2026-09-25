@@ -46,5 +46,9 @@ export function resetShellStores(): void {
   usePaseoGoReadStateStore.setState({ lastReadAt: {} });
   usePaseoGoFavoritesStore.setState({ items: [] });
   usePaseoGoCommandsStore.setState({ items: [] });
-  usePaseoGoSettingsStore.setState({ shellMode: false, defaultTab: "chats" });
+  usePaseoGoSettingsStore.setState({
+    shellMode: false,
+    defaultTab: "chats",
+    notifications: true,
+  });
 }

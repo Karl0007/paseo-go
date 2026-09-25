@@ -206,6 +206,8 @@ export default function ShellMeScreen() {
   const setShellMode = usePaseoGoSettingsStore((state) => state.setShellMode);
   const defaultTab = usePaseoGoSettingsStore((state) => state.defaultTab);
   const setDefaultTab = usePaseoGoSettingsStore((state) => state.setDefaultTab);
+  const notifications = usePaseoGoSettingsStore((state) => state.notifications);
+  const setNotifications = usePaseoGoSettingsStore((state) => state.setNotifications);
   const shellModeActive = shellMode ?? SHELL_MODE_ENV_DEFAULT;
 
   // 主题走官方覆盖口：AppearanceProvider 订阅同一份 app settings，写入即生效。
@@ -329,6 +331,18 @@ export default function ShellMeScreen() {
             value={defaultTab}
             onSelect={handleSelectDefaultTab}
             testIdPrefix="me-default-tab"
+          />
+        </SettingRow>
+        <View style={styles.divider} />
+        <SettingRow
+          title={t("me.notifications")}
+          hint={t("me.notificationsHint")}
+          testID="me-notifications-row"
+        >
+          <ThemedModeSwitch
+            testID="shell-notify-switch"
+            value={notifications}
+            onValueChange={setNotifications}
           />
         </SettingRow>
         <View style={styles.divider} />
