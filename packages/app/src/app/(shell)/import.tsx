@@ -6,7 +6,7 @@
 // 提示而非失败。状态判定/行映射/勾选/结果分类都在 @/shell/import/rows（纯逻辑，
 // 单测覆盖），屏只剩数据接线与渲染。本屏是隐藏 tab（C5 KI-2 模式）：返回按钮与
 // 硬件返回都经 tab navigator 跳回对话。
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   BackHandler,
   FlatList,
@@ -23,7 +23,6 @@ import { useTranslation } from "react-i18next";
 import { StyleSheet } from "react-native-unistyles";
 import { Check, ChevronDown, ChevronLeft, Inbox, RotateCw } from "lucide-react-native";
 import * as Haptics from "expo-haptics";
-import type { FetchRecentProviderSessionEntry } from "@getpaseo/client/internal/daemon-client";
 import { Button } from "@/components/ui/button";
 import { LoadingSpinner } from "@/components/ui/loading-spinner";
 import { getProviderIcon } from "@/components/provider-icons";
@@ -51,6 +50,7 @@ import {
   type ImportAttempt,
   type ImportRow,
 } from "@/shell/import/rows";
+import { useImportList } from "@/shell/import/use-import-list";
 
 const IMPORT_LIST_LIMIT = 60;
 
@@ -176,42 +176,9 @@ export default function ShellImportScreen() {
     }
   }, [hosts.length, openHostChooser, serverId]);
 
-  const [listState, setListState] = useState<{
-    status: "loading" | "ready" | "error";
-    entries: FetchRecentProviderSessionEntry[];
-    alreadyImportedCount: number;
-    providerErrors: Array<{ provider: string; message: string }>;
-    error: string | null;
-  }>({ status: "loading", entries: [], alreadyImportedCount: 0, providerErrors: [], error: null });
-  const requestSeq = useRef(0);
-  const load = useCallback(async () => {
-    if (!client) return;
-    const seq = ++requestSeq.current;
-    setListState((prev) => ({ ...prev, status: "loading" }));
-    try {
-      const payload = await client.fetchRecentProviderSessions({ limit: IMPORT_LIST_LIMIT });
-      if (seq !== requestSeq.current) return;
-      setListState({
-        status: "ready",
-        entries: payload.entries,
-        alreadyImportedCount: payload.filteredAlreadyImportedCount ?? 0,
-        providerErrors: payload.providerErrors ?? [],
-        error: null,
-      });
-    } catch (error) {
-      if (seq !== requestSeq.current) return;
-      setListState({
-        status: "error",
-        entries: [],
-        alreadyImportedCount: 0,
-        providerErrors: [],
-        error: error instanceof Error ? error.message : String(error),
-      });
-    }
-  }, [client]);
-  useEffect(() => {
-    void load();
-  }, [load]);
+  // F1 (review): the fetch lifecycle lives in useImportList — its stale-host guard
+  // is what stops a mid-import host switch from letting A's closure overwrite B.
+  const { listState, load } = useImportList(IMPORT_LIST_LIMIT, serverId, client);
   const handleRefresh = useCallback(() => {
     void load();
   }, [load]);

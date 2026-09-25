@@ -219,8 +219,7 @@
   "notify": {
     "channelName": "会话提醒",
     "needsInputBody": "正在等待你的批准，点击处理。",
-    "failedBody": "运行出错，点击查看。",
-    "failedBodyWithError": "运行出错：{{error}}"
+    "failedBody": "运行出错，点击查看。"
   },
   "me": {
     "title": "我的",

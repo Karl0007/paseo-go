@@ -13,7 +13,7 @@ import {
   useLastWorkspaceSelection,
 } from "@/stores/navigation-active-workspace-store";
 import { shouldUseDesktopDaemon } from "@/desktop/daemon/desktop-daemon";
-import { usePaseoGoShellActive } from "@/shell/stores/settings";
+import { useShellSeam } from "@/shell/use-shell-seam";
 import { SHELL } from "@/shell/routes";
 
 const isDesktop = shouldUseDesktopDaemon();
@@ -34,10 +34,12 @@ export default function Index() {
     workspaceSelectionWorkspaceId,
   );
 
-  const paseoGoShellActive = usePaseoGoShellActive();
-  // C8: redirect to the shell group root, not a hardcoded tab — (shell)/_layout's
-  // initialRouteName (last focused tab, else the 默认启动 tab setting) picks the tab.
-  if (paseoGoShellActive) return <Redirect href={SHELL.root as Href} />;
+  const shellSeam = useShellSeam();
+  // F2: branch only after settings rehydrate — the Redirect unmounts Index on its
+  // first frame, stranding a persisted shellMode off-switch. C8: group root, and
+  // (shell)/_layout's initialRouteName (last focused tab, else 默认启动) picks the tab.
+  if (shellSeam.pending) return <StartupSplashScreen />;
+  if (shellSeam.active) return <Redirect href={SHELL.root as Href} />;
 
   const startupRoute = resolveStartupRoute({
     route: { kind: "index", pathname },

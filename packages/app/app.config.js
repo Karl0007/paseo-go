@@ -107,7 +107,7 @@ export default {
     version: nativeReleaseVersion.appVersion,
     orientation: "portrait",
     icon: isPaseoGo ? "../../paseo-go/assets/icon.png" : "./assets/images/icon.png",
-    scheme: "paseo",
+    scheme: isPaseoGo ? "paseogo" : "paseo",
     userInterfaceStyle: "automatic",
     newArchEnabled: true,
     ios: {

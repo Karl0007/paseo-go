@@ -19,6 +19,8 @@
 import { Platform } from "react-native";
 import * as Notifications from "expo-notifications";
 import { shellNavigateToAgent } from "@/shell/chats/shell-navigate-to-agent";
+import { chatLastEventAtFromAgent } from "@/shell/chats/derive";
+import { useSessionStore } from "@/stores/session-store";
 import { usePaseoGoReadStateStore } from "@/shell/stores/readState";
 import { decodeAttentionPayload, encodeAttentionPayload, type AttentionPayload } from "./payload";
 
@@ -45,6 +47,9 @@ function ensureChannel(): Promise<unknown> {
     channelReady = Notifications.setNotificationChannelAsync(SHELL_NOTIFY_CHANNEL_ID, {
       name: channelName,
       importance: Notifications.AndroidImportance.HIGH,
+      // F7 (review): explicit — attention bodies must never extend on the lock
+      // screen even under a future system default change.
+      lockscreenVisibility: Notifications.AndroidNotificationVisibility.PRIVATE,
     }).catch(() => null);
   }
   return channelReady;
@@ -71,7 +76,15 @@ function openFromResponse(response: Notifications.NotificationResponse): void {
   if (!payload) return;
   lastHandledIdentifier = identifier;
   // The visit starts at the session itself — the chats row must not stay unread.
-  usePaseoGoReadStateStore.getState().markRead(`${payload.serverId}:${payload.agentId}`);
+  // F4: stamp with the chat's own host-domain event time; an unloaded directory
+  // (cold start) leaves the dot instead of writing a device-clock watermark that
+  // would swallow every host event until the clocks cross.
+  const agent = useSessionStore.getState().sessions[payload.serverId]?.agents.get(payload.agentId);
+  if (agent) {
+    usePaseoGoReadStateStore
+      .getState()
+      .markRead(`${payload.serverId}:${payload.agentId}`, chatLastEventAtFromAgent(agent));
+  }
   shellNavigateToAgent(payload);
   void Notifications.dismissNotificationAsync(identifier).catch(() => {});
 }

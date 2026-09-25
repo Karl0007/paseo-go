@@ -31,6 +31,7 @@ import { parentExplorerPath } from "@/utils/explorer-paths";
 import { SHELL_I18N_NAMESPACE } from "@/shell/i18n";
 import { SHELL } from "@/shell/routes";
 import { previewKind, type ShellPreviewPlan } from "@/shell/files/preview-kind";
+import { resolvePreviewRoot } from "@/shell/files/preview-root";
 import { formatShellFileSize } from "@/shell/files/format-size";
 import { formatMessageTimestamp } from "@/utils/time";
 import { useShellFileActions, type ShellFileTarget } from "@/shell/files/use-shell-file-actions";
@@ -226,12 +227,12 @@ export default function ShellPreviewScreen() {
   const client = useSessionStore((state) =>
     serverId ? (state.sessions[serverId]?.client ?? null) : null,
   );
-  const workspaceRoot = (
-    params.workspaceRoot?.trim() ||
-    workspace?.workspaceDirectory ||
-    workspace?.projectRootPath ||
-    ""
-  ).trim();
+  // F6: the descriptor wins outright — a deep link must not steer a resolved
+  // workspace into a forged root; the param is the offline-favorites fallback only.
+  const workspaceRoot = resolvePreviewRoot({
+    paramRoot: params.workspaceRoot,
+    descriptorRoot: workspace?.workspaceDirectory || workspace?.projectRootPath,
+  });
 
   // Size/mtime via the official listDirectory RPC on the parent directory — the
   // same call the explorer rows use; never a full read just to stat.

@@ -1,9 +1,17 @@
 // C11 acceptance: the attention→notify mapping is this pure planner's subject —
-// first-scan baseline, the recency floor (two-wave directory patches must not wake
-// old agents), one notification per (agent, state), re-fire on a genuinely new
-// transition, and the settings-switch gate.
+// first-scan baseline, the ledger-only floor (F5), one notification per (agent,
+// state), re-fire on a genuinely new transition, the settings-switch gate, and the
+// F7 body contract (no error echo in lock-screen text).
 import { describe, expect, it } from "vitest";
-import { planAttentionEvents, type AttentionAgentSnapshot, type NotifiedLedger } from "./attention";
+import en from "../locales/en.json";
+import zh from "../locales/zh.json";
+import {
+  bodyKeyFor,
+  planAttentionEvents,
+  type AttentionAgentSnapshot,
+  type AttentionEvent,
+  type NotifiedLedger,
+} from "./attention";
 
 function agent(overrides: Partial<AttentionAgentSnapshot> = {}): AttentionAgentSnapshot {
   return {
@@ -23,14 +31,15 @@ const EMPTY: NotifiedLedger = new Map();
 function scan(input: {
   enabled?: boolean;
   primed?: boolean;
-  fireFrom?: number;
   agents: readonly AttentionAgentSnapshot[];
   notified?: NotifiedLedger;
 }) {
+  // Spread forwards vestigial keys (see the F5 test's legacyFloor) so this file
+  // also runs red against the pre-fix planner that read `fireFrom`.
   return planAttentionEvents({
+    ...(input as object),
     enabled: input.enabled ?? true,
     primed: input.primed ?? true,
-    fireFrom: input.fireFrom ?? 0,
     agents: input.agents,
     notified: input.notified ?? EMPTY,
   });
@@ -63,36 +72,42 @@ describe("planAttentionEvents", () => {
     expect(notified.get("srv1:a1")?.kind).toBe("needs_input");
   });
 
-  it("records but does not announce a stamp below the recency floor", () => {
-    // The two-wave case: an OLD failed agent gets its attentionTimestamp patched
-    // in after the baseline — new stamp, ancient recency → silent, yet recorded.
+  it("announces a host behind the device clock: the ledger is the only floor (F5)", () => {
+    // The pre-fix hook passed `fireFrom = Date.now()` (device wall clock) and muted
+    // every host-issued stamp below it — a host one hour behind was silenced for
+    // that whole hour, forever re-recording each transition silently. The floor is
+    // now purely ledger-based: no record for this (kind, stamp) → announce.
+    const deviceNow = 1_700_000_000_000;
+    const hostStamp = deviceNow - 3_600_000;
+    const legacyFloor = { fireFrom: deviceNow }; // spread: bypasses excess-property
+    const baseline = scan({
+      ...legacyFloor,
+      primed: false,
+      agents: [agent({ bucket: "running" })],
+    });
+    const scan2 = scan({
+      ...legacyFloor,
+      agents: [
+        agent({ bucket: "failed", attentionTimestamp: hostStamp, lastActivityAt: hostStamp }),
+      ],
+      notified: baseline.notified,
+    });
+    expect(scan2.events).toHaveLength(1);
+    expect(scan2.events[0]).toMatchObject({ kind: "failed", stamp: hostStamp });
+  });
+
+  it("the baseline records each agent's (kind, stamp) so identical later scans stay silent", () => {
     const first = scan({
       primed: false,
-      fireFrom: 1000,
-      agents: [agent({ bucket: "failed", attentionTimestamp: null, lastActivityAt: 500 })],
+      agents: [agent({ bucket: "failed", attentionTimestamp: 900 })],
     });
     expect(first.events).toEqual([]);
+    expect(first.notified.get("srv1:a1")).toEqual({ kind: "failed", stamp: 900 });
     const second = scan({
-      fireFrom: 1000,
-      agents: [agent({ bucket: "failed", attentionTimestamp: 900, lastActivityAt: 900 })],
+      agents: [agent({ bucket: "failed", attentionTimestamp: 900 })],
       notified: first.notified,
     });
     expect(second.events).toEqual([]);
-    expect(second.notified.get("srv1:a1")).toEqual({ kind: "failed", stamp: 900 });
-  });
-
-  it("announces a transition stamped at or after the recency floor", () => {
-    const first = scan({
-      primed: false,
-      fireFrom: 1000,
-      agents: [agent({ bucket: "running" })],
-    });
-    const second = scan({
-      fireFrom: 1000,
-      agents: [agent({ bucket: "needs_input", attentionTimestamp: 1000 })],
-      notified: first.notified,
-    });
-    expect(second.events).toHaveLength(1);
   });
 
   it("suppresses the same agent + same state on every later scan", () => {
@@ -163,5 +178,28 @@ describe("planAttentionEvents", () => {
       notified: gone.notified,
     });
     expect(back.events).toEqual([]);
+  });
+});
+
+describe("bodyKeyFor (F7: no error echo in notification bodies)", () => {
+  const event = (kind: AttentionEvent["kind"]): AttentionEvent => ({
+    key: "srv1:a1",
+    serverId: "srv1",
+    agentId: "a1",
+    workspaceId: "ws1",
+    kind,
+    stamp: 1,
+  });
+
+  it("maps kinds to fixed generic body keys", () => {
+    expect(bodyKeyFor(event("needs_input"))).toBe("notify.needsInputBody");
+    expect(bodyKeyFor(event("failed"))).toBe("notify.failedBody");
+  });
+
+  it("no shell locale carries an error-echo body key anymore", () => {
+    // lastError can embed local paths / user content; it must never reach the
+    // lock screen. The vector is gone with the key itself.
+    expect((en.notify as Record<string, unknown>).failedBodyWithError).toBeUndefined();
+    expect((zh.notify as Record<string, unknown>).failedBodyWithError).toBeUndefined();
   });
 });

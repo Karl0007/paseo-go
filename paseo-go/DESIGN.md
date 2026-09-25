@@ -9,14 +9,14 @@
 
 ## 1. 用户拍板记录
 
-| # | 裁定 | 原话/结论 |
-|---|---|---|
-| D1 | 收藏夹语义 | 收藏文件是基础；**追加收藏快捷指令**（一键执行预设任务） |
-| D2 | 对话详情复用深度 | 整路由直挂官方 `h/[serverId]/agent/[agentId]` |
-| D3 | 品牌 | **Paseo Go** + 独立包名 `app.paseo.shell`（与官方共存安装） |
-| D4 | 范围 | P1 全部要做（拖拽排序/内容搜索/推送通知/会话导入/添加到对话），先最小闭环后逐个补齐，不许偷懒 |
-| D5 | 语言 | 中英双语，走官方 i18n 设施 |
-| D6 | 设计自主权 | 线框图只是示意；交互按成熟产品范式自行设计（长按置顶/归档/拖拽等），当作独立开发的 app，保证美观一致 |
+| #   | 裁定             | 原话/结论                                                                                            |
+| --- | ---------------- | ---------------------------------------------------------------------------------------------------- |
+| D1  | 收藏夹语义       | 收藏文件是基础；**追加收藏快捷指令**（一键执行预设任务）                                             |
+| D2  | 对话详情复用深度 | 整路由直挂官方 `h/[serverId]/agent/[agentId]`                                                        |
+| D3  | 品牌             | **Paseo Go** + 独立包名 `app.paseo.shell`（与官方共存安装）                                          |
+| D4  | 范围             | P1 全部要做（拖拽排序/内容搜索/推送通知/会话导入/添加到对话），先最小闭环后逐个补齐，不许偷懒        |
+| D5  | 语言             | 中英双语，走官方 i18n 设施                                                                           |
+| D6  | 设计自主权       | 线框图只是示意；交互按成熟产品范式自行设计（长按置顶/归档/拖拽等），当作独立开发的 app，保证美观一致 |
 
 ## 2. 架构不变量（铁律）
 
@@ -27,8 +27,19 @@
 2. **新代码去处**：路由 `packages/app/src/app/(shell)/**`；逻辑 `packages/app/src/shell/**`（stores/config/routes/components）。
 3. **路由字符串收敛** `src/shell/routes.ts`（唯一出处）：
    ```ts
-   SHELL = { root:"/(shell)", chats, workspace, me, files:"/(shell)/files/[serverId]/[workspaceId]", preview:"/(shell)/preview", commandRun:"/(shell)/run" }
-   OFFICIAL = { agent:(sid,aid)=>`/h/${sid}/agent/${aid}`, hostSettings:(sid)=>`/h/${sid}/settings` }
+   SHELL = {
+     root: "/(shell)",
+     chats,
+     workspace,
+     me,
+     files: "/(shell)/files/[serverId]/[workspaceId]",
+     preview: "/(shell)/preview",
+     commandRun: "/(shell)/run",
+   };
+   OFFICIAL = {
+     agent: (sid, aid) => `/h/${sid}/agent/${aid}`,
+     hostSettings: (sid) => `/h/${sid}/settings`,
+   };
    ```
 4. **i18n 零缝隙**：壳文案放 `src/shell/locales/{zh,en}.json`，运行时 `i18n.addResourceBundle` 注入，**不改上游 locale 文件**。
 5. **主题零缝隙**：全部用官方 Unistyles 主题 token；禁止硬编码色值。
@@ -44,6 +55,7 @@
        ──push──> 官方 host settings / new workspace / onboarding 流程
 我的  ──push──> 官方设置页 / 壳设置 / 关于
 ```
+
 Android 返回键/手势 = Stack pop；tab 间不叠栈。
 
 ## 4. 对话 tab（参考微信/Telegram/Linear Inbox）
@@ -74,6 +86,8 @@ Android 返回键/手势 = Stack pop；tab 间不叠栈。
 - 官方设置页整页复用（push 官方路由）
 - 壳设置：壳模式开关 · 主题(跟随/亮/暗) · 默认启动 tab · 清除本地数据 · 关于(壳版本+上游 commit)
 
+**本地数据威胁模型记录（审查轮裁定：不加密，理由存档）**：壳态（`paseoGo.*`：settings/pins/archive/favorites/commands/readState）只含 serverId/agentId/路径/别名/水位等索引与偏好，无凭据；官方侧 host registry 同用 AsyncStorage（`host-runtime.ts:1407`），host 连接密码随官方路径明文落盘——改造属 `packages/**` 冻结范围（§2 铁律），壳不越权。裁定不加密的理由：① 本机可读 app 数据的攻击者同样能读到 Keystore 解封结果，静态加密只挡住"只拷走备份文件"这一半场景；② 场景定位是局域网/自托管私有部署，设备失守的主防线是系统锁屏与全盘加密；③ 用户侧已有控制权：本节"清除本地数据"一键复位 + daemon 侧密码可轮换。接受的残余风险：Android Auto Backup 可能把明文态（含官方 host 密码）带入云备份——介意者关闭系统云备份；上游如引入加密存储，壳直接受益，无需改动。
+
 ## 7. 对话详情（D2 直挂）
 
 - 官方 agent 路由原样；返回→列表；进入即清未读
@@ -81,13 +95,13 @@ Android 返回键/手势 = Stack pop；tab 间不叠栈。
 
 ## 8. P1 增强（全部要做，D4）
 
-| 功能 | 方案 | 卡 |
-|---|---|---|
-| 置顶拖拽排序 | react-native-draggable-flatlist（官方已依赖+patch） | C3 |
-| 搜索 | 会话标题/内容(客户端过滤) + 文件名(explorer RPC)；**内容全文搜索**：spike 上游 #4659 的 RPC，无则立 known_issue 卡 | C9 |
-| 会话导入 | ＋菜单 → 官方 omp 导入流程（daemon `listOmpImportableSessions`） | C10 |
-| 推送通知 | spike 官方 expo-notifications 基建；目标=等待批准时后台可达；不可达则前台本地通知+known_issue | C11 |
-| 添加到对话 | 文件长按菜单 → composer 附件 | C6 尾/known_issue |
+| 功能         | 方案                                                                                                               | 卡                |
+| ------------ | ------------------------------------------------------------------------------------------------------------------ | ----------------- |
+| 置顶拖拽排序 | react-native-draggable-flatlist（官方已依赖+patch）                                                                | C3                |
+| 搜索         | 会话标题/内容(客户端过滤) + 文件名(explorer RPC)；**内容全文搜索**：spike 上游 #4659 的 RPC，无则立 known_issue 卡 | C9                |
+| 会话导入     | ＋菜单 → 官方 omp 导入流程（daemon `listOmpImportableSessions`）                                                   | C10               |
+| 推送通知     | spike 官方 expo-notifications 基建；目标=等待批准时后台可达；不可达则前台本地通知+known_issue                      | C11               |
+| 添加到对话   | 文件长按菜单 → composer 附件                                                                                       | C6 尾/known_issue |
 
 ## 9. 视觉一致性
 
@@ -95,12 +109,12 @@ Android 返回键/手势 = Stack pop；tab 间不叠栈。
 
 ## 10. 开工前置验证（C1 spike，四项，半天）
 
-| # | 假设 | 验证法 | 失败预案 |
-|---|---|---|---|
-| A1 | host-runtime 多主机状态可在 (shell) 屏订阅 | 壳屏渲染 host 列表 | 直接用 @getpaseo/client 多实例 |
-| A2 | 官方 agent 路由从 (shell) push 可正常 bootstrap | 真机点进会话 | 壳内嵌 view+自挂 Boundary |
-| A3 | FileExplorerPane 打开回调可覆盖为 Stack push | 临时壳屏挂载试验 | 自绘轻量树 +2-3 天 |
-| A4 | agent status 字段足以渲染四态状态灯 | 打印真实 payload | 降级两态 |
+| #   | 假设                                            | 验证法             | 失败预案                       |
+| --- | ----------------------------------------------- | ------------------ | ------------------------------ |
+| A1  | host-runtime 多主机状态可在 (shell) 屏订阅      | 壳屏渲染 host 列表 | 直接用 @getpaseo/client 多实例 |
+| A2  | 官方 agent 路由从 (shell) push 可正常 bootstrap | 真机点进会话       | 壳内嵌 view+自挂 Boundary      |
+| A3  | FileExplorerPane 打开回调可覆盖为 Stack push    | 临时壳屏挂载试验   | 自绘轻量树 +2-3 天             |
+| A4  | agent status 字段足以渲染四态状态灯             | 打印真实 payload   | 降级两态                       |
 
 ## 11. 证据契约（每卡固定四项）
 
@@ -108,7 +122,8 @@ Android 返回键/手势 = Stack pop；tab 间不叠栈。
 2. 套件：`pnpm test`（app 包相关全量）全绿
 3. 真实运行：Paseo Go dev build 在 Android 真机/模拟器上触发变更路径
 4. 读图：Agent 亲自 read 截图写结论（截图存 `paseo-go/evidence/<卡号>/`）
-+ 恰好一次 commit；报告 JSON：commit/per_item/verification/grep/known_issues
+
+- 恰好一次 commit；报告 JSON：commit/per_item/verification/grep/known_issues
 
 ## 12. 卡序
 

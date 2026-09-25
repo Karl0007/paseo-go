@@ -1,6 +1,8 @@
 // Per-chat read timestamps (DESIGN.md §2.6, §4): unread = the chat's last event is
 // newer than `lastReadAt[key]`; a chat never opened has no record and counts as
 // unread. Clearing on entry is C4's wiring — C2 owns the store and the derivation.
+// F4 (review): stamps are caller-supplied host-domain event times — no device-clock
+// default, which would compare across clock domains and mis-arm the unread dot.
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { create } from "zustand";
 import { persist } from "zustand/middleware";
@@ -13,8 +15,9 @@ const PaseoGoReadStatePersistedSchema = z.strictObject({
 
 interface PaseoGoReadStateState {
   lastReadAt: Record<string, number>;
-  /** Row key is `${serverId}:${agentId}`; `at` defaults to now (epoch ms). */
-  markRead: (key: string, at?: number) => void;
+  /** Row key is `${serverId}:${agentId}`; `at` is the chat's host-domain last-event
+   *  stamp (chatLastEventAt family), never the device wall clock. */
+  markRead: (key: string, at: number) => void;
   /** C3 delete cleanup: a deleted chat's read stamp must not outlive it. */
   clear: (key: string) => void;
   clearAll: () => void;
@@ -26,7 +29,7 @@ export const usePaseoGoReadStateStore = create<PaseoGoReadStateState>()(
       lastReadAt: {},
       markRead: (key, at) =>
         set((state) => ({
-          lastReadAt: { ...state.lastReadAt, [key]: at ?? Date.now() },
+          lastReadAt: { ...state.lastReadAt, [key]: at },
         })),
       clear: (key) =>
         set((state) => {

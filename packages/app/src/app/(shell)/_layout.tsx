@@ -10,6 +10,7 @@ import { StyleSheet, withUnistyles } from "react-native-unistyles";
 import { useShellNotifications } from "@/shell/notify/use-shell-notifications";
 import { ensureShellI18n, SHELL_I18N_NAMESPACE } from "@/shell/i18n";
 import { usePaseoGoSettingsStore, type ShellTab } from "@/shell/stores/settings";
+import { focusedShellTab, type NavStateLike } from "@/shell/focused-tab";
 
 ensureShellI18n();
 
@@ -111,12 +112,12 @@ export default function ShellTabsLayout() {
   // C11: attention watcher lives on the tabs layout, so it runs on every shell tab.
   useShellNotifications();
   useEffect(() => {
-    // Focused route, or null on a hidden push (files/commands) — those aren't tabs,
-    // so they must not overwrite the remembered position.
+    // F3: useNavigation resolves to the root stack — the active tab lives one level
+    // deeper (focusedShellTab). Null on a hidden push (files/commands): those aren't
+    // tabs and must not overwrite the remembered position.
     const record = () => {
-      const state = navigation.getState();
-      const name = state ? state.routes[state.index]?.name : undefined;
-      if (name === "chats" || name === "workspace" || name === "me") lastFocusedTab = name;
+      const tab = focusedShellTab(navigation.getState() as unknown as NavStateLike | undefined);
+      if (tab) lastFocusedTab = tab;
     };
     record();
     return navigation.addListener("state", record);

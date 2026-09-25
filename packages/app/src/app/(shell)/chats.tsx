@@ -33,7 +33,10 @@ import { useToast } from "@/contexts/toast-context";
 import { useAggregatedAgents } from "@/hooks/use-aggregated-agents";
 import { useOpenAddProject } from "@/hooks/use-open-add-project";
 import { getHostRuntimeStore, useHostRegistryStatus, useHosts } from "@/runtime/host-runtime";
+import { useSessionStore } from "@/stores/session-store";
 import {
+  chatLastEventAt,
+  chatLastEventAtFromAgent,
   deriveChatSections,
   flattenChatSections,
   type ChatListItem,
@@ -235,9 +238,18 @@ export default function ShellChatsScreen() {
   // (workspace route + open intent) with a push verb (the official dismissTo pops the
   // list → back exits the app; the parse stub flashes white, SPIKE A2). The opener
   // stamps read on entry and again when this screen regains focus, so a reply watched
-  // inside the session never resurfaces as an unread dot.
+  // inside the session never resurfaces as an unread dot. F4: both beats stamp with
+  // the chat's own host-domain last-event time, never the device wall clock.
   const opener = useMemo(
-    () => createChatOpener({ markRead, navigateToAgent: shellNavigateToAgent, now: Date.now }),
+    () =>
+      createChatOpener({
+        markRead,
+        navigateToAgent: shellNavigateToAgent,
+        lastEventAtOf: (serverId, agentId) => {
+          const agent = useSessionStore.getState().sessions[serverId]?.agents.get(agentId);
+          return agent ? chatLastEventAtFromAgent(agent) : undefined;
+        },
+      }),
     [markRead],
   );
   const handleOpenChat = useCallback(
@@ -247,6 +259,7 @@ export default function ShellChatsScreen() {
         serverId: agent.serverId,
         agentId: agent.agent.id,
         workspaceId: agent.agent.workspaceId,
+        lastEventAt: chatLastEventAt(agent),
       }),
     [opener],
   );

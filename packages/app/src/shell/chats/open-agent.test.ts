@@ -1,25 +1,30 @@
-// C4 acceptance: markRead trigger timing — entry stamp, return stamp, and the
-// no-op cases (first focus, focus without a visit, stale pending after a second
-// visit). Navigation itself is the official navigateToAgent's job; the opener is
-// only judged on "called exactly once, with the target's ids".
+// C4 acceptance + F4 review fix: the read watermark must live in the chat's own
+// (host-clock) domain — markRead stamps with the chat's last-event stamp, never the
+// device wall clock, or a host clock behind the device makes every chat permanently
+// read (device stamp above all host stamps) or permanently unread. markRead timing:
+// entry stamp, return stamp, no-op cases. `now` stays in the harness only so this
+// file also runs red-green against the pre-fix opener (which stamped from it);
+// the fixed opener ignores it. Navigation itself is the official navigateToAgent's
+// job; the opener is judged on "called exactly once, with the target's ids".
 import { describe, expect, it, vi } from "vitest";
-import { createChatOpener, type ChatOpenTarget } from "./open-agent";
+import { isChatUnread } from "./derive";
+import { createChatOpener, type ChatOpenTarget, type ChatOpenerDeps } from "./open-agent";
 
-const T0 = 1_700_000_000_000;
+const DEVICE_NOW = 1_700_000_000_000; // device wall clock, 1h ahead of the host
+const HOST_LAG = 3_600_000;
+const HOST_EVENT = DEVICE_NOW - HOST_LAG + 60_000; // recent event, still < DEVICE_NOW
 
-function harness() {
-  let clock = T0;
+function harness(latestHostEvent = HOST_EVENT) {
   const markRead = vi.fn();
   const navigateToAgent = vi.fn();
-  const opener = createChatOpener({
+  const lastEventAtOf = vi.fn(() => latestHostEvent);
+  const deps = {
     markRead,
     navigateToAgent,
-    now: () => clock,
-  });
-  const advance = (ms: number) => {
-    clock += ms;
-  };
-  return { opener, markRead, navigateToAgent, advance };
+    lastEventAtOf,
+    now: () => DEVICE_NOW,
+  } as unknown as ChatOpenerDeps;
+  return { opener: createChatOpener(deps), markRead, navigateToAgent, lastEventAtOf };
 }
 
 const target: ChatOpenTarget = {
@@ -27,28 +32,67 @@ const target: ChatOpenTarget = {
   serverId: "srv-1",
   agentId: "agent-9",
   workspaceId: "ws-7",
+  lastEventAt: HOST_EVENT,
 };
 
 describe("createChatOpener", () => {
-  it("marks read at press time and navigates once with the target's ids", () => {
-    const { opener, markRead, navigateToAgent } = harness();
+  it("stamps the chat's own last-event clock, keeping unread semantics under host skew", () => {
+    const { opener, markRead } = harness();
     opener.open(target);
     expect(markRead).toHaveBeenCalledTimes(1);
-    expect(markRead).toHaveBeenCalledWith(target.key, T0);
-    expect(navigateToAgent).toHaveBeenCalledTimes(1);
-    expect(navigateToAgent).toHaveBeenCalledWith({
-      serverId: "srv-1",
-      agentId: "agent-9",
-      workspaceId: "ws-7",
-    });
+    expect(markRead).toHaveBeenCalledWith(target.key, HOST_EVENT);
+
+    // Same-domain comparison: seen → read; a newer host event → unread again.
+    const chat = {
+      key: target.key,
+      serverId: target.serverId,
+      bucket: "running" as const,
+      lastActivityAt: HOST_EVENT,
+      attentionTimestamp: null,
+    };
+    expect(isChatUnread(chat, HOST_EVENT)).toBe(false);
+    expect(isChatUnread({ ...chat, lastActivityAt: HOST_EVENT + 1 }, HOST_EVENT)).toBe(true);
+    // The pre-fix device-clock watermark (DEVICE_NOW) would have swallowed every
+    // future host event: host stamps stay below DEVICE_NOW for the whole lag hour.
+    expect(isChatUnread({ ...chat, lastActivityAt: HOST_EVENT + 1 }, DEVICE_NOW)).toBe(false);
   });
 
-  it("re-marks on return so activity watched during the visit stays read", () => {
-    const { opener, markRead, advance } = harness();
+  it("re-marks on return with the fresh host stamp so watched activity stays read", () => {
+    const during = HOST_EVENT + 45_000; // activity that happened inside the visit
+    const markRead = vi.fn();
+    const opener = createChatOpener({
+      markRead,
+      navigateToAgent: vi.fn(),
+      lastEventAtOf: () => during,
+    });
     opener.open(target);
-    advance(60_000);
     opener.onFocus();
-    expect(markRead).toHaveBeenNthCalledWith(2, target.key, T0 + 60_000);
+    expect(markRead).toHaveBeenNthCalledWith(2, target.key, during);
+  });
+
+  it("never lowers the watermark when the host clock stepped back", () => {
+    const older = HOST_EVENT - 10_000;
+    const { opener, markRead } = harness(older);
+    opener.open(target);
+    opener.onFocus();
+    expect(markRead).toHaveBeenNthCalledWith(2, target.key, HOST_EVENT);
+  });
+
+  it("keeps the pending visit when the directory has no row yet, stamps on a later focus", () => {
+    const markRead = vi.fn();
+    let known: number | undefined;
+    const opener = createChatOpener({
+      markRead,
+      navigateToAgent: vi.fn(),
+      lastEventAtOf: () => known,
+    });
+    opener.open(target);
+    opener.onFocus(); // directory empty: nothing stamped, visit still pending
+    expect(markRead).toHaveBeenCalledTimes(1);
+    known = HOST_EVENT + 5_000;
+    opener.onFocus();
+    expect(markRead).toHaveBeenCalledTimes(2);
+    expect(markRead).toHaveBeenNthCalledWith(2, target.key, known);
   });
 
   it("clears nothing on the screen's first focus or any focus without a visit", () => {
@@ -66,16 +110,16 @@ describe("createChatOpener", () => {
     markRead.mockClear();
     opener.onFocus();
     expect(markRead).toHaveBeenCalledTimes(1);
-    expect(markRead).toHaveBeenCalledWith(other.key, T0);
-    // The pending slot is consumed: a further focus clears nothing.
+    expect(markRead).toHaveBeenCalledWith(other.key, HOST_EVENT);
     markRead.mockClear();
     opener.onFocus();
     expect(markRead).not.toHaveBeenCalled();
   });
 
-  it("passes a missing workspaceId through for the official cold deep-link fallback", () => {
+  it("navigates once with the target's ids, passing a missing workspaceId through", () => {
     const { opener, navigateToAgent } = harness();
     opener.open({ ...target, workspaceId: null });
+    expect(navigateToAgent).toHaveBeenCalledTimes(1);
     expect(navigateToAgent).toHaveBeenCalledWith({
       serverId: "srv-1",
       agentId: "agent-9",

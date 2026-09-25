@@ -6,6 +6,11 @@
 // watched, so it must not resurface as unread). The second beat keys off a pending
 // target set by `open`, so the screen's first focus and plain re-focuses clear nothing.
 //
+// F4 (review): the watermark lives in the chat's own clock domain. markRead used to
+// stamp with the device wall clock while isChatUnread compares host-issued event
+// stamps — a host behind the device read as permanently seen (and one ahead as
+// permanently unread). Both beats now stamp with the chat's last-event time.
+//
 // React-free and dependency-injected like shellAgentActions, so the markRead timing is
 // unit-testable without a navigator or a store.
 
@@ -15,6 +20,8 @@ export interface ChatOpenTarget {
   serverId: string;
   agentId: string;
   workspaceId: string | null | undefined;
+  /** Host-domain last-event stamp (chatLastEventAt) at press time. */
+  lastEventAt: number;
 }
 
 export interface ChatOpenerDeps {
@@ -25,22 +32,37 @@ export interface ChatOpenerDeps {
     agentId: string;
     workspaceId?: string | null;
   }) => unknown;
-  now: () => number;
+  /** Fresh host-domain last-event stamp; undefined = the agent is not in the
+   *  directory yet — the pending visit survives to the next focus. */
+  lastEventAtOf: (serverId: string, agentId: string) => number | undefined;
 }
 
 export interface ChatOpener {
-  /** Mark read at press time, remember the visit, hand navigation to the official tool. */
+  /** Mark read at the chat's press-time event stamp, remember the visit, navigate. */
   open: (target: ChatOpenTarget) => void;
   /** Wire to the screen's focus effect: clears the read stamp of the last visit. */
   onFocus: () => void;
 }
 
+interface PendingVisit {
+  key: string;
+  serverId: string;
+  agentId: string;
+  /** Entry watermark; the return stamp never drops below it (host clock can step). */
+  at: number;
+}
+
 export function createChatOpener(deps: ChatOpenerDeps): ChatOpener {
-  let pendingKey: string | null = null;
+  let pending: PendingVisit | null = null;
   return {
     open(target) {
-      deps.markRead(target.key, deps.now());
-      pendingKey = target.key;
+      deps.markRead(target.key, target.lastEventAt);
+      pending = {
+        key: target.key,
+        serverId: target.serverId,
+        agentId: target.agentId,
+        at: target.lastEventAt,
+      };
       deps.navigateToAgent({
         serverId: target.serverId,
         agentId: target.agentId,
@@ -48,9 +70,12 @@ export function createChatOpener(deps: ChatOpenerDeps): ChatOpener {
       });
     },
     onFocus() {
-      if (pendingKey === null) return;
-      deps.markRead(pendingKey, deps.now());
-      pendingKey = null;
+      if (pending === null) return;
+      const visit = pending;
+      const fresh = deps.lastEventAtOf(visit.serverId, visit.agentId);
+      if (fresh === undefined) return;
+      pending = null;
+      deps.markRead(visit.key, Math.max(fresh, visit.at));
     },
   };
 }

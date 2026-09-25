@@ -60,6 +60,14 @@ export function chatLastEventAt(agent: ChatAgentInput): number {
   return Math.max(agent.lastActivityAt, agent.attentionTimestamp ?? 0);
 }
 
+/** Date-field twin of chatLastEventAt for callers holding session-store rows. */
+export function chatLastEventAtFromAgent(agent: {
+  lastActivityAt: Date;
+  attentionTimestamp?: Date | null;
+}): number {
+  return Math.max(agent.lastActivityAt.getTime(), agent.attentionTimestamp?.getTime() ?? 0);
+}
+
 /** Unread = last event newer than the stored read stamp; never-opened counts unread. */
 export function isChatUnread(agent: ChatAgentInput, lastReadAt: number | undefined): boolean {
   return chatLastEventAt(agent) > (lastReadAt ?? 0);

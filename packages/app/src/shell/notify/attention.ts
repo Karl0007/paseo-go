@@ -7,11 +7,13 @@
 // switch is a new transition. Records are never pruned (re-appearing agents must not
 // re-notify; the map is bounded by agent count).
 //
-// Two guards keep old states from shouting: `primed=false` on the first settled scan
-// records everything silently, and `fireFrom` (the baseline instant) filters stamps —
-// the directory fills in waves (summary rows first, attention fields patched later),
-// so an OLD failed agent can change stamp right after the baseline; recency, not
-// ledger absence, is what distinguishes a transition the user has not seen yet.
+// One guard keeps old states from shouting: `primed=false` on the first settled
+// scan (and on every host-set re-baseline) records every present agent's (kind,
+// stamp) silently, and from then on the LEDGER is the only floor — a (kind, stamp)
+// the user was never shown fires. F5 (review): the old extra floor compared stamps
+// against `Date.now()` taken on the device; host-issued stamps live in the host
+// clock, so a host behind the device was silenced for the whole offset — usually
+// forever. Cross-domain comparisons are banned here, by test.
 import type { SidebarStateBucket } from "@/utils/sidebar-agent-state";
 
 export type AttentionNotifyKind = "needs_input" | "failed";
@@ -58,8 +60,6 @@ export function planAttentionEvents(input: {
   enabled: boolean;
   /** False on the very first settled scan of this JS context: record, never fire. */
   primed: boolean;
-  /** Transitions stamped before this instant are recorded silently (see header). */
-  fireFrom: number;
   agents: readonly AttentionAgentSnapshot[];
   notified: NotifiedLedger;
 }): AttentionScanResult {
@@ -73,7 +73,7 @@ export function planAttentionEvents(input: {
     const previous = notified.get(agent.key);
     if (previous && previous.kind === kind && previous.stamp === stamp) continue;
     notified.set(agent.key, { kind, stamp });
-    if (!input.primed || stamp < input.fireFrom) continue;
+    if (!input.primed) continue;
     events.push({
       key: agent.key,
       serverId: agent.serverId,
@@ -84,4 +84,11 @@ export function planAttentionEvents(input: {
     });
   }
   return { events, notified };
+}
+
+/** F7 (review): notification bodies are fixed generic strings. The raw lastError
+ *  can carry local paths and user content — lock-screen text is not where details
+ *  belong; the tap opens the session inside the app. */
+export function bodyKeyFor(event: AttentionEvent): "notify.needsInputBody" | "notify.failedBody" {
+  return event.kind === "needs_input" ? "notify.needsInputBody" : "notify.failedBody";
 }

@@ -219,8 +219,7 @@
   "notify": {
     "channelName": "Chat alerts",
     "needsInputBody": "Waiting for your approval — open to respond.",
-    "failedBody": "Ran into an error. Tap to review.",
-    "failedBodyWithError": "Ran into an error: {{error}}"
+    "failedBody": "Ran into an error. Tap to review."
   },
   "me": {
     "title": "Me",
