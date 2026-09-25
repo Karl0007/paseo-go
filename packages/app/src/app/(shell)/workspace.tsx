@@ -10,7 +10,7 @@ import { router, type Href } from "expo-router";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useTranslation } from "react-i18next";
 import { StyleSheet } from "react-native-unistyles";
-import { FolderTree, Plus, Search, Star, type LucideIcon } from "lucide-react-native";
+import { FolderTree, Plus, Search, Star, Zap, type LucideIcon } from "lucide-react-native";
 import { SidebarAgentListSkeleton } from "@/components/sidebar-agent-list-skeleton";
 import { Button } from "@/components/ui/button";
 import { useToast } from "@/contexts/toast-context";
@@ -19,12 +19,19 @@ import { useOpenAddProject } from "@/hooks/use-open-add-project";
 import { useProjects } from "@/hooks/use-projects";
 import { getHostRuntimeStore, useHostRegistryStatus, useHosts } from "@/runtime/host-runtime";
 import { SHELL_I18N_NAMESPACE } from "@/shell/i18n";
-import { OFFICIAL, shellFilesHref } from "@/shell/routes";
+import { OFFICIAL, shellCommandEditHref, shellFilesHref } from "@/shell/routes";
 import { useShellHostStatuses } from "@/shell/runtime/use-shell-host-statuses";
 import { WorkspaceHostHeader } from "@/shell/components/workspace-host-header";
 import { WorkspaceProjectRow } from "@/shell/components/workspace-project-row";
 import { WorkspaceFavoriteRow } from "@/shell/components/workspace-favorite-row";
+import { WorkspaceCommandRow } from "@/shell/components/workspace-command-row";
+import {
+  CommandWorkspacePickerSheet,
+  type CommandWorkspaceOption,
+} from "@/shell/components/command-workspace-picker";
 import { usePaseoGoFavoritesStore, type ShellFavoriteFile } from "@/shell/stores/favorites";
+import { usePaseoGoCommandsStore, type ShellCommand } from "@/shell/stores/commands";
+import { useShellCommandRunner } from "@/shell/commands/use-shell-command-runner";
 import {
   buildWorkspaceTree,
   type ShellHostSection,
@@ -36,12 +43,21 @@ const REFRESH_SETTLE_MS = 700;
 type TreeItem =
   | { type: "favorites-header"; key: string }
   | { type: "favorites-empty"; key: string }
+  | { type: "new-command"; key: string }
   | {
       type: "favorite";
       key: string;
       favorite: ShellFavoriteFile;
       hostLabel: string;
       dimmed: boolean;
+    }
+  | {
+      type: "command";
+      key: string;
+      command: ShellCommand;
+      hostLabel: string;
+      dimmed: boolean;
+      running: boolean;
     }
   | { type: "host"; key: string; section: ShellHostSection }
   | { type: "host-empty"; key: string; label: string }
@@ -125,20 +141,43 @@ export default function ShellWorkspaceScreen() {
   );
 
   const favorites = usePaseoGoFavoritesStore((state) => state.items);
+  const commands = usePaseoGoCommandsStore((state) => state.items);
+  const { runningId, pickerCommand, requestRun, selectWorkspace, closePicker, remove } =
+    useShellCommandRunner();
   const items = useMemo<TreeItem[]>(() => {
-    const out: TreeItem[] = [{ type: "favorites-header", key: "favorites-header" }];
-    if (favorites.length === 0) {
+    const out: TreeItem[] = [
+      { type: "favorites-header", key: "favorites-header" },
+      { type: "new-command", key: "new-command" },
+    ];
+    if (favorites.length === 0 && commands.length === 0) {
       out.push({ type: "favorites-empty", key: "favorites-empty" });
     }
-    for (const favorite of favorites) {
-      out.push({
-        type: "favorite",
-        key: `favorite:${favorite.hostId}:${favorite.path}`,
-        favorite,
-        hostLabel: hostsById.get(favorite.hostId)?.label ?? favorite.hostId,
-        dimmed: (statuses.get(favorite.hostId) ?? "connecting") !== "online",
-      });
-    }
+    // 混排 (DESIGN §5): 文件与 ⚡ 快捷指令按各自的加入时间倒序穿插在同一收藏夹区。
+    const entries: { at: number; item: TreeItem }[] = [
+      ...favorites.map((favorite) => ({
+        at: favorite.addedAt,
+        item: {
+          type: "favorite" as const,
+          key: `favorite:${favorite.hostId}:${favorite.path}`,
+          favorite,
+          hostLabel: hostsById.get(favorite.hostId)?.label ?? favorite.hostId,
+          dimmed: (statuses.get(favorite.hostId) ?? "connecting") !== "online",
+        },
+      })),
+      ...commands.map((command) => ({
+        at: command.createdAt,
+        item: {
+          type: "command" as const,
+          key: `command:${command.id}`,
+          command,
+          hostLabel: hostsById.get(command.hostId)?.label ?? command.hostId,
+          dimmed: (statuses.get(command.hostId) ?? "connecting") !== "online",
+          running: runningId === command.id,
+        },
+      })),
+    ];
+    entries.sort((left, right) => right.at - left.at);
+    for (const entry of entries) out.push(entry.item);
     for (const section of sections) {
       out.push({ type: "host", key: `host:${section.serverId}`, section });
       if (section.rows.length === 0) {
@@ -153,7 +192,7 @@ export default function ShellWorkspaceScreen() {
       }
     }
     return out;
-  }, [sections, t, favorites, hostsById, statuses]);
+  }, [sections, t, favorites, commands, runningId, hostsById, statuses]);
 
   const [refreshing, setRefreshing] = useState(false);
   const refreshTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -195,6 +234,27 @@ export default function ShellWorkspaceScreen() {
     (row: ShellWorkspaceRow) => router.push(shellFilesHref(row.serverId, row.workspaceId)),
     [],
   );
+  const handleNewCommand = useCallback(() => router.push(shellCommandEditHref() as Href), []);
+  const handleEditCommand = useCallback(
+    (command: ShellCommand) => router.push(shellCommandEditHref(command.id) as Href),
+    [],
+  );
+  const handleRemoveCommand = useCallback(
+    (command: ShellCommand) => void remove(command),
+    [remove],
+  );
+
+  // 项目选择 sheet (workspaceId 缺省): the host's own sections rows, same labels and
+  // order the tree below shows — one derivation, no second workspace list.
+  const pickerOptions = useMemo<CommandWorkspaceOption[]>(() => {
+    if (!pickerCommand) return [];
+    const section = sections.find((entry) => entry.serverId === pickerCommand.hostId);
+    return (section?.rows ?? []).map((row) => ({
+      workspaceId: row.workspaceId,
+      name: row.name,
+      projectName: row.projectName,
+    }));
+  }, [sections, pickerCommand]);
 
   const renderItem = useCallback(
     ({ item }: { item: TreeItem }) => {
@@ -216,6 +276,27 @@ export default function ShellWorkspaceScreen() {
               dimmed={item.dimmed}
             />
           );
+        case "new-command":
+          return (
+            <ActionRow
+              Icon={Zap}
+              label={t("workspace.newCommand")}
+              onPress={handleNewCommand}
+              testID="shell-workspace-new-command"
+            />
+          );
+        case "command":
+          return (
+            <WorkspaceCommandRow
+              command={item.command}
+              hostLabel={item.hostLabel}
+              dimmed={item.dimmed}
+              running={item.running}
+              onRun={requestRun}
+              onEdit={handleEditCommand}
+              onRemove={handleRemoveCommand}
+            />
+          );
         case "host":
           return (
             <WorkspaceHostHeader
@@ -234,7 +315,16 @@ export default function ShellWorkspaceScreen() {
           );
       }
     },
-    [handleOpenSettings, handleRetryHost, handleOpenWorkspace, t],
+    [
+      handleOpenSettings,
+      handleRetryHost,
+      handleOpenWorkspace,
+      handleNewCommand,
+      handleEditCommand,
+      handleRemoveCommand,
+      requestRun,
+      t,
+    ],
   );
 
   const keyExtractor = useCallback((item: TreeItem) => item.key, []);
@@ -318,6 +408,12 @@ export default function ShellWorkspaceScreen() {
         </Pressable>
       </View>
       {body}
+      <CommandWorkspacePickerSheet
+        open={pickerCommand !== null}
+        options={pickerOptions}
+        onSelect={selectWorkspace}
+        onClose={closePicker}
+      />
     </View>
   );
 }

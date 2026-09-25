@@ -84,14 +84,54 @@
     "searchPlaceholder": "Search files (coming soon)",
     "searchSoon": "Search is coming soon",
     "favoritesTitle": "Favorites",
-    "favoritesEmpty": "Nothing starred yet — tap a file while browsing, then hit the star.",
+    "favoritesEmpty": "Nothing saved yet — star a file while browsing, or tap ⚡ above to create a quick command.",
     "retry": "Retry",
     "hostEmpty": "No projects yet — add one with New project below.",
     "hostEmptyOffline": "Host offline — projects appear once it reconnects.",
     "newProject": "New project",
     "connectHost": "Connect a new host",
+    "newCommand": "New quick command",
     "emptyTitle": "No hosts yet",
     "emptyHint": "Connect a Paseo daemon and your projects and files show up here."
+  },
+  "commands": {
+    "newTitle": "New quick command",
+    "editTitle": "Edit quick command",
+    "name": "Name",
+    "namePlaceholder": "e.g. List the directory",
+    "host": "Host",
+    "hostPlaceholder": "Choose a host",
+    "project": "Project",
+    "model": "Model",
+    "prompt": "Prompt",
+    "promptPlaceholder": "Sent to the agent as the first message when the command runs",
+    "save": "Save",
+    "askEveryTime": "Ask every time",
+    "defaultModel": "Default",
+    "pickWorkspace": "Choose project",
+    "modelProviderDefault": "{{provider}} default model",
+    "menu": {
+      "run": "Run now",
+      "edit": "Edit",
+      "delete": "Delete",
+      "deleteConfirmTitle": "Delete quick command",
+      "deleteConfirmMessage": "Delete “{{name}}”? This cannot be undone.",
+      "deleteConfirm": "Delete",
+      "deleteCancel": "Cancel"
+    },
+    "toast": {
+      "deleted": "Deleted “{{name}}”"
+    },
+    "errors": {
+      "nameRequired": "Name is required",
+      "hostRequired": "Choose a host",
+      "promptRequired": "Prompt is required",
+      "runFailed": "Run failed",
+      "offline": "Host is offline — cannot run",
+      "workspaceNotSynced": "Project not synced yet — try again shortly",
+      "noProvider": "No usable model provider on this host",
+      "hostNoWorkspaces": "This host has no projects"
+    }
   },
   "files": {
     "notFound": "Workspace not found — it may be archived or the host has not synced.",

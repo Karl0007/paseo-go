@@ -1,7 +1,7 @@
 // All route strings the Paseo Go shell navigates with (DESIGN.md §2.3) — single
 // source of truth. Shell screens push SHELL.* within their own group and OFFICIAL.*
-// to reuse upstream routes unchanged (D2). `commandRun` lands with C7; DETAIL.* is
-// the C6 preview stack. The strings are declared here so call sites never inline paths.
+// to reuse upstream routes unchanged (D2). `commandsEdit` lands with C7 (the run
+// flow is a sheet on the 工作区 tab, not a route); DETAIL.* is the C6 preview stack.
 import type { Href } from "expo-router";
 import {
   buildHostWorkspaceOpenRoute,
@@ -15,7 +15,7 @@ export const SHELL = {
   workspace: "/(shell)/workspace",
   me: "/(shell)/me",
   files: "/(shell)/files/[serverId]/[workspaceId]",
-  commandRun: "/(shell)/run",
+  commandsEdit: "/(shell)/commands/edit",
 } as const;
 
 // 预览屏 lives in its own top-level group so opening a file is a real root-Stack
@@ -49,6 +49,12 @@ export const SHELL_TAB = { chats: "chats", workspace: "workspace", me: "me" } as
 // names stay in one place and expo-router handles encoding (C5 rows → C6 browse).
 export function shellFilesHref(serverId: string, workspaceId: string): Href {
   return { pathname: SHELL.files, params: { serverId, workspaceId } } as Href;
+}
+
+// 快捷指令表单屏: same screen serves 新建 (no id) and 编辑 (?id=) — the id goes
+// through the object form so expo-router owns the encoding, like the preview params.
+export function shellCommandEditHref(id?: string): Href {
+  return (id ? { pathname: SHELL.commandsEdit, params: { id } } : SHELL.commandsEdit) as Href;
 }
 
 // Workspace routes wrap the official builders (host-routes) so the shell never

@@ -84,14 +84,54 @@
     "searchPlaceholder": "搜索文件（即将上线）",
     "searchSoon": "搜索即将上线",
     "favoritesTitle": "收藏夹",
-    "favoritesEmpty": "还没有收藏——浏览项目文件时点开文件，再点星标即可收藏。",
+    "favoritesEmpty": "还没有收藏——浏览文件时点星标，或点上方 ⚡ 新建快捷指令。",
     "retry": "重试",
     "hostEmpty": "暂无项目，点下方「新建项目」添加。",
     "hostEmptyOffline": "主机离线，重连后显示项目。",
     "newProject": "新建项目",
     "connectHost": "连接新主机",
+    "newCommand": "新建快捷指令",
     "emptyTitle": "还没有主机",
     "emptyHint": "连接一台 Paseo daemon，项目与文件会出现在这里。"
+  },
+  "commands": {
+    "newTitle": "新建快捷指令",
+    "editTitle": "编辑快捷指令",
+    "name": "名称",
+    "namePlaceholder": "例如：列出目录结构",
+    "host": "主机",
+    "hostPlaceholder": "选择主机",
+    "project": "项目",
+    "model": "模型",
+    "prompt": "指令内容",
+    "promptPlaceholder": "发送给 agent 的提示词，执行时作为首条消息发出",
+    "save": "保存",
+    "askEveryTime": "每次选择",
+    "defaultModel": "默认",
+    "pickWorkspace": "选择运行项目",
+    "modelProviderDefault": "{{provider}} 默认模型",
+    "menu": {
+      "run": "立即运行",
+      "edit": "编辑",
+      "delete": "删除",
+      "deleteConfirmTitle": "删除快捷指令",
+      "deleteConfirmMessage": "确定删除「{{name}}」？此操作不可撤销。",
+      "deleteConfirm": "删除",
+      "deleteCancel": "取消"
+    },
+    "toast": {
+      "deleted": "已删除「{{name}}」"
+    },
+    "errors": {
+      "nameRequired": "请输入名称",
+      "hostRequired": "请选择主机",
+      "promptRequired": "请输入指令内容",
+      "runFailed": "执行失败",
+      "offline": "主机离线，无法执行",
+      "workspaceNotSynced": "该项目尚未同步，稍后重试",
+      "noProvider": "该主机没有可用的模型 provider",
+      "hostNoWorkspaces": "该主机暂无项目"
+    }
   },
   "files": {
     "notFound": "找不到该工作区——项目可能已归档或主机尚未同步。",
