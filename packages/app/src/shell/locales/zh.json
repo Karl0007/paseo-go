@@ -7,6 +7,31 @@
   "search": {
     "cancel": "取消"
   },
+  "import": {
+    "title": "导入会话",
+    "chooseHost": "从主机导入",
+    "pickHost": "选择要导入的主机",
+    "noHost": "未选择主机",
+    "noHostsBody": "尚未配置任何主机，先连接一台 daemon。",
+    "status": {
+      "connectHost": "连接主机后才能导入会话。",
+      "updateHost": "请升级主机版本以支持导入。",
+      "noProviders": "没有启用可导入的 provider。",
+      "loading": "正在加载可导入会话…",
+      "failed": "加载失败：{{message}}"
+    },
+    "retry": "重试",
+    "empty": "没有可导入的会话。",
+    "alreadyHidden": "已隐藏 {{count}} 条导入过的会话",
+    "providerError": "{{provider}}：{{message}}",
+    "submit": "导入（{{count}}）",
+    "importing": "正在导入 {{current}}/{{total}}…",
+    "toast": {
+      "imported": "已导入 {{count}} 条会话",
+      "already": "{{count}} 条此前已导入",
+      "failed": "{{count}} 条导入失败"
+    }
+  },
   "chats": {
     "title": "对话",
     "noHosts": "尚未配置任何主机。",
@@ -39,7 +64,6 @@
     "importChat": "导入会话",
     "searchPlaceholder": "搜索对话（标题/别名/项目/动态）",
     "searchEmpty": "没有匹配的对话",
-    "importSoon": "会话导入即将上线",
     "emptyTitle": "还没有对话",
     "emptyAgentsHint": "点「新建对话」，让 agent 开始干活。",
     "emptyHostsHint": "还没有可连接的主机，先连接一台 daemon。",

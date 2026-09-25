@@ -7,6 +7,34 @@
   "search": {
     "cancel": "Cancel"
   },
+  "import": {
+    "title": "Import sessions",
+    "chooseHost": "Import from host",
+    "pickHost": "Choose a host to import from",
+    "noHost": "No host selected",
+    "noHostsBody": "No hosts configured yet — connect a daemon first.",
+    "status": {
+      "connectHost": "Connect to the host to import sessions.",
+      "updateHost": "Update the host to import sessions.",
+      "noProviders": "No importable providers are enabled.",
+      "loading": "Loading importable sessions…",
+      "failed": "Could not load sessions: {{message}}"
+    },
+    "retry": "Retry",
+    "empty": "No sessions available to import.",
+    "alreadyHidden": "{{count}} already-imported sessions hidden",
+    "providerError": "{{provider}}: {{message}}",
+    "submit": "Import ({{count}})",
+    "importing": "Importing {{current}}/{{total}}…",
+    "toast": {
+      "imported_one": "Imported {{count}} session",
+      "imported_other": "Imported {{count}} sessions",
+      "already_one": "{{count}} was already imported",
+      "already_other": "{{count}} were already imported",
+      "failed_one": "{{count}} failed to import",
+      "failed_other": "{{count}} failed to import"
+    }
+  },
   "chats": {
     "title": "Chats",
     "noHosts": "No hosts configured yet.",
@@ -39,7 +67,6 @@
     "importChat": "Import session",
     "searchPlaceholder": "Search chats (title, alias, project, activity)",
     "searchEmpty": "No matching chats",
-    "importSoon": "Session import is coming soon",
     "emptyTitle": "No conversations yet",
     "emptyAgentsHint": "Tap New chat and let an agent get to work.",
     "emptyHostsHint": "No host to connect to yet — pair or add a daemon first.",

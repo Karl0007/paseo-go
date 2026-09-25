@@ -16,6 +16,8 @@ export const SHELL = {
   me: "/(shell)/me",
   files: "/(shell)/files/[serverId]/[workspaceId]",
   commandsEdit: "/(shell)/commands/edit",
+  // C10 导入屏: 隐藏 tab（同 files/commands 的 C5 KI-2 模式），＋菜单 push 进入。
+  import: "/(shell)/import",
 } as const;
 
 // 预览屏 lives in its own top-level group so opening a file is a real root-Stack

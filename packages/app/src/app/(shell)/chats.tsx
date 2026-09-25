@@ -55,7 +55,7 @@ import {
 } from "@/shell/search/chat-filter";
 import { normalizeSearchQuery } from "@/shell/search/query";
 import { resolveProjectPlacement } from "@/utils/project-placement";
-import { OFFICIAL } from "@/shell/routes";
+import { OFFICIAL, SHELL } from "@/shell/routes";
 import { usePaseoGoArchiveStore } from "@/shell/stores/archive";
 import { usePaseoGoPinsStore } from "@/shell/stores/pins";
 import { usePaseoGoReadStateStore } from "@/shell/stores/readState";
@@ -328,7 +328,7 @@ export default function ShellChatsScreen() {
     setSearchActive(false);
     setQuery("");
   }, []);
-  const handleImportPlaceholder = useCallback(() => toast.show(t("chats.importSoon")), [toast, t]);
+  const handleImportChat = useCallback(() => router.push(SHELL.import as Href), []);
 
   const renderItem = useCallback(
     ({ item, drag, isActive }: DraggableRenderItemInfo<ChatListItem<ShellChatAgent>>) => {
@@ -394,7 +394,7 @@ export default function ShellChatsScreen() {
           statuses={statuses}
           onRetryHost={handleRetryHost}
           onNewChat={handleNewChat}
-          onImportChat={handleImportPlaceholder}
+          onImportChat={handleImportChat}
           onSearch={handleSearchOpen}
           searchActive={searchActive}
           onQueryChange={setQuery}

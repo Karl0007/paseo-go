@@ -91,6 +91,7 @@ function ShellTabsBase({
       <Tabs.Screen name="me" options={meOptions} />
       <Tabs.Screen name="files/[serverId]/[workspaceId]" options={hiddenScreenOptions} />
       <Tabs.Screen name="commands/edit" options={hiddenScreenOptions} />
+      <Tabs.Screen name="import" options={hiddenScreenOptions} />
     </Tabs>
   );
 }

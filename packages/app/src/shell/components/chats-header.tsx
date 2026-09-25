@@ -3,7 +3,7 @@
 // live list; the filter reveals them and their 取消归档/删除 menu) | 搜索 (C9: the
 // icon opens the header's search mode — the whole bar morphs into input + 取消,
 // filtering the list below instantly) | ＋菜单 (新建对话 = official add-project flow,
-// 导入 = placeholder until C10). Menus ride the official menu engine in sheet
+// 导入会话 = C10 push of the shell import screen). Menus ride the official menu engine in sheet
 // presentation, the compact-native shape the composer already uses.
 import { useCallback, useMemo } from "react";
 import { Pressable, Text, View } from "react-native";
