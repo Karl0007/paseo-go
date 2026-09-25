@@ -21,6 +21,7 @@ DESIGN.md §4（D4：拖拽必做）。基线 = C2 HEAD。
 
 - 菜单动作收敛到 `src/shell/shellAgentActions.ts`（唯一出处，C4/C11 复用）
 - draggable-flatlist × 下拉刷新共存是已知坑：真机验证互不干扰，截图为证
+- **R1 纪律（强制）**：壳屏一律用 `src/shell/runtime/use-shell-host-statuses.ts`，禁用官方 `useHostRuntimeConnectionStatuses`（上游 react-compiler 冻结缺陷，R1 卡结论）；metro 带 `EXPO_PUBLIC_PASEO_GO_SHELL=1`；改壳代码后 force-stop+重启 app 拉新 bundle；取证优先 metro inspector CDP（`/json/list`→Runtime.evaluate），dev console 在 metro hub 日志不在 logcat
 
 ## 验收（四项证据契约）
 
