@@ -81,10 +81,23 @@
   },
   "workspace": {
     "title": "工作区",
-    "probeHeader": "文件浏览器 · A3 探针",
-    "noProject": "在线主机上暂无项目。",
-    "projectLine": "{{project}} · {{host}}",
-    "openedLine": "onOpenFile 已触发：{{path}} —— 回调覆盖为 Stack push 可行。"
+    "searchPlaceholder": "搜索文件（即将上线）",
+    "searchSoon": "搜索即将上线",
+    "favoritesTitle": "收藏夹",
+    "favoritesEmpty": "还没有收藏。浏览项目文件时长按文件即可收藏。",
+    "retry": "重试",
+    "hostEmpty": "暂无项目，点下方「新建项目」添加。",
+    "hostEmptyOffline": "主机离线，重连后显示项目。",
+    "newProject": "新建项目",
+    "connectHost": "连接新主机",
+    "emptyTitle": "还没有主机",
+    "emptyHint": "连接一台 Paseo daemon，项目与文件会出现在这里。"
+  },
+  "files": {
+    "rootPathLabel": "工作区根目录",
+    "pathUnknown": "（未知路径）",
+    "placeholderHint": "文件浏览即将上线（C6）。",
+    "notFound": "未找到该工作区，可能已归档或主机尚未同步。"
   },
   "me": {
     "title": "我的",

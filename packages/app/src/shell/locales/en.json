@@ -81,10 +81,23 @@
   },
   "workspace": {
     "title": "Workspace",
-    "probeHeader": "File explorer · A3 probe",
-    "noProject": "No project on an online host yet.",
-    "projectLine": "{{project}} · {{host}}",
-    "openedLine": "onOpenFile fired: {{path}} — Stack push override works."
+    "searchPlaceholder": "Search files (coming soon)",
+    "searchSoon": "Search is coming soon",
+    "favoritesTitle": "Favorites",
+    "favoritesEmpty": "Nothing starred yet. Long-press a file while browsing to favorite it.",
+    "retry": "Retry",
+    "hostEmpty": "No projects yet — add one with New project below.",
+    "hostEmptyOffline": "Host offline — projects appear once it reconnects.",
+    "newProject": "New project",
+    "connectHost": "Connect a new host",
+    "emptyTitle": "No hosts yet",
+    "emptyHint": "Connect a Paseo daemon and your projects and files show up here."
+  },
+  "files": {
+    "rootPathLabel": "Workspace root",
+    "pathUnknown": "(unknown path)",
+    "placeholderHint": "File browsing lands with C6.",
+    "notFound": "Workspace not found — it may be archived or the host has not synced."
   },
   "me": {
     "title": "Me",

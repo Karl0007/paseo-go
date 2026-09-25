@@ -60,12 +60,20 @@ function ShellTabsBase({
     [workspace],
   );
   const meOptions = useMemo(() => ({ title: me, tabBarIcon: MeTabIcon }), [me]);
+  // C5 files screen: the tree row's full-screen push target. It rides the group's
+  // route tree but must never surface as a tab — hidden from the bar, and the bar
+  // itself is suppressed while it is focused (reads as a Stack push over the tabs).
+  const filesOptions = useMemo(
+    () => ({ href: null, tabBarStyle: { display: "none" as const } }),
+    [],
+  );
 
   return (
     <Tabs initialRouteName={initialRouteName} screenOptions={screenOptions}>
       <Tabs.Screen name="chats" options={chatsOptions} />
       <Tabs.Screen name="workspace" options={workspaceOptions} />
       <Tabs.Screen name="me" options={meOptions} />
+      <Tabs.Screen name="files/[serverId]/[workspaceId]" options={filesOptions} />
     </Tabs>
   );
 }
