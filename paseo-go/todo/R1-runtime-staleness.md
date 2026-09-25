@@ -32,3 +32,14 @@ C2 真机验收发现：metro 重启 + daemon 重启后，平板上 host-runtime
 4. 读图：≥2 张（复现态/缓解后）
 
 - 恰好一次 commit；报告含根因链（文件:行）与 a/b/c 归类；known_issues 里给 C3 的验证注意事项
+
+## 结论（R1 完成，归类 c：产品性、影响 release）
+
+- 根因（文件:行级）：`packages/app/src/runtime/host-runtime.ts:2505-2524` 聚合 hook 用 `void version;`（L2517）声明重算依赖；`packages/app/app.config.js:191` `reactCompiler: true` 使 babel-plugin-react-compiler 重推 memo 依赖并忽略手写 deps → 编译产物只在 `serverIds` 身份变化时重算 Map（`if ($[5] !== serverIds)`，version 不在条件内）→ host 列表最后变化时刻 controller 若还在 booting（快照默认 connecting，L409-417），Map 永久冻结；transport/WS/store 全部正常（直读 `getSnapshot()`=online、per-host hook=online）。与 daemon/metro 重启无因果——重启只是让"冻结瞬间"被注意到的舞台；`pm clear` 后全新直连同样复现（连接时 upsert→serverIds 定格于 connecting 窗口）。C2 三路实证逐条对上。详见 `paseo-go/R1-upstream-repro.md`。
+- 缓解（壳侧，已验证）：`packages/app/src/shell/runtime/use-shell-host-statuses.ts`（version 作真实操作数，编译产物条件含 `$[n] !== version`）+ chats.tsx 切换；单测 3 例（含编译契约测试）。真机：重启 daemon 后 UI 逐拍跟随 error→connecting→error→online（旧包同配方永久卡 connecting）。
+- 卡内"watchdog"处方按证据修正：快照本身不陈旧，陈旧在 UI memo——重连 watchdog 治不了且会 churn 健康连接，故未做。
+- 给 C3 的验证注意事项（known_issues）：
+  1. 壳屏一律用 `useShellHostStatuses`，禁用官方 `useHostRuntimeConnectionStatuses`（add-project-flow.tsx:321、use-schedules.ts:44、new-workspace-screen.tsx:1337 三个官方调用点在上游修复前仍可能显示陈旧聚合状态，别当回归报）。
+  2. 真机验证前确认 metro 带 `EXPO_PUBLIC_PASEO_GO_SHELL=1`（卡内写的 `PASEO_GO=1` 是笔误，SPIKE.md 为准）；重启 metro 后需 force-stop+重启 app 才会拉新 bundle（`r` 键经 hub stdin 不可靠）。
+  3. 壳 APK 与官方 debug APK 共用 6767 时，daemon 日志 `hello resumed` 属正常（同 clientId 会话续接），不是故障信号。
+  4. 取证利器：metro inspector CDP（`/json/list` → `Runtime.evaluate`）可直读 app 内 store/React fiber，比 logcat 快（dev 构建 console 不进 logcat，进 metro 日志）。

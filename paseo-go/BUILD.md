@@ -135,3 +135,4 @@ $ADB = "$env:LOCALAPPDATA\Android\platform-tools\adb.exe"
 2. 本机页面文件禁用是 gradle/vitest OOM 根因；长期建议用户启用页面文件（系统属性→高级→虚拟内存），启用后可去掉 §2/§3 的限内存参数。
 3. `expo run:android` 一键路径在默认内存参数下会死，故 runbook 固化为 prebuild+gradle 分步。
 4. EAS 完全不需要：本地 gradle 路径零登录。
+5. **聚合连接状态 hook 在 React Compiler 下失效（R1，归类 c）**：官方 `useHostRuntimeConnectionStatuses` 的 `void version` 重算信号会被 `app.config.js` 的 `reactCompiler: true` 剥掉，返回的 Map 只在 serverIds 身份变化时刷新（真机表现：在线 host 永久显示"连接中"）。壳屏必须用 `src/shell/runtime/use-shell-host-statuses.ts`；根因与上游复现见 `paseo-go/R1-upstream-repro.md`。另：给 app 拉新 bundle 后需 force-stop+重启 app（metro 终端 `r` 键经管道不可靠）。

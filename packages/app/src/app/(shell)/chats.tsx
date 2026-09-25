@@ -17,12 +17,7 @@ import { Button } from "@/components/ui/button";
 import { useToast } from "@/contexts/toast-context";
 import { useAggregatedAgents } from "@/hooks/use-aggregated-agents";
 import { useOpenAddProject } from "@/hooks/use-open-add-project";
-import {
-  getHostRuntimeStore,
-  useHostRegistryStatus,
-  useHostRuntimeConnectionStatuses,
-  useHosts,
-} from "@/runtime/host-runtime";
+import { getHostRuntimeStore, useHostRegistryStatus, useHosts } from "@/runtime/host-runtime";
 import {
   deriveChatSections,
   flattenChatSections,
@@ -38,6 +33,7 @@ import { usePaseoGoArchiveStore } from "@/shell/stores/archive";
 import { usePaseoGoPinsStore } from "@/shell/stores/pins";
 import { usePaseoGoReadStateStore } from "@/shell/stores/readState";
 import { deriveSidebarStateBucket } from "@/utils/sidebar-agent-state";
+import { useShellHostStatuses } from "@/shell/runtime/use-shell-host-statuses";
 
 const SECTION_TITLE_KEY: Record<Exclude<ChatSectionKind, "offline">, string> = {
   pinned: "chats.section.pinned",
@@ -123,7 +119,7 @@ export default function ShellChatsScreen() {
   const lastReadAt = usePaseoGoReadStateStore((state) => state.lastReadAt);
 
   const hostIds = useMemo(() => hosts.map((host) => host.serverId), [hosts]);
-  const statuses = useHostRuntimeConnectionStatuses(hostIds);
+  const statuses = useShellHostStatuses(hostIds);
   const hostsById = useMemo(
     () => new Map(hosts.map((host) => [host.serverId, host] as const)),
     [hosts],
