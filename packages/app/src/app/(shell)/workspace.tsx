@@ -1,9 +1,11 @@
-// 工作区 tab (DESIGN §5, card C5): 搜索框占位 (C9 实装) → 收藏夹区空态占位 (C6/C7
-// 填充) → 主机分组 (连接点 + 名称 + ⚙ push 官方 host settings；离线置灰+重试) →
-// 项目行 (workspace 名 + 活跃 agent 数角标, 按最近使用排序) → ＋新建项目 (官方
-// add-project 流程, C2 顶栏同款) → ＋连接新主机 (官方 welcome). Row taps push the
-// shell files route — a C6 placeholder showing the workspace root for now. Cold
-// start rides the official skeleton; pull-to-refresh re-pulls agents + directories.
+// 工作区 tab (DESIGN §5, cards C5+C6+C7+C9): 搜索 (C9: the bar morphs into an input;
+// 文件名 hits come from the session-store explorer cache — the protocol has no
+// filename-search RPC, live-probed on both daemons, so only 已浏览目录 are covered,
+// which the empty state says out loud; a hit pushes the C6 preview directly) →
+// 收藏夹区 (files star + ⚡ 快捷指令混排) → 主机分组 (连接点 + 名称 + ⚙ 官方 host
+// settings；离线置灰+重试) → 项目行 (workspace 名 + 活跃 agent 角标, 最近使用排序) →
+// ＋新建项目 / ＋连接新主机 (官方流程). Cold start rides the official skeleton;
+// pull-to-refresh re-pulls agents + directories.
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { FlatList, Pressable, RefreshControl, Text, View } from "react-native";
 import { router, type Href } from "expo-router";
@@ -18,8 +20,9 @@ import { useAggregatedAgents } from "@/hooks/use-aggregated-agents";
 import { useOpenAddProject } from "@/hooks/use-open-add-project";
 import { useProjects } from "@/hooks/use-projects";
 import { getHostRuntimeStore, useHostRegistryStatus, useHosts } from "@/runtime/host-runtime";
+import { useSessionStore } from "@/stores/session-store";
 import { SHELL_I18N_NAMESPACE } from "@/shell/i18n";
-import { OFFICIAL, shellCommandEditHref, shellFilesHref } from "@/shell/routes";
+import { OFFICIAL, shellCommandEditHref, shellFilesHref, shellPreviewHref } from "@/shell/routes";
 import { useShellHostStatuses } from "@/shell/runtime/use-shell-host-statuses";
 import { WorkspaceHostHeader } from "@/shell/components/workspace-host-header";
 import { WorkspaceProjectRow } from "@/shell/components/workspace-project-row";
@@ -32,6 +35,15 @@ import {
 import { usePaseoGoFavoritesStore, type ShellFavoriteFile } from "@/shell/stores/favorites";
 import { usePaseoGoCommandsStore, type ShellCommand } from "@/shell/stores/commands";
 import { useShellCommandRunner } from "@/shell/commands/use-shell-command-runner";
+import { SearchModeBar } from "@/shell/components/search/search-mode-bar";
+import { FileSearchRow } from "@/shell/components/search/file-search-row";
+import {
+  searchFileNames,
+  type FileSearchEntry,
+  type FileSearchHit,
+  type FileSearchSource,
+} from "@/shell/search/file-search";
+import { normalizeSearchQuery } from "@/shell/search/query";
 import {
   buildWorkspaceTree,
   type ShellHostSection,
@@ -92,6 +104,19 @@ function WorkspaceEmptyState({ onConnectHost }: { onConnectHost: () => void }) {
   );
 }
 
+// 文件搜索空态 (C9): with a live query, a quiet miss line + the honest scope note —
+// the client-side filter only sees directories this app run has browsed (no
+// filename-search RPC upstream). With an empty query just the scope note leads.
+function FileSearchEmptyState({ searching }: { searching: boolean }) {
+  const { t } = useTranslation(SHELL_I18N_NAMESPACE);
+  return (
+    <View style={styles.searchEmpty} testID="shell-workspace-search-empty">
+      {searching ? <Text style={styles.emptyTitle}>{t("workspace.searchEmptyTitle")}</Text> : null}
+      <Text style={styles.emptyHint}>{t("workspace.searchEmptyHint")}</Text>
+    </View>
+  );
+}
+
 function ActionRow({
   Icon,
   label,
@@ -139,6 +164,53 @@ export default function ShellWorkspaceScreen() {
     () => buildWorkspaceTree({ hosts, statuses, projects, agents }),
     [hosts, statuses, projects, agents],
   );
+
+  // C9 文件名搜索: the session-store explorer cache is the index (no filename-search
+  // RPC upstream — see shell/search/file-search.ts). Built only while search mode is
+  // open; names reuse the tree sections so results label like the tree below.
+  const sessions = useSessionStore((state) => state.sessions);
+  const [searchActive, setSearchActive] = useState(false);
+  const [query, setQuery] = useState("");
+  const searchSources = useMemo<FileSearchSource[]>(() => {
+    if (!searchActive) return [];
+    const names = new Map<string, string>();
+    for (const section of sections) {
+      for (const row of section.rows) {
+        names.set(`${section.serverId}:${row.workspaceId}`, row.name);
+      }
+    }
+    const out: FileSearchSource[] = [];
+    for (const [serverId, session] of Object.entries(sessions)) {
+      for (const [stateKey, explorer] of session.fileExplorer) {
+        // Only workspace-scoped states open in the preview (it needs a
+        // workspaceId); the shell only ever creates `workspace:` states anyway.
+        if (!stateKey.startsWith("workspace:")) continue;
+        const workspaceId = stateKey.slice("workspace:".length);
+        const descriptor = session.workspaces.get(workspaceId);
+        const entries: FileSearchEntry[] = [];
+        for (const directory of explorer.directories.values()) {
+          entries.push(...directory.entries);
+        }
+        out.push({
+          serverId,
+          hostLabel: hostsById.get(serverId)?.label ?? serverId,
+          workspaceId,
+          workspaceName:
+            names.get(`${serverId}:${workspaceId}`) ??
+            descriptor?.projectDisplayName ??
+            workspaceId,
+          workspaceRoot: descriptor?.workspaceDirectory || descriptor?.projectRootPath || "",
+          entries,
+        });
+      }
+    }
+    return out;
+  }, [searchActive, sessions, sections, hostsById]);
+  const searchHits = useMemo(
+    () => (searchActive ? searchFileNames(searchSources, query) : []),
+    [searchActive, searchSources, query],
+  );
+  const searching = searchActive && normalizeSearchQuery(query).length > 0;
 
   const favorites = usePaseoGoFavoritesStore((state) => state.items);
   const commands = usePaseoGoCommandsStore((state) => state.items);
@@ -226,10 +298,29 @@ export default function ShellWorkspaceScreen() {
     () => router.push(OFFICIAL.addHost(Date.now()) as Href),
     [],
   );
-  const handleSearchPlaceholder = useCallback(
-    () => toast.show(t("workspace.searchSoon")),
-    [toast, t],
+  const handleSearchOpen = useCallback(() => setSearchActive(true), []);
+  const handleSearchClose = useCallback(() => {
+    setSearchActive(false);
+    setQuery("");
+  }, []);
+  const handleOpenHit = useCallback(
+    (hit: FileSearchHit) =>
+      router.push(
+        shellPreviewHref({
+          serverId: hit.serverId,
+          workspaceId: hit.workspaceId,
+          path: hit.path,
+          name: hit.name,
+          workspaceRoot: hit.workspaceRoot,
+        }) as Href,
+      ),
+    [],
   );
+  const renderSearchRow = useCallback(
+    ({ item }: { item: FileSearchHit }) => <FileSearchRow hit={item} onOpen={handleOpenHit} />,
+    [handleOpenHit],
+  );
+  const searchKeyExtractor = useCallback((hit: FileSearchHit) => hit.key, []);
   const handleOpenWorkspace = useCallback(
     (row: ShellWorkspaceRow) => router.push(shellFilesHref(row.serverId, row.workspaceId)),
     [],
@@ -363,9 +454,26 @@ export default function ShellWorkspaceScreen() {
   const showSkeleton =
     hostRegistryStatus === "loading" || (projectsLoading && isInitialLoad && hosts.length > 0);
   const hasHosts = hosts.length > 0;
+  // Stable element identity for FlatList (the chats tab's listEmpty idiom).
+  const searchListEmpty = useMemo(
+    () => <FileSearchEmptyState searching={searching} />,
+    [searching],
+  );
 
   let body: ReactNode;
-  if (showSkeleton) {
+  if (searchActive) {
+    // 结果替换列表区 (C9 ruling): the tree is fully swapped for the hit list.
+    body = (
+      <FlatList
+        data={searchHits}
+        keyExtractor={searchKeyExtractor}
+        renderItem={renderSearchRow}
+        contentContainerStyle={styles.listContent}
+        ListEmptyComponent={searchListEmpty}
+        testID="shell-workspace-search-results"
+      />
+    );
+  } else if (showSkeleton) {
     body = (
       <View style={styles.skeletonWrap} testID="shell-workspace-skeleton">
         <SidebarAgentListSkeleton />
@@ -394,18 +502,30 @@ export default function ShellWorkspaceScreen() {
   return (
     <View style={styles.screen}>
       <View style={[styles.header, { paddingTop: insets.top + 12 }]}>
-        <Text style={styles.title}>{t("workspace.title")}</Text>
-        <Pressable
-          onPress={handleSearchPlaceholder}
-          accessibilityRole="search"
-          style={styles.searchBar}
-          testID="shell-workspace-search"
-        >
-          <Search size={15} color={styles.searchIcon.color} />
-          <Text style={styles.searchPlaceholder} numberOfLines={1}>
-            {t("workspace.searchPlaceholder")}
-          </Text>
-        </Pressable>
+        {searchActive ? (
+          <SearchModeBar
+            onQueryChange={setQuery}
+            onCancel={handleSearchClose}
+            placeholder={t("workspace.searchInputPlaceholder")}
+            inputTestID="shell-workspace-search-input"
+            cancelTestID="shell-workspace-search-cancel"
+          />
+        ) : (
+          <>
+            <Text style={styles.title}>{t("workspace.title")}</Text>
+            <Pressable
+              onPress={handleSearchOpen}
+              accessibilityRole="search"
+              style={styles.searchBar}
+              testID="shell-workspace-search"
+            >
+              <Search size={15} color={styles.searchIcon.color} />
+              <Text style={styles.searchPlaceholder} numberOfLines={1}>
+                {t("workspace.searchPlaceholder")}
+              </Text>
+            </Pressable>
+          </>
+        )}
       </View>
       {body}
       <CommandWorkspacePickerSheet
@@ -451,6 +571,12 @@ const styles = StyleSheet.create((theme) => ({
     flex: 1,
     fontSize: theme.fontSize.sm,
     color: theme.colors.foregroundExtraMuted,
+  },
+  searchEmpty: {
+    alignItems: "center",
+    gap: theme.spacing[2],
+    paddingTop: theme.spacing[4] * 4,
+    paddingHorizontal: theme.spacing[6],
   },
   listContent: {
     paddingBottom: theme.spacing[8],

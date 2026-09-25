@@ -44,7 +44,8 @@ export interface ShellChatAgent {
   agent: AggregatedAgent;
 }
 
-const ACTIVITY_LABEL_KEY: Record<SidebarStateBucket, string | null> = {
+/** Row subtitle AND the C9 search haystack read the same 最后动态 label map. */
+export const ACTIVITY_LABEL_KEY: Record<SidebarStateBucket, string | null> = {
   needs_input: "chats.activity.needsInput",
   failed: "chats.activity.failed",
   running: "chats.activity.running",

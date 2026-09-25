@@ -4,6 +4,9 @@
     "workspace": "工作区",
     "me": "我的"
   },
+  "search": {
+    "cancel": "取消"
+  },
   "chats": {
     "title": "对话",
     "noHosts": "尚未配置任何主机。",
@@ -34,7 +37,8 @@
     "newMenu": "新建",
     "newChat": "新建对话",
     "importChat": "导入会话",
-    "searchSoon": "搜索即将上线",
+    "searchPlaceholder": "搜索对话（标题/别名/项目/动态）",
+    "searchEmpty": "没有匹配的对话",
     "importSoon": "会话导入即将上线",
     "emptyTitle": "还没有对话",
     "emptyAgentsHint": "点「新建对话」，让 agent 开始干活。",
@@ -81,8 +85,10 @@
   },
   "workspace": {
     "title": "工作区",
-    "searchPlaceholder": "搜索文件（即将上线）",
-    "searchSoon": "搜索即将上线",
+    "searchPlaceholder": "搜索文件名",
+    "searchInputPlaceholder": "搜索文件名（仅已浏览目录）",
+    "searchEmptyTitle": "没有匹配的文件",
+    "searchEmptyHint": "文件搜索目前只覆盖本次运行中浏览过的项目目录（上游暂无文件名/内容搜索 RPC）。",
     "favoritesTitle": "收藏夹",
     "favoritesEmpty": "还没有收藏——浏览文件时点星标，或点上方 ⚡ 新建快捷指令。",
     "retry": "重试",

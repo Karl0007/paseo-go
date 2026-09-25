@@ -12,6 +12,11 @@
 // persist through shellAgentActions.reorderPinned. The 顶栏 filter segment flips
 // between 进行中 and 已归档; the archived view reuses the same derivation with the
 // archived set inverted, and its rows carry the 取消归档/删除 menu.
+// C9: the header search morphs the bar into an input + 取消; a non-empty query
+// filters the derived sections in place (别名/标题/项目名/最后动态, case-insensitive,
+// grouping kept — a 置顶 hit stays in 置顶), the empty query restores the full list.
+// Drag is inert while searching so a filtered pinned subset can never rewrite the
+// pin order (handleDragEnd only sees visible rows).
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Pressable, Text, View } from "react-native";
 import { useFocusEffect } from "@react-navigation/native";
@@ -35,10 +40,21 @@ import {
   type ChatSectionKind,
 } from "@/shell/chats/derive";
 import { createChatOpener } from "@/shell/chats/open-agent";
-import { ChatListRow, type ShellChatAgent } from "@/shell/components/chat-list-row";
+import {
+  ACTIVITY_LABEL_KEY,
+  ChatListRow,
+  type ShellChatAgent,
+} from "@/shell/components/chat-list-row";
 import { ChatSectionHeader } from "@/shell/components/chat-section-header";
 import { ChatsHeader, type ChatListFilter } from "@/shell/components/chats-header";
 import { SHELL_I18N_NAMESPACE } from "@/shell/i18n";
+import {
+  chatMatchesQuery,
+  filterChatSections,
+  type ChatSearchFields,
+} from "@/shell/search/chat-filter";
+import { normalizeSearchQuery } from "@/shell/search/query";
+import { resolveProjectPlacement } from "@/utils/project-placement";
 import { OFFICIAL } from "@/shell/routes";
 import { usePaseoGoArchiveStore } from "@/shell/stores/archive";
 import { usePaseoGoPinsStore } from "@/shell/stores/pins";
@@ -82,15 +98,25 @@ function OfflineSectionHeader({
 function ChatsEmptyState({
   hasHosts,
   archivedOnly,
+  searching,
   onNewChat,
   onConnectHost,
 }: {
   hasHosts: boolean;
   archivedOnly: boolean;
+  /** C9: the query matched nothing — a quiet line, not the 新建对话 guidance. */
+  searching: boolean;
   onNewChat: () => void;
   onConnectHost: () => void;
 }) {
   const { t } = useTranslation(SHELL_I18N_NAMESPACE);
+  if (searching) {
+    return (
+      <View style={styles.empty} testID="shell-chats-search-empty">
+        <Text style={styles.emptyHint}>{t("chats.searchEmpty")}</Text>
+      </View>
+    );
+  }
   if (archivedOnly) {
     return (
       <View style={styles.empty} testID="shell-chats-empty-archived">
@@ -120,6 +146,26 @@ function ChatsEmptyState({
   );
 }
 
+// C9 search haystack for one row: the alias (shell rename) plus the texts the row
+// renders — official title, project name, translated 最后动态 label. Matching rules
+// live in the pure chat-filter module.
+function searchFieldsFor(
+  agent: ShellChatAgent,
+  aliases: Readonly<Record<string, string>>,
+  t: (key: string) => string,
+): ChatSearchFields {
+  const activityKey = ACTIVITY_LABEL_KEY[agent.bucket];
+  return {
+    alias: aliases[agent.key],
+    title: agent.agent.title,
+    projectName: resolveProjectPlacement({
+      projectPlacement: agent.agent.projectPlacement,
+      cwd: agent.agent.cwd,
+    }).projectName,
+    activityLabel: activityKey ? t(activityKey) : null,
+  };
+}
+
 export default function ShellChatsScreen() {
   const { t } = useTranslation(SHELL_I18N_NAMESPACE);
   const insets = useSafeAreaInsets();
@@ -131,6 +177,7 @@ export default function ShellChatsScreen() {
   const { agents, isInitialLoad, refreshAll } = useAggregatedAgents();
 
   const pinnedIds = usePaseoGoPinsStore((state) => state.pinnedIds);
+  const aliases = usePaseoGoPinsStore((state) => state.aliases);
   const archivedIds = usePaseoGoArchiveStore((state) => state.archivedIds);
   const lastReadAt = usePaseoGoReadStateStore((state) => state.lastReadAt);
   const markRead = usePaseoGoReadStateStore((state) => state.markRead);
@@ -166,6 +213,12 @@ export default function ShellChatsScreen() {
   const [filter, setFilter] = useState<ChatListFilter>("active");
   const archivedOnly = filter === "archived";
 
+  // C9 search mode: the header owns the input, the screen owns the query. The
+  // normalised form drives filtering; empty means “no filter” (restore-on-clear).
+  const [searchActive, setSearchActive] = useState(false);
+  const [query, setQuery] = useState("");
+  const normalizedQuery = normalizeSearchQuery(query);
+
   const hostIds = useMemo(() => hosts.map((host) => host.serverId), [hosts]);
   const statuses = useShellHostStatuses(hostIds);
   const hostsById = useMemo(
@@ -194,17 +247,34 @@ export default function ShellChatsScreen() {
       agent,
     }));
     if (archivedOnly) inputs = inputs.filter((agent) => archivedSet.has(agent.key));
+    const sections = deriveChatSections({
+      agents: inputs,
+      pinnedIds: archivedOnly ? [] : pinnedIds,
+      archivedIds: archivedOnly ? [] : archivedIds,
+      lastReadAt,
+      hostIds,
+      hostStatuses: statuses,
+    });
+    // C9: a live query narrows the derived sections in place; empty restores.
+    if (normalizedQuery.length === 0) return flattenChatSections(sections);
     return flattenChatSections(
-      deriveChatSections({
-        agents: inputs,
-        pinnedIds: archivedOnly ? [] : pinnedIds,
-        archivedIds: archivedOnly ? [] : archivedIds,
-        lastReadAt,
-        hostIds,
-        hostStatuses: statuses,
-      }),
+      filterChatSections(sections, (agent) =>
+        chatMatchesQuery(searchFieldsFor(agent, aliases, t), normalizedQuery),
+      ),
     );
-  }, [agents, archivedOnly, archivedSet, pinnedIds, archivedIds, lastReadAt, hostIds, statuses]);
+  }, [
+    agents,
+    archivedOnly,
+    archivedSet,
+    pinnedIds,
+    archivedIds,
+    lastReadAt,
+    hostIds,
+    statuses,
+    normalizedQuery,
+    aliases,
+    t,
+  ]);
 
   const archivedCount = useMemo(
     () => agents.filter((agent) => archivedSet.has(`${agent.serverId}:${agent.id}`)).length,
@@ -230,6 +300,10 @@ export default function ShellChatsScreen() {
   // order is its opinion we keep — headers and unpinned rows are re-derived anyway.
   const handleDragEnd = useCallback(
     (nextItems: ChatListItem<ShellChatAgent>[]) => {
+      // C9: while a query narrows the list, handleDragEnd only sees the visible
+      // subset — persisting it would drop the hidden pins. Drag is also disabled
+      // in renderItem, so this is the belt to that braces.
+      if (normalizedQuery.length > 0) return;
       const order: string[] = [];
       for (const item of nextItems) {
         if (item.type === "row" && pinnedSet.has(item.row.agent.key))
@@ -237,7 +311,7 @@ export default function ShellChatsScreen() {
       }
       actions.reorderPinned(order);
     },
-    [actions, pinnedSet],
+    [actions, pinnedSet, normalizedQuery],
   );
 
   const handleRetryHost = useCallback(
@@ -249,7 +323,11 @@ export default function ShellChatsScreen() {
   );
   const handleNewChat = useCallback(() => openAddProject(), [openAddProject]);
   const handleConnectHost = useCallback(() => router.push(OFFICIAL.welcome as Href), []);
-  const handleSearchPlaceholder = useCallback(() => toast.show(t("chats.searchSoon")), [toast, t]);
+  const handleSearchOpen = useCallback(() => setSearchActive(true), []);
+  const handleSearchClose = useCallback(() => {
+    setSearchActive(false);
+    setQuery("");
+  }, []);
   const handleImportPlaceholder = useCallback(() => toast.show(t("chats.importSoon")), [toast, t]);
 
   const renderItem = useCallback(
@@ -275,7 +353,7 @@ export default function ShellChatsScreen() {
           />
         );
       }
-      const draggable = !archivedOnly && pinnedSet.has(item.row.agent.key);
+      const draggable = !archivedOnly && !searchActive && pinnedSet.has(item.row.agent.key);
       return (
         <ChatListRow
           row={item.row}
@@ -287,21 +365,23 @@ export default function ShellChatsScreen() {
         />
       );
     },
-    [actions, archivedOnly, handleOpenChat, hostsById, handleRetryHost, pinnedSet, t],
+    [actions, archivedOnly, searchActive, handleOpenChat, hostsById, handleRetryHost, pinnedSet, t],
   );
 
   const keyExtractor = useCallback((item: ChatListItem<ShellChatAgent>) => item.key, []);
   const hasHosts = hosts.length > 0;
+  const searching = searchActive && normalizedQuery.length > 0;
   const listEmpty = useMemo(
     () => (
       <ChatsEmptyState
         hasHosts={hasHosts}
         archivedOnly={archivedOnly}
+        searching={searching}
         onNewChat={handleNewChat}
         onConnectHost={handleConnectHost}
       />
     ),
-    [archivedOnly, hasHosts, handleNewChat, handleConnectHost],
+    [archivedOnly, hasHosts, searching, handleNewChat, handleConnectHost],
   );
 
   const showSkeleton = isInitialLoad || hostRegistryStatus === "loading";
@@ -315,7 +395,10 @@ export default function ShellChatsScreen() {
           onRetryHost={handleRetryHost}
           onNewChat={handleNewChat}
           onImportChat={handleImportPlaceholder}
-          onSearch={handleSearchPlaceholder}
+          onSearch={handleSearchOpen}
+          searchActive={searchActive}
+          onQueryChange={setQuery}
+          onSearchClose={handleSearchClose}
           filter={filter}
           onFilterChange={setFilter}
           archivedCount={archivedCount}

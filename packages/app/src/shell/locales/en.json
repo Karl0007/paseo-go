@@ -4,6 +4,9 @@
     "workspace": "Workspace",
     "me": "Me"
   },
+  "search": {
+    "cancel": "Cancel"
+  },
   "chats": {
     "title": "Chats",
     "noHosts": "No hosts configured yet.",
@@ -34,7 +37,8 @@
     "newMenu": "Create",
     "newChat": "New chat",
     "importChat": "Import session",
-    "searchSoon": "Search is coming soon",
+    "searchPlaceholder": "Search chats (title, alias, project, activity)",
+    "searchEmpty": "No matching chats",
     "importSoon": "Session import is coming soon",
     "emptyTitle": "No conversations yet",
     "emptyAgentsHint": "Tap New chat and let an agent get to work.",
@@ -81,8 +85,10 @@
   },
   "workspace": {
     "title": "Workspace",
-    "searchPlaceholder": "Search files (coming soon)",
-    "searchSoon": "Search is coming soon",
+    "searchPlaceholder": "Search files",
+    "searchInputPlaceholder": "Search file names (browsed folders only)",
+    "searchEmptyTitle": "No matching files",
+    "searchEmptyHint": "File search currently covers only the project folders you have browsed in this app session (upstream offers no filename/content search RPC yet).",
     "favoritesTitle": "Favorites",
     "favoritesEmpty": "Nothing saved yet — star a file while browsing, or tap ⚡ above to create a quick command.",
     "retry": "Retry",

@@ -1,9 +1,10 @@
 // 对话 tab top bar (DESIGN §4): 连接状态胶囊 (tap = per-host status sheet with
 // single-host retry) | 进行中/已归档 filter segment (C3: archived rows hide from the
-// live list; the filter reveals them and their 取消归档/删除 menu) | 搜索 icon
-// (placeholder until C9) | ＋菜单 (新建对话 = official add-project flow, 导入 =
-// placeholder until C10). Menus ride the official menu engine in sheet presentation,
-// the compact-native shape the composer already uses.
+// live list; the filter reveals them and their 取消归档/删除 menu) | 搜索 (C9: the
+// icon opens the header's search mode — the whole bar morphs into input + 取消,
+// filtering the list below instantly) | ＋菜单 (新建对话 = official add-project flow,
+// 导入 = placeholder until C10). Menus ride the official menu engine in sheet
+// presentation, the compact-native shape the composer already uses.
 import { useCallback, useMemo } from "react";
 import { Pressable, Text, View } from "react-native";
 import { StyleSheet } from "react-native-unistyles";
@@ -20,6 +21,7 @@ import {
 import type { HostRuntimeConnectionStatus } from "@/runtime/host-runtime";
 import { SHELL_I18N_NAMESPACE } from "@/shell/i18n";
 import type { HostProfile } from "@/types/host-connection";
+import { SearchModeBar } from "@/shell/components/search/search-mode-bar";
 
 const HOST_STATUS_LABEL_KEY: Record<HostRuntimeConnectionStatus, string> = {
   idle: "chats.hostStatus.idle",
@@ -109,6 +111,9 @@ export function ChatsHeader({
   onNewChat,
   onImportChat,
   onSearch,
+  searchActive,
+  onQueryChange,
+  onSearchClose,
   filter,
   onFilterChange,
   archivedCount,
@@ -119,6 +124,10 @@ export function ChatsHeader({
   onNewChat: () => void;
   onImportChat: () => void;
   onSearch: () => void;
+  /** C9: true while the bar is morphed into the search input. */
+  searchActive: boolean;
+  onQueryChange: (query: string) => void;
+  onSearchClose: () => void;
   filter: ChatListFilter;
   onFilterChange: (filter: ChatListFilter) => void;
   archivedCount: number;
@@ -139,6 +148,19 @@ export function ChatsHeader({
   const pickActive = useCallback(() => onFilterChange("active"), [onFilterChange]);
   const pickArchived = useCallback(() => onFilterChange("archived"), [onFilterChange]);
 
+  if (searchActive) {
+    return (
+      <View style={styles.header}>
+        <SearchModeBar
+          onQueryChange={onQueryChange}
+          onCancel={onSearchClose}
+          placeholder={t("chats.searchPlaceholder")}
+          inputTestID="shell-chat-search-input"
+          cancelTestID="shell-chat-search-cancel"
+        />
+      </View>
+    );
+  }
   return (
     <View style={styles.header}>
       <Text style={styles.title}>{t("chats.title")}</Text>
@@ -192,9 +214,9 @@ export function ChatsHeader({
         <View style={styles.spacer} />
         <Pressable
           onPress={onSearch}
-          accessibilityRole="button"
+          accessibilityRole="search"
           hitSlop={8}
-          testID="shell-search-placeholder"
+          testID="shell-chats-search"
           style={searchStyle}
         >
           <Search size={18} color={styles.iconColor.color} />
