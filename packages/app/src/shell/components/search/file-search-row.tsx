@@ -28,6 +28,7 @@ export function FileSearchRow({
     <Pressable
       onPress={handlePress}
       accessibilityRole="button"
+      accessibilityLabel={`${hit.name} · ${subtitle}`}
       testID={`shell-file-hit:${hit.key}`}
       style={rowStyle}
     >

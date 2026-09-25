@@ -486,7 +486,22 @@ export default function ShellCommandEditScreen() {
           {title}
         </Text>
       </View>
-      {hydrated ? <CommandFormBody command={command} onSaved={handleBack} /> : null}
+      {hydrated ? <CommandFormBody command={command} onSaved={handleBack} /> : <FormSkeleton />}
+    </View>
+  );
+}
+
+// C12: persist rehydration used to leave a bare-white frame under the header —
+// render a static form-shaped skeleton (label bar + field box ×4) instead.
+function FormSkeleton() {
+  return (
+    <View style={styles.skeleton} testID="shell-command-edit-skeleton">
+      {[0, 1, 2, 3].map((i) => (
+        <View key={i} style={styles.skeletonField}>
+          <View style={styles.skeletonLabel} />
+          <View style={styles.skeletonBox} />
+        </View>
+      ))}
     </View>
   );
 }
@@ -495,6 +510,27 @@ const styles = StyleSheet.create((theme) => ({
   screen: {
     flex: 1,
     backgroundColor: theme.colors.surface0,
+  },
+  skeleton: {
+    flex: 1,
+    gap: theme.spacing[4],
+    padding: theme.spacing[4],
+  },
+  skeletonField: {
+    gap: theme.spacing[2],
+  },
+  skeletonLabel: {
+    width: 96,
+    height: 12,
+    borderRadius: theme.borderRadius.sm,
+    backgroundColor: theme.colors.surface2,
+  },
+  skeletonBox: {
+    height: 44,
+    borderRadius: theme.borderRadius.md,
+    backgroundColor: theme.colors.surface1,
+    borderWidth: theme.borderWidth[1],
+    borderColor: theme.colors.border,
   },
   header: {
     flexDirection: "row",

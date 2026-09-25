@@ -21,7 +21,8 @@ import { router, type Href } from "expo-router";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useTranslation } from "react-i18next";
 import { StyleSheet } from "react-native-unistyles";
-import { Check, ChevronDown, ChevronLeft, RotateCw } from "lucide-react-native";
+import { Check, ChevronDown, ChevronLeft, Inbox, RotateCw } from "lucide-react-native";
+import * as Haptics from "expo-haptics";
 import type { FetchRecentProviderSessionEntry } from "@getpaseo/client/internal/daemon-client";
 import { Button } from "@/components/ui/button";
 import { LoadingSpinner } from "@/components/ui/loading-spinner";
@@ -110,6 +111,9 @@ function ImportRowCell({
   );
 }
 
+// C12: 44dp host-chip target (module const — react-perf forbids per-render objects).
+const HOST_CHIP_HIT_SLOP = { top: 8, bottom: 8, left: 4, right: 4 } as const;
+
 // 状态行：文案来自 deriveImportStatus；加载态带 spinner，失败态带重试。
 function ImportStatusBlock({
   message,
@@ -123,9 +127,14 @@ function ImportStatusBlock({
   onRetry: () => void;
 }) {
   const { t } = useTranslation(SHELL_I18N_NAMESPACE);
+  // C12: 静默状态（无主机/未选/空列表）也走 图标+一句引导 的空态范式。
   return (
     <View style={styles.statusWrap} testID="shell-import-status">
-      {showSpinner ? <LoadingSpinner size="small" color={styles.headerIcon.color} /> : null}
+      {showSpinner ? (
+        <LoadingSpinner size="small" color={styles.headerIcon.color} />
+      ) : (
+        <Inbox size={18} color={styles.headerIcon.color} />
+      )}
       <Text style={styles.statusText}>{message}</Text>
       {showRetry ? (
         <Button variant="ghost" size="sm" onPress={onRetry}>
@@ -270,6 +279,9 @@ export default function ShellImportScreen() {
     }
     setProgress(null);
     const summary = summarizeImportAttempts(attempts);
+    // C12: 成功动作触觉——有真实导入落地才 Success。
+    if (summary.imported > 0)
+      void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => {});
     const message = buildImportToastParts(summary)
       .map((part) => t(`import.toast.${part.key}`, { count: part.count }))
       .join(" · ");
@@ -370,7 +382,7 @@ export default function ShellImportScreen() {
         <Pressable
           onPress={goBackToChats}
           accessibilityRole="button"
-          hitSlop={8}
+          hitSlop={10}
           testID="shell-import-back"
           style={styles.headerButton}
         >
@@ -381,6 +393,7 @@ export default function ShellImportScreen() {
           <Pressable
             onPress={handleHostChip}
             accessibilityRole="button"
+            hitSlop={HOST_CHIP_HIT_SLOP}
             testID="shell-import-host"
             style={styles.hostRow}
           >
@@ -393,7 +406,7 @@ export default function ShellImportScreen() {
         <Pressable
           onPress={handleRefresh}
           accessibilityRole="button"
-          hitSlop={8}
+          hitSlop={10}
           disabled={isBusy || !client}
           testID="shell-import-refresh"
           style={styles.headerButton}
@@ -464,6 +477,7 @@ const styles = StyleSheet.create((theme) => ({
     alignItems: "center",
     gap: 3,
     marginTop: 1,
+    paddingVertical: theme.spacing[2],
   },
   hostLabel: {
     color: theme.colors.foregroundMuted,

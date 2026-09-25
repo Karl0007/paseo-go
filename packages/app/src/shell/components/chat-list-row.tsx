@@ -174,6 +174,16 @@ function ChatRowInner({
     [agent.key, agent.serverId, agent.agent.id],
   );
   const displayTitle = alias ?? agent.agent.title ?? t("chats.untitled");
+  // C12 无障碍: rows carry purely-visual info (未读角标/状态灯/置灰) — announce it.
+  const activityLabelKey = ACTIVITY_LABEL_KEY[agent.bucket];
+  const rowLabel = [
+    displayTitle,
+    unread ? t("chats.a11yUnread") : null,
+    activityLabelKey ? t(activityLabelKey) : null,
+    dimmed ? t("chats.hostStatus.offline") : null,
+  ]
+    .filter(Boolean)
+    .join(" · ");
   // 停止 only acts on an abortable turn: running, or blocked on an approval.
   const stoppable = agent.bucket === "running" || agent.bucket === "needs_input";
   const menuState = useMemo(
@@ -197,6 +207,7 @@ function ChatRowInner({
         <ContextMenuTrigger
           testID={`shell-chat-row-${agent.key}`}
           accessibilityRole="button"
+          accessibilityLabel={rowLabel}
           onPress={handlePress}
           // Draggable rows hand long press to the arbitration hook; plain rows let
           // the engine's own native long press open the menu (with a selection tick).

@@ -5,7 +5,9 @@
 import { useCallback } from "react";
 import { Pressable, Text, View } from "react-native";
 import { StyleSheet } from "react-native-unistyles";
+import { useTranslation } from "react-i18next";
 import { Folder } from "lucide-react-native";
+import { SHELL_I18N_NAMESPACE } from "@/shell/i18n";
 import type { ShellWorkspaceRow } from "@/shell/workspace/derive";
 
 export function WorkspaceProjectRow({
@@ -18,6 +20,7 @@ export function WorkspaceProjectRow({
   dimmed: boolean;
   onOpen: (row: ShellWorkspaceRow) => void;
 }) {
+  const { t } = useTranslation(SHELL_I18N_NAMESPACE);
   const handleOpen = useCallback(() => onOpen(row), [onOpen, row]);
   const rowStyle = useCallback(
     ({ pressed }: { pressed: boolean }) => [
@@ -27,10 +30,15 @@ export function WorkspaceProjectRow({
     ],
     [dimmed],
   );
+  const labelParts = [row.name, row.projectName];
+  if (row.activeCount > 0)
+    labelParts.push(t("workspace.a11yActiveAgents", { count: row.activeCount }));
+  if (dimmed) labelParts.push(t("chats.hostStatus.offline"));
   return (
     <Pressable
       onPress={handleOpen}
       accessibilityRole="button"
+      accessibilityLabel={labelParts.join(" · ")}
       style={rowStyle}
       testID={`shell-workspace-row-${row.key}`}
     >

@@ -8,6 +8,7 @@ import { useCallback, type ReactElement } from "react";
 import { ActivityIndicator, Text, View } from "react-native";
 import { StyleSheet, withUnistyles } from "react-native-unistyles";
 import { useTranslation } from "react-i18next";
+import * as Haptics from "expo-haptics";
 import { PenLine, Play, Trash2, Zap } from "lucide-react-native";
 import {
   ContextMenu,
@@ -107,10 +108,22 @@ export function WorkspaceCommandRow({
     },
     [onRun, onEdit, onRemove, command],
   );
-
+  // C12: 长弹触觉（官方引擎不自发）+ 行级无障碍标签（标题+状态）。
+  const handleLongPress = useCallback(() => {
+    void Haptics.selectionAsync().catch(() => {});
+  }, []);
+  const rowLabel = dimmed
+    ? `${command.name} · ${subtitle} · ${t("chats.hostStatus.offline")}`
+    : `${command.name} · ${subtitle}`;
   return (
     <ContextMenu>
-      <ContextMenuTrigger onPress={handlePress} testID={`shell-command-row-${command.id}`}>
+      <ContextMenuTrigger
+        onPress={handlePress}
+        onLongPress={handleLongPress}
+        accessibilityRole="button"
+        accessibilityLabel={rowLabel}
+        testID={`shell-command-row-${command.id}`}
+      >
         <View style={styles.row}>
           {running ? (
             <ActivityIndicator size="small" color={styles.boltColor.color} />

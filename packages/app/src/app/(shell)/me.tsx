@@ -56,6 +56,9 @@ function tapHaptic(): void {
   void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => {});
 }
 
+// C12: 44dp chip target (module const — react-perf forbids per-render objects).
+const CHIP_HIT_SLOP = { top: 8, bottom: 8 } as const;
+
 // 列表行 (对齐官方设置页视觉): title + hint, trailing control (children) or chevron.
 function SettingRow({
   title,
@@ -79,8 +82,14 @@ function SettingRow({
   const body = (
     <>
       <View style={styles.rowBody}>
-        <Text style={[styles.rowTitle, destructive && styles.rowDestructive]}>{title}</Text>
-        {hint ? <Text style={styles.muted}>{hint}</Text> : null}
+        <Text style={[styles.rowTitle, destructive && styles.rowDestructive]} numberOfLines={1}>
+          {title}
+        </Text>
+        {hint ? (
+          <Text style={styles.muted} numberOfLines={2}>
+            {hint}
+          </Text>
+        ) : null}
       </View>
       {children ?? (onPress ? <ChevronRight size={16} color={styles.muted.color} /> : null)}
     </>
@@ -128,6 +137,7 @@ function ChoiceChip({
       testID={`${testIdPrefix}-${chipKey}`}
       accessibilityRole="button"
       accessibilityState={active ? ACCESSIBILITY_SELECTED : ACCESSIBILITY_UNSELECTED}
+      hitSlop={CHIP_HIT_SLOP}
       onPress={handlePress}
       style={chipStyle}
     >
@@ -241,6 +251,21 @@ export default function ShellMeScreen() {
     },
     [setDefaultTab],
   );
+  // C12: 开关切换补触觉（官方 Switch 不自发）。
+  const handleToggleShellMode = useCallback(
+    (value: boolean) => {
+      tapHaptic();
+      setShellMode(value);
+    },
+    [setShellMode],
+  );
+  const handleToggleNotifications = useCallback(
+    (value: boolean) => {
+      tapHaptic();
+      setNotifications(value);
+    },
+    [setNotifications],
+  );
   const handleClearData = useCallback(async () => {
     const confirmed = await confirmDialog({
       title: t("me.clearConfirmTitle"),
@@ -250,9 +275,10 @@ export default function ShellMeScreen() {
       destructive: true,
     });
     if (!confirmed) return;
-    void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning).catch(() => {});
     await clearPaseoGoLocalData();
     resetShellStores();
+    // C12: 成功触觉跟着真实完成，不再抢跑在清除之前。
+    void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => {});
     // 不运行中弹栈换 IA：shellMode 是启动期消费的缝隙，重启后官方首页自然接管
     // （Main 定稿）。原地留下，toast 说清重启语义；壳数据此刻已真实归零。
     toast.show(t("me.clearDone"));
@@ -308,7 +334,8 @@ export default function ShellMeScreen() {
           <ThemedModeSwitch
             testID="shell-mode-switch"
             value={shellModeActive}
-            onValueChange={setShellMode}
+            accessibilityLabel={t("me.shellMode")}
+            onValueChange={handleToggleShellMode}
           />
         </SettingRow>
         <View style={styles.divider} />
@@ -342,7 +369,8 @@ export default function ShellMeScreen() {
           <ThemedModeSwitch
             testID="shell-notify-switch"
             value={notifications}
-            onValueChange={setNotifications}
+            accessibilityLabel={t("me.notifications")}
+            onValueChange={handleToggleNotifications}
           />
         </SettingRow>
         <View style={styles.divider} />

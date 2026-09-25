@@ -9,7 +9,7 @@ import { useCallback, useMemo } from "react";
 import { Pressable, Text, View } from "react-native";
 import { StyleSheet } from "react-native-unistyles";
 import { useTranslation } from "react-i18next";
-import { Inbox, MessageSquarePlus, Plus, Search } from "lucide-react-native";
+import { Inbox, MessageSquarePlus, Plus, Search, Server } from "lucide-react-native";
 import { HostStatusDot } from "@/components/host-status-dot";
 import {
   DropdownMenu,
@@ -92,6 +92,7 @@ function FilterSegment({
       onPress={onPress}
       accessibilityRole="button"
       accessibilityState={accessibilityState}
+      hitSlop={SEGMENT_HIT_SLOP}
       testID={testID}
       style={segmentStyle}
     >
@@ -102,6 +103,9 @@ function FilterSegment({
   );
 }
 
+// C12: 44dp targets for the pill/segment row (module consts — react-perf).
+const SEGMENT_HIT_SLOP = { top: 10, bottom: 10 } as const;
+const PILL_HIT_SLOP = { top: 8, bottom: 8 } as const;
 export type ChatListFilter = "active" | "archived";
 
 export function ChatsHeader({
@@ -110,6 +114,7 @@ export function ChatsHeader({
   onRetryHost,
   onNewChat,
   onImportChat,
+  onConnectHost,
   onSearch,
   searchActive,
   onQueryChange,
@@ -123,6 +128,8 @@ export function ChatsHeader({
   onRetryHost: (serverId: string) => void;
   onNewChat: () => void;
   onImportChat: () => void;
+  /** C12: the empty host sheet gets the same 连接主机 entry the empty list offers. */
+  onConnectHost: () => void;
   onSearch: () => void;
   /** C9: true while the bar is morphed into the search input. */
   searchActive: boolean;
@@ -141,6 +148,7 @@ export function ChatsHeader({
     [],
   );
   const importLeading = useMemo(() => <Inbox size={16} color={styles.iconColor.color} />, []);
+  const connectLeading = useMemo(() => <Server size={16} color={styles.iconColor.color} />, []);
   const searchStyle = useCallback(
     ({ pressed }: { pressed: boolean }) => [styles.iconButton, pressed && styles.iconButtonPressed],
     [],
@@ -169,6 +177,7 @@ export function ChatsHeader({
           <DropdownMenuTrigger
             testID="shell-host-pill"
             accessibilityRole="button"
+            hitSlop={PILL_HIT_SLOP}
             style={styles.pillTrigger}
           >
             <View style={[styles.pill, styles.pillRow]}>
@@ -180,7 +189,16 @@ export function ChatsHeader({
           </DropdownMenuTrigger>
           <DropdownMenuContent sheetTitle={t("chats.hostsMenu")} width={300}>
             {total === 0 ? (
-              <DropdownMenuHint>{t("chats.noHosts")}</DropdownMenuHint>
+              <>
+                <DropdownMenuHint>{t("chats.noHosts")}</DropdownMenuHint>
+                <DropdownMenuItem
+                  testID="shell-host-sheet-connect"
+                  leading={connectLeading}
+                  onSelect={onConnectHost}
+                >
+                  {t("chats.connectHost")}
+                </DropdownMenuItem>
+              </>
             ) : (
               hosts.map((host) => (
                 <HostMenuItem
@@ -225,6 +243,7 @@ export function ChatsHeader({
           <DropdownMenuTrigger
             testID="shell-plus-menu"
             accessibilityRole="button"
+            hitSlop={6}
             style={styles.iconButton}
           >
             <Plus size={18} color={styles.iconColor.color} />

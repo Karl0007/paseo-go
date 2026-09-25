@@ -18,13 +18,13 @@
 // Drag is inert while searching so a filtered pinned subset can never rewrite the
 // pin order (handleDragEnd only sees visible rows).
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Pressable, Text, View } from "react-native";
+import { Text, View } from "react-native";
 import { useFocusEffect } from "@react-navigation/native";
 import { router, type Href } from "expo-router";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useTranslation } from "react-i18next";
 import { StyleSheet } from "react-native-unistyles";
-import { MessageCircle } from "lucide-react-native";
+import { Archive, MessageCircle, SearchX, WifiOff } from "lucide-react-native";
 import { SidebarAgentListSkeleton } from "@/components/sidebar-agent-list-skeleton";
 import { Button } from "@/components/ui/button";
 import { DraggableList } from "@/components/draggable-list";
@@ -92,35 +92,82 @@ function OfflineSectionHeader({
   );
 }
 
-// Empty state (DESIGN §4): illustration + 新建对话 guidance; with no hosts configured
-// the guidance is the official connect flow instead. The archived filter gets a plain
-// quiet line instead — there is nothing to create from an empty archive.
+// Empty states (DESIGN §4 / C12): every branch is icon + one-line guidance + a
+// primary action — 无会话 gets the 新建对话 guidance (the official connect flow when
+// no host exists yet), 搜索无结果 offers 清除搜索, 已归档空 offers 切回进行中.
 function ChatsEmptyState({
   hasHosts,
+  allHostsOffline,
   archivedOnly,
   searching,
   onNewChat,
   onConnectHost,
+  onClearSearch,
+  onShowActive,
+  onRetryAll,
 }: {
   hasHosts: boolean;
+  /** C12: every host is offline/error and no cached rows remain — the 新建对话
+   * guidance would mislead; offer 重试连接 instead (offline hosts without a cached
+   * directory are otherwise invisible here). */
+  allHostsOffline: boolean;
   archivedOnly: boolean;
-  /** C9: the query matched nothing — a quiet line, not the 新建对话 guidance. */
+  /** C9: the query matched nothing. */
   searching: boolean;
   onNewChat: () => void;
   onConnectHost: () => void;
+  onClearSearch: () => void;
+  onShowActive: () => void;
+  onRetryAll: () => void;
 }) {
   const { t } = useTranslation(SHELL_I18N_NAMESPACE);
   if (searching) {
     return (
       <View style={styles.empty} testID="shell-chats-search-empty">
+        <View style={styles.emptyIconWrap}>
+          <SearchX size={28} color={styles.emptyIcon.color} />
+        </View>
         <Text style={styles.emptyHint}>{t("chats.searchEmpty")}</Text>
+        <Button
+          variant="secondary"
+          size="sm"
+          onPress={onClearSearch}
+          testID="shell-empty-clear-search"
+        >
+          {t("chats.searchEmptyAction")}
+        </Button>
       </View>
     );
   }
   if (archivedOnly) {
     return (
       <View style={styles.empty} testID="shell-chats-empty-archived">
+        <View style={styles.emptyIconWrap}>
+          <Archive size={28} color={styles.emptyIcon.color} />
+        </View>
         <Text style={styles.emptyHint}>{t("chats.emptyArchived")}</Text>
+        <Button
+          variant="secondary"
+          size="sm"
+          onPress={onShowActive}
+          testID="shell-empty-show-active"
+        >
+          {t("chats.emptyArchivedAction")}
+        </Button>
+      </View>
+    );
+  }
+  if (allHostsOffline) {
+    return (
+      <View style={styles.empty} testID="shell-chats-empty-offline">
+        <View style={styles.emptyIconWrap}>
+          <WifiOff size={28} color={styles.emptyIcon.color} />
+        </View>
+        <Text style={styles.emptyTitle}>{t("chats.offlineTitle")}</Text>
+        <Text style={styles.emptyHint}>{t("chats.offlineHint")}</Text>
+        <Button onPress={onRetryAll} testID="shell-empty-retry-all">
+          {t("chats.retryAll")}
+        </Button>
       </View>
     );
   }
@@ -138,9 +185,9 @@ function ChatsEmptyState({
           {t("chats.newChat")}
         </Button>
       ) : (
-        <Pressable onPress={onConnectHost} accessibilityRole="button" testID="shell-empty-connect">
-          <Text style={styles.emptyLink}>{t("chats.connectHost")}</Text>
-        </Pressable>
+        <Button variant="secondary" onPress={onConnectHost} testID="shell-empty-connect">
+          {t("chats.connectHost")}
+        </Button>
       )}
     </View>
   );
@@ -329,6 +376,7 @@ export default function ShellChatsScreen() {
     setQuery("");
   }, []);
   const handleImportChat = useCallback(() => router.push(SHELL.import as Href), []);
+  const handleShowActive = useCallback(() => setFilter("active"), []);
 
   const renderItem = useCallback(
     ({ item, drag, isActive }: DraggableRenderItemInfo<ChatListItem<ShellChatAgent>>) => {
@@ -370,18 +418,38 @@ export default function ShellChatsScreen() {
 
   const keyExtractor = useCallback((item: ChatListItem<ShellChatAgent>) => item.key, []);
   const hasHosts = hosts.length > 0;
+  const allHostsOffline =
+    hasHosts && hosts.every((host) => (statuses.get(host.serverId) ?? "idle") !== "online");
   const searching = searchActive && normalizedQuery.length > 0;
+  const handleRetryAll = useCallback(() => {
+    for (const host of hosts) void getHostRuntimeStore().runProbeCycleNow(host.serverId);
+    toast.show(t("chats.retryingAll", { count: hosts.length }));
+  }, [hosts, toast, t]);
   const listEmpty = useMemo(
     () => (
       <ChatsEmptyState
         hasHosts={hasHosts}
+        allHostsOffline={allHostsOffline}
         archivedOnly={archivedOnly}
         searching={searching}
         onNewChat={handleNewChat}
         onConnectHost={handleConnectHost}
+        onClearSearch={handleSearchClose}
+        onShowActive={handleShowActive}
+        onRetryAll={handleRetryAll}
       />
     ),
-    [archivedOnly, hasHosts, searching, handleNewChat, handleConnectHost],
+    [
+      archivedOnly,
+      hasHosts,
+      allHostsOffline,
+      searching,
+      handleNewChat,
+      handleConnectHost,
+      handleSearchClose,
+      handleShowActive,
+      handleRetryAll,
+    ],
   );
 
   const showSkeleton = isInitialLoad || hostRegistryStatus === "loading";
@@ -395,6 +463,7 @@ export default function ShellChatsScreen() {
           onRetryHost={handleRetryHost}
           onNewChat={handleNewChat}
           onImportChat={handleImportChat}
+          onConnectHost={handleConnectHost}
           onSearch={handleSearchOpen}
           searchActive={searchActive}
           onQueryChange={setQuery}
@@ -471,10 +540,5 @@ const styles = StyleSheet.create((theme) => ({
     color: theme.colors.foregroundMuted,
     textAlign: "center",
     marginBottom: theme.spacing[3],
-  },
-  emptyLink: {
-    fontSize: theme.fontSize.base,
-    fontWeight: theme.fontWeight.semibold,
-    color: theme.colors.accent,
   },
 }));

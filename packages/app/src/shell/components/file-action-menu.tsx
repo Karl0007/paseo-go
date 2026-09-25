@@ -5,9 +5,10 @@
 // (取消收藏/分享/复制路径 subset). 下载 and 分享 both ride the official
 // download-store pipeline — on native it ends in the system share sheet, which is
 // also how a downloaded file is opened elsewhere.
-import { type ReactElement, type ReactNode } from "react";
+import { useCallback, type ReactElement, type ReactNode } from "react";
 import { useTranslation } from "react-i18next";
 import { withUnistyles } from "react-native-unistyles";
+import * as Haptics from "expo-haptics";
 import { Copy, Download, MessageSquarePlus, Share2, Star, StarOff } from "lucide-react-native";
 import {
   ContextMenu,
@@ -189,7 +190,12 @@ export function ShellFileOverflowMenu({
   const labels = useFileMenuLabels();
   return (
     <DropdownMenu compactMode="sheet">
-      <DropdownMenuTrigger testID={testID} accessibilityRole="button">
+      <DropdownMenuTrigger
+        testID={testID}
+        accessibilityRole="button"
+        hitSlop={12}
+        accessibilityLabel={title}
+      >
         {trigger}
       </DropdownMenuTrigger>
       <DropdownMenuContent sheetTitle={title} width={280}>
@@ -205,18 +211,32 @@ export function ShellFavoriteRowMenu({
   title,
   onPress,
   testID,
+  accessibilityLabel,
   children,
 }: {
   actions: ShellFileMenuActions;
   title: string;
   onPress: () => void;
   testID: string;
+  /** C12: row-level label (标题+状态) — the trigger IS the row. */
+  accessibilityLabel?: string;
   children: ReactNode;
 }): ReactElement {
   const labels = useFileMenuLabels();
+  // C12: the official engine fires no haptics itself; long-press-open gets the
+  // same selection tick the chat rows use.
+  const handleLongPress = useCallback(() => {
+    void Haptics.selectionAsync().catch(() => {});
+  }, []);
   return (
     <ContextMenu>
-      <ContextMenuTrigger onPress={onPress} testID={testID}>
+      <ContextMenuTrigger
+        onPress={onPress}
+        onLongPress={handleLongPress}
+        accessibilityRole="button"
+        accessibilityLabel={accessibilityLabel}
+        testID={testID}
+      >
         {children}
       </ContextMenuTrigger>
       <ContextMenuContent sheetTitle={title} width={280}>

@@ -27,9 +27,12 @@
     "submit": "导入（{{count}}）",
     "importing": "正在导入 {{current}}/{{total}}…",
     "toast": {
-      "imported": "已导入 {{count}} 条会话",
-      "already": "{{count}} 条此前已导入",
-      "failed": "{{count}} 条导入失败"
+      "imported_one": "已导入 {{count}} 条会话",
+      "imported_other": "已导入 {{count}} 条会话",
+      "already_one": "{{count}} 条此前已导入",
+      "already_other": "{{count}} 条此前已导入",
+      "failed_one": "{{count}} 条导入失败",
+      "failed_other": "{{count}} 条导入失败"
     }
   },
   "chats": {
@@ -47,6 +50,10 @@
     },
     "retry": "重试",
     "retrying": "正在重连 {{label}}…",
+    "retryingAll": "正在重连 {{count}} 台主机…",
+    "retryAll": "重试连接",
+    "offlineTitle": "所有主机已离线",
+    "offlineHint": "重新连接后即可在此查看各主机的会话。",
     "section": {
       "pinned": "置顶",
       "needsAttention": "需要处理",
@@ -59,11 +66,13 @@
       "failed": "出错"
     },
     "untitled": "未命名会话",
+    "a11yUnread": "未读",
     "newMenu": "新建",
     "newChat": "新建对话",
     "importChat": "导入会话",
     "searchPlaceholder": "搜索对话（标题/别名/项目/动态）",
     "searchEmpty": "没有匹配的对话",
+    "searchEmptyAction": "清除搜索",
     "emptyTitle": "还没有对话",
     "emptyAgentsHint": "点「新建对话」，让 agent 开始干活。",
     "emptyHostsHint": "还没有可连接的主机，先连接一台 daemon。",
@@ -74,6 +83,7 @@
       "archivedCount": "已归档 {{count}}"
     },
     "emptyArchived": "没有已归档的对话。",
+    "emptyArchivedAction": "切回进行中",
     "menu": {
       "pin": "置顶",
       "unpin": "取消置顶",
@@ -112,9 +122,12 @@
     "searchPlaceholder": "搜索文件名",
     "searchInputPlaceholder": "搜索文件名（仅已浏览目录）",
     "searchEmptyTitle": "没有匹配的文件",
+    "searchEmptyAction": "清除搜索",
     "searchEmptyHint": "文件搜索目前只覆盖本次运行中浏览过的项目目录（上游暂无文件名/内容搜索 RPC）。",
     "favoritesTitle": "收藏夹",
     "favoritesEmpty": "还没有收藏——浏览文件时点星标，或点上方 ⚡ 新建快捷指令。",
+    "a11yActiveAgents_one": "{{count}} 个活跃对话",
+    "a11yActiveAgents_other": "{{count}} 个活跃对话",
     "retry": "重试",
     "hostEmpty": "暂无项目，点下方「新建项目」添加。",
     "hostEmptyOffline": "主机离线，重连后显示项目。",
@@ -234,6 +247,7 @@
     "notificationsHint": "agent 等待批准或出错时发系统通知，点击直达会话。锁屏后台推送依赖官方推送通道。",
     "clearData": "清除本地数据",
     "clearDataHint": "只删壳自己的数据（置顶、归档、已读、收藏、快捷指令、设置），官方数据不受影响。",
+    "clearConfirmTitle": "清除本地数据？",
     "clearConfirmMessage": "将删除壳的全部本地数据，无法恢复。主机连接与官方设置保留；重启应用后回到官方首页。",
     "clearConfirm": "清除",
     "clearCancel": "取消",

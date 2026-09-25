@@ -20,6 +20,9 @@ const ThemedTextInput = withUnistyles(EditingTextInput, (theme) => ({
   selectionColor: theme.colors.foreground,
 }));
 
+// C12: 44dp cancel target (module const — react-perf forbids per-render objects).
+const CANCEL_HIT_SLOP = { top: 10, bottom: 10, left: 6, right: 6 } as const;
+
 export interface SearchModeBarProps {
   onQueryChange: (query: string) => void;
   onCancel: () => void;
@@ -64,6 +67,7 @@ export function SearchModeBar({
       <Pressable
         onPress={handleCancel}
         accessibilityRole="button"
+        hitSlop={CANCEL_HIT_SLOP}
         testID={cancelTestID}
         style={cancelStyle}
       >

@@ -15,8 +15,9 @@ import { router, type Href } from "expo-router";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useTranslation } from "react-i18next";
 import { StyleSheet } from "react-native-unistyles";
-import { ChevronLeft, Star, StarOff, X } from "lucide-react-native";
+import { ChevronLeft, FileQuestion, Star, StarOff, X } from "lucide-react-native";
 import { FileExplorerPane } from "@/components/file-explorer-pane";
+import { LoadingSpinner } from "@/components/ui/loading-spinner";
 import { useHosts } from "@/runtime/host-runtime";
 import {
   useSessionStore,
@@ -73,7 +74,7 @@ function SelectionFavoriteChip({
       <Pressable
         onPress={toggleFavorite}
         accessibilityRole="button"
-        hitSlop={6}
+        hitSlop={11}
         style={styles.chipButton}
         testID="shell-files-selection-favorite"
       >
@@ -89,7 +90,7 @@ function SelectionFavoriteChip({
       <Pressable
         onPress={onClear}
         accessibilityRole="button"
-        hitSlop={6}
+        hitSlop={11}
         style={styles.chipButton}
         testID="shell-files-selection-clear"
       >
@@ -161,6 +162,12 @@ export function FilesScreenBody({
   const hosts = useHosts();
   const workspace = useSessionStore((state) =>
     serverId && workspaceId ? state.sessions[serverId]?.workspaces.get(workspaceId) : undefined,
+  );
+  // C12: entering files straight after connect (deep link / capsule) can beat the
+  // workspace-descriptor wave — show the pane's loading idiom until the host's
+  // workspace set has hydrated, so a cold first frame never misreports 「找不到」.
+  const workspacesHydrated = useSessionStore((state) =>
+    serverId ? (state.sessions[serverId]?.hasHydratedWorkspaces ?? false) : false,
   );
 
   const hostLabel = hosts.find((host) => host.serverId === serverId)?.label ?? serverId;
@@ -236,20 +243,63 @@ export function FilesScreenBody({
         />
       ) : null}
       <View style={styles.body}>
-        {workspace && serverId ? (
-          <FileExplorerPane
-            serverId={serverId}
-            workspaceId={workspaceId}
-            workspaceRoot={rootPath}
-            onOpenFile={handleOpenFile}
-            onAddToChat={handleAddToChat}
-          />
-        ) : (
-          <Text style={styles.missing} testID="shell-files-missing">
-            {t("files.notFound")}
-          </Text>
-        )}
+        <FilesPaneState
+          serverId={serverId}
+          workspaceId={workspaceId}
+          rootPath={rootPath}
+          hasWorkspace={workspace !== undefined}
+          workspacesHydrated={workspacesHydrated}
+          notFoundLabel={t("files.notFound")}
+          onOpenFile={handleOpenFile}
+          onAddToChat={handleAddToChat}
+        />
       </View>
+    </View>
+  );
+}
+
+// Three-state body (C12): descriptor synced → official pane; workspace set still
+// hydrating → loading; hydrated but the workspace is gone → icon + notFound.
+// A component with early returns instead of a nested ternary (lint rule).
+function FilesPaneState({
+  serverId,
+  workspaceId,
+  rootPath,
+  hasWorkspace,
+  workspacesHydrated,
+  notFoundLabel,
+  onOpenFile,
+  onAddToChat,
+}: {
+  serverId: string;
+  workspaceId: string;
+  rootPath: string;
+  hasWorkspace: boolean;
+  workspacesHydrated: boolean;
+  notFoundLabel: string;
+  onOpenFile: (path: string) => void;
+  onAddToChat: (path: string) => void;
+}) {
+  if (hasWorkspace && serverId)
+    return (
+      <FileExplorerPane
+        serverId={serverId}
+        workspaceId={workspaceId}
+        workspaceRoot={rootPath}
+        onOpenFile={onOpenFile}
+        onAddToChat={onAddToChat}
+      />
+    );
+  if (serverId && !workspacesHydrated)
+    return (
+      <View style={styles.loading} testID="shell-files-loading">
+        <LoadingSpinner size="small" color={styles.chipIcon.color} />
+      </View>
+    );
+  return (
+    <View style={styles.missingWrap} testID="shell-files-missing">
+      <FileQuestion size={28} color={styles.chipIcon.color} />
+      <Text style={styles.missing}>{notFoundLabel}</Text>
     </View>
   );
 }
@@ -330,11 +380,20 @@ const styles = StyleSheet.create((theme) => ({
   body: {
     flex: 1,
   },
+  loading: {
+    flex: 1,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  missingWrap: {
+    alignItems: "center",
+    gap: theme.spacing[2],
+    paddingTop: theme.spacing[8] * 2,
+    paddingHorizontal: theme.spacing[6],
+  },
   missing: {
     fontSize: theme.fontSize.sm,
     color: theme.colors.foregroundMuted,
     textAlign: "center",
-    paddingTop: theme.spacing[8],
-    paddingHorizontal: theme.spacing[4],
   },
 }));

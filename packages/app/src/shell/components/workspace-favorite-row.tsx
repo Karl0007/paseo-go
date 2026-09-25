@@ -8,10 +8,12 @@ import { useCallback, useMemo } from "react";
 import { Text, View } from "react-native";
 import { router, type Href } from "expo-router";
 import { StyleSheet } from "react-native-unistyles";
+import { useTranslation } from "react-i18next";
 import { Star } from "lucide-react-native";
 import { useFileDownload } from "@/hooks/use-file-download";
 import { useSessionStore } from "@/stores/session-store";
 import { shellPreviewHref } from "@/shell/routes";
+import { SHELL_I18N_NAMESPACE } from "@/shell/i18n";
 import { formatShellFileSize } from "@/shell/files/format-size";
 import {
   useShellCopyPath,
@@ -33,6 +35,7 @@ export function WorkspaceFavoriteRow({
   hostLabel: string;
   dimmed: boolean;
 }) {
+  const { t } = useTranslation(SHELL_I18N_NAMESPACE);
   const workspace = useSessionStore((state) =>
     state.sessions[favorite.hostId]?.workspaces.get(favorite.workspaceId),
   );
@@ -91,12 +94,17 @@ export function WorkspaceFavoriteRow({
     [toggleFavorite, copyPath, handleShare, target],
   );
 
+  // C12 无障碍: the trigger is the whole row — announce 名称 · 项目 · 状态.
+  const rowLabel = dimmed
+    ? `${favorite.name} · ${subtitle} · ${t("chats.hostStatus.offline")}`
+    : `${favorite.name} · ${subtitle}`;
   return (
     <ShellFavoriteRowMenu
       title={favorite.name}
       testID={`shell-favorite-row-${favorite.hostId}-${favorite.path}`}
       onPress={handleOpen}
       actions={menuActions}
+      accessibilityLabel={rowLabel}
     >
       <View style={styles.row}>
         <Star size={16} color={styles.starColor.color} fill={styles.starColor.color} />

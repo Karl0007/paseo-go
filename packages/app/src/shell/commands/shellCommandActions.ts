@@ -5,7 +5,6 @@
 // new agent id to the C4 push-navigation helper. `remove` is destructive-gated
 // behind the official confirm dialog like the chat menu's 删除. Every outcome
 // reports through notify/reportError; failures never surface as silent no-ops.
-import { Alert } from "react-native";
 import { useCallback, useMemo } from "react";
 import { useTranslation } from "react-i18next";
 import * as Haptics from "expo-haptics";
@@ -40,6 +39,8 @@ export interface ShellCommandActionDeps {
   navigateToAgent: (input: { serverId: string; agentId: string; workspaceId: string }) => void;
   confirm?: (input: ConfirmDialogInput) => Promise<boolean>;
   haptic?: () => void;
+  /** C12: 运行成功专属反馈（默认 Success 通知触觉，注入保持可测）。 */
+  successHaptic?: () => void;
 }
 
 export interface ShellCommandActions {
@@ -67,6 +68,11 @@ export function createShellCommandActions(deps: ShellCommandActionDeps): ShellCo
     ((): void => {
       void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => {});
     });
+  const successHaptic =
+    deps.successHaptic ??
+    ((): void => {
+      void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => {});
+    });
 
   return {
     run: async (command, workspaceId) => {
@@ -93,6 +99,8 @@ export function createShellCommandActions(deps: ShellCommandActionDeps): ShellCo
       }
       try {
         const agent = await client.createAgent(plan.request);
+        // C12: 发起 tick 之外补“成功落地”反馈——会话即将切换，触觉是唯一的即时确认。
+        successHaptic();
         deps.navigateToAgent({
           serverId: command.hostId,
           agentId: agent.id,
@@ -137,9 +145,10 @@ export function useShellCommandActions(): ShellCommandActions {
   const toast = useToast();
   const { preferences } = useFormPreferences();
   const notify = useCallback((message: string) => toast.show(message), [toast]);
+  // C12: 错误统一官方 toast.error（与 shellAgentActions 同轨）。
   const reportError = useCallback(
-    (title: string, message: string) => Alert.alert(title, message),
-    [],
+    (title: string, message: string) => toast.error(`${title}: ${message}`),
+    [toast],
   );
   const translate = t as ShellActionTranslate;
   const preferredProvider = preferences.provider ?? null;

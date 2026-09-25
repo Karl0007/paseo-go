@@ -7,7 +7,6 @@
 // delete gated behind the official native confirm dialog. Every action fires a
 // selection haptic and reports through the injected notify/reportError callbacks,
 // so the layer stays React-free and unit-testable against a mock client.
-import { Alert } from "react-native";
 import { useCallback, useMemo } from "react";
 import { useTranslation } from "react-i18next";
 import * as Haptics from "expo-haptics";
@@ -36,7 +35,7 @@ export interface ShellAgentActionDeps {
   t: ShellActionTranslate;
   /** Success feedback channel (the screen wires the app toast host). */
   notify: (message: string) => void;
-  /** Failure feedback channel (the screen wires the native Alert). */
+  /** Failure feedback channel (the screen wires the official error toast, C12). */
   reportError: (title: string, message: string) => void;
   /** Defaults to the live host-runtime client for the target's server. */
   getClient?: (serverId: string) => ShellAgentClientPort | null;
@@ -219,9 +218,11 @@ export function useShellAgentActions(): ShellAgentActions {
   const { t } = useTranslation(SHELL_I18N_NAMESPACE);
   const toast = useToast();
   const notify = useCallback((message: string) => toast.show(message), [toast]);
+  // C12: 错误反馈统一走官方 toast.error（成功/信息一直是 toast.show）——
+  // 同一操作层不再一半 Alert 一半 toast。
   const reportError = useCallback(
-    (title: string, message: string) => Alert.alert(title, message),
-    [],
+    (title: string, message: string) => toast.error(`${title}: ${message}`),
+    [toast],
   );
   const translate = t as ShellActionTranslate;
   return useMemo(

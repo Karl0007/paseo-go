@@ -12,7 +12,7 @@ import { router, type Href } from "expo-router";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useTranslation } from "react-i18next";
 import { StyleSheet } from "react-native-unistyles";
-import { FolderTree, Plus, Search, Star, Zap, type LucideIcon } from "lucide-react-native";
+import { FolderTree, Plus, Search, SearchX, Star, Zap, type LucideIcon } from "lucide-react-native";
 import { SidebarAgentListSkeleton } from "@/components/sidebar-agent-list-skeleton";
 import { Button } from "@/components/ui/button";
 import { useToast } from "@/contexts/toast-context";
@@ -104,14 +104,29 @@ function WorkspaceEmptyState({ onConnectHost }: { onConnectHost: () => void }) {
   );
 }
 
-// 文件搜索空态 (C9): with a live query, a quiet miss line + the honest scope note —
+// 文件搜索空态 (C9 + C12): icon + miss line + the honest scope note + 清除搜索;
 // the client-side filter only sees directories this app run has browsed (no
 // filename-search RPC upstream). With an empty query just the scope note leads.
-function FileSearchEmptyState({ searching }: { searching: boolean }) {
+function FileSearchEmptyState({ searching, onClear }: { searching: boolean; onClear: () => void }) {
   const { t } = useTranslation(SHELL_I18N_NAMESPACE);
   return (
     <View style={styles.searchEmpty} testID="shell-workspace-search-empty">
-      {searching ? <Text style={styles.emptyTitle}>{t("workspace.searchEmptyTitle")}</Text> : null}
+      {searching ? (
+        <>
+          <View style={styles.emptyIconWrap}>
+            <SearchX size={28} color={styles.emptyIcon.color} />
+          </View>
+          <Text style={styles.emptyTitle}>{t("workspace.searchEmptyTitle")}</Text>
+          <Button
+            variant="secondary"
+            size="sm"
+            onPress={onClear}
+            testID="shell-workspace-search-clear"
+          >
+            {t("workspace.searchEmptyAction")}
+          </Button>
+        </>
+      ) : null}
       <Text style={styles.emptyHint}>{t("workspace.searchEmptyHint")}</Text>
     </View>
   );
@@ -451,13 +466,15 @@ export default function ShellWorkspaceScreen() {
     [refreshing, handleRefresh],
   );
 
+  // C12: mask until BOTH the project list and the first agent-directory wave land —
+  // otherwise a fast projects response flashes 「暂无项目」 under still-arriving agents.
   const showSkeleton =
-    hostRegistryStatus === "loading" || (projectsLoading && isInitialLoad && hosts.length > 0);
+    hostRegistryStatus === "loading" || (hosts.length > 0 && (projectsLoading || isInitialLoad));
   const hasHosts = hosts.length > 0;
   // Stable element identity for FlatList (the chats tab's listEmpty idiom).
   const searchListEmpty = useMemo(
-    () => <FileSearchEmptyState searching={searching} />,
-    [searching],
+    () => <FileSearchEmptyState searching={searching} onClear={handleSearchClose} />,
+    [searching, handleSearchClose],
   );
 
   let body: ReactNode;
@@ -557,7 +574,7 @@ const styles = StyleSheet.create((theme) => ({
     flexDirection: "row",
     alignItems: "center",
     gap: theme.spacing[2],
-    height: 38,
+    height: 44,
     paddingHorizontal: theme.spacing[3],
     borderRadius: theme.borderRadius.lg,
     backgroundColor: theme.colors.surface1,

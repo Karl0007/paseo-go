@@ -9,6 +9,9 @@ import { RefreshCw, Settings } from "lucide-react-native";
 import { HostStatusDot } from "@/components/host-status-dot";
 import { SHELL_I18N_NAMESPACE } from "@/shell/i18n";
 
+// C12: 44dp targets for the header's small glyphs (module consts, react-perf).
+const RETRY_HIT_SLOP = { top: 14, bottom: 14, left: 8, right: 8 } as const;
+
 export function WorkspaceHostHeader({
   serverId,
   label,
@@ -38,7 +41,7 @@ export function WorkspaceHostHeader({
         <Pressable
           onPress={handleRetry}
           accessibilityRole="button"
-          hitSlop={8}
+          hitSlop={RETRY_HIT_SLOP}
           style={styles.retry}
           testID={`shell-host-retry-${serverId}`}
         >
@@ -49,7 +52,7 @@ export function WorkspaceHostHeader({
       <Pressable
         onPress={handleSettings}
         accessibilityRole="button"
-        hitSlop={8}
+        hitSlop={11}
         style={styles.gear}
         testID={`shell-host-settings-${serverId}`}
       >

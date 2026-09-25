@@ -32,6 +32,7 @@ import { SHELL_I18N_NAMESPACE } from "@/shell/i18n";
 import { SHELL } from "@/shell/routes";
 import { previewKind, type ShellPreviewPlan } from "@/shell/files/preview-kind";
 import { formatShellFileSize } from "@/shell/files/format-size";
+import { formatMessageTimestamp } from "@/utils/time";
 import { useShellFileActions, type ShellFileTarget } from "@/shell/files/use-shell-file-actions";
 import { ShellFileOverflowMenu } from "@/shell/components/file-action-menu";
 
@@ -149,7 +150,7 @@ function PreviewBody({
       },
       {
         label: t("preview.card.modified"),
-        value: stat?.mtime ? new Date(stat.mtime).toLocaleString() : "—",
+        value: stat?.mtime ? formatMessageTimestamp(new Date(stat.mtime)) : "—",
       },
       { label: t("preview.card.type"), value: t(`preview.type.${plan.kind}`) },
     );

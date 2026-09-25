@@ -6,6 +6,10 @@ import { useTranslation } from "react-i18next";
 import { RefreshCw } from "lucide-react-native";
 import { SHELL_I18N_NAMESPACE } from "@/shell/i18n";
 
+// C12: 44dp touch target for the tiny retry glyph (module const — no per-render
+// object props, react-perf).
+const RETRY_HIT_SLOP = { top: 14, bottom: 14, left: 8, right: 8 } as const;
+
 export function ChatSectionHeader({
   title,
   onRetry,
@@ -25,7 +29,7 @@ export function ChatSectionHeader({
         <Pressable
           onPress={onRetry}
           accessibilityRole="button"
-          hitSlop={8}
+          hitSlop={RETRY_HIT_SLOP}
           style={styles.retry}
           testID={testID ? `${testID}-retry` : undefined}
         >
