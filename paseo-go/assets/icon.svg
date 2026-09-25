@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
+  <!-- Paseo Go glyph: a "G" that takes off — the stroke ends in a paper-plane dart.
+       Official color system: white glyph on Paseo green (#20744A) / near-black. -->
+  <g fill="none" stroke="#ffffff" stroke-width="52" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M 353.3 155.3 A 140 140 0 1 0 396 256 L 312 256" />
+  </g>
+  <polygon points="397.9,112.2 384.6,187.7 346.1,162.2 322,123" fill="#ffffff" />
+</svg>

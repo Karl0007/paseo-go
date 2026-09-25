@@ -1,5 +1,5 @@
 import React from "react";
-import { Redirect, usePathname } from "expo-router";
+import { Redirect, usePathname, type Href } from "expo-router";
 import { StartupSplashScreen } from "@/screens/startup-splash-screen";
 import { useEarliestOnlineHostServerId, useHostRuntimeBootstrapState } from "@/app/_layout";
 import {
@@ -13,6 +13,7 @@ import {
   useLastWorkspaceSelection,
 } from "@/stores/navigation-active-workspace-store";
 import { shouldUseDesktopDaemon } from "@/desktop/daemon/desktop-daemon";
+import { usePaseoGoShellActive } from "@/shell/stores/settings";
 
 const isDesktop = shouldUseDesktopDaemon();
 
@@ -31,6 +32,9 @@ export default function Index() {
     workspaceSelectionServerId,
     workspaceSelectionWorkspaceId,
   );
+
+  const paseoGoShellActive = usePaseoGoShellActive();
+  if (paseoGoShellActive) return <Redirect href={"/(shell)/chats" as Href} />;
 
   const startupRoute = resolveStartupRoute({
     route: { kind: "index", pathname },

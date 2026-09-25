@@ -1,0 +1,33 @@
+{
+  "tabs": {
+    "chats": "对话",
+    "workspace": "工作区",
+    "me": "我的"
+  },
+  "chats": {
+    "title": "对话",
+    "hostsHeader": "主机 · A1 探针",
+    "agentsHeader": "会话 · A2/A4 探针",
+    "noHosts": "尚未配置任何主机。",
+    "noAgents": "已连接主机上暂无会话。",
+    "hostLine": "{{label}} · {{status}}",
+    "agentStatusLine": "status={{status}} · turn={{turn}} · attention={{attention}} · pending={{pending}}",
+    "openAgentHint": "点按会话可 push 官方对话路由（A2）。"
+  },
+  "workspace": {
+    "title": "工作区",
+    "probeHeader": "文件浏览器 · A3 探针",
+    "noProject": "在线主机上暂无项目。",
+    "projectLine": "{{project}} · {{host}}",
+    "openedLine": "onOpenFile 已触发：{{path}} —— 回调覆盖为 Stack push 可行。"
+  },
+  "me": {
+    "title": "我的",
+    "shellModeHeader": "壳设置",
+    "shellMode": "壳模式",
+    "shellModeHint": "开启后进入 Paseo Go 三 tab 而非官方首页，重新加载后生效。环境默认值：{{env}}。",
+    "aboutHeader": "关于",
+    "shellVersion": "Paseo Go {{version}}",
+    "upstream": "上游 paseo @ {{ref}}"
+  }
+}

@@ -94,14 +94,19 @@ const variants = {
 
 const variant = variants[appVariant] ?? variants.production;
 const nativeReleaseVersion = getNativeReleaseVersion(pkg.version);
+// Paseo Go seam (paseo-go): PASEO_GO=1 → independent branding, coexists with official.
+const isPaseoGo = process.env.PASEO_GO === "1";
+const goName = appVariant === "development" ? "Paseo Go Debug" : "Paseo Go";
+const goPkg = appVariant === "development" ? "app.paseo.shell.debug" : "app.paseo.shell";
+const goFg = "../../paseo-go/assets/android-icon-foreground.png";
 
 export default {
   expo: {
-    name: variant.name,
-    slug: "voice-mobile",
+    name: isPaseoGo ? goName : variant.name,
+    slug: isPaseoGo ? "paseo-go" : "voice-mobile",
     version: nativeReleaseVersion.appVersion,
     orientation: "portrait",
-    icon: "./assets/images/icon.png",
+    icon: isPaseoGo ? "../../paseo-go/assets/icon.png" : "./assets/images/icon.png",
     scheme: "paseo",
     userInterfaceStyle: "automatic",
     newArchEnabled: true,
@@ -119,8 +124,9 @@ export default {
     },
     android: {
       adaptiveIcon: {
-        backgroundColor: "#000000",
-        foregroundImage: "./assets/images/android-icon-foreground.png",
+        backgroundColor: isPaseoGo ? "#20744A" : "#000000",
+        foregroundImage: isPaseoGo ? goFg : "./assets/images/android-icon-foreground.png",
+        ...(isPaseoGo ? { monochromeImage: goFg } : {}),
       },
       edgeToEdgeEnabled: true,
       predictiveBackGestureEnabled: false,
@@ -128,7 +134,7 @@ export default {
       // Allow HTTP connections for local network hosts (required for release builds)
       usesCleartextTraffic: true,
       permissions: buildProfile.androidPermissions,
-      package: variant.packageId,
+      package: isPaseoGo ? goPkg : variant.packageId,
       versionCode: nativeReleaseVersion.androidVersionCode,
       ...(variant.googleServicesFile ? { googleServicesFile: variant.googleServicesFile } : {}),
     },

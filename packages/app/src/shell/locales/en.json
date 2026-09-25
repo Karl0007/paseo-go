@@ -1,0 +1,33 @@
+{
+  "tabs": {
+    "chats": "Chats",
+    "workspace": "Workspace",
+    "me": "Me"
+  },
+  "chats": {
+    "title": "Chats",
+    "hostsHeader": "Hosts · A1 probe",
+    "agentsHeader": "Agents · A2/A4 probe",
+    "noHosts": "No hosts configured yet.",
+    "noAgents": "No agents on connected hosts.",
+    "hostLine": "{{label}} · {{status}}",
+    "agentStatusLine": "status={{status}} · turn={{turn}} · attention={{attention}} · pending={{pending}}",
+    "openAgentHint": "Tap an agent to push the official conversation route (A2)."
+  },
+  "workspace": {
+    "title": "Workspace",
+    "probeHeader": "File explorer · A3 probe",
+    "noProject": "No project on an online host yet.",
+    "projectLine": "{{project}} · {{host}}",
+    "openedLine": "onOpenFile fired: {{path}} — Stack push override works."
+  },
+  "me": {
+    "title": "Me",
+    "shellModeHeader": "Shell settings",
+    "shellMode": "Shell mode",
+    "shellModeHint": "Opens the Paseo Go tabs instead of the official home. Takes effect after reload. Env default: {{env}}.",
+    "aboutHeader": "About",
+    "shellVersion": "Paseo Go {{version}}",
+    "upstream": "upstream paseo @ {{ref}}"
+  }
+}
