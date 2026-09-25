@@ -32,3 +32,7 @@ DESIGN.md §2（两个缝隙、新代码去处）、§3（IA）、§10（A1-A4 s
 4. 读图：≥4 张（官方模式首页、壳模式三 tab、启动器双 app 共存、agent 路由 push 成功页）
 
 - 恰好一次 commit；报告含缝隙 diff 原文
+
+## 收卡勘误（C8，2026-09-25）
+
+缝隙1 的 href 由 `/(shell)/chats` 修正为 `/(shell)`（1 行内），配合壳分发器 `(shell)/index.tsx`（lastFocusedTab ?? defaultTab）——原硬编码绕过 initialRouteName 致默认启动 tab 失效。缝隙文件数与行数预算不变（仍 ≤5 行）。经编排者批准，详见 C8 报告 seam_errata。
