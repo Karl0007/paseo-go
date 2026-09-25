@@ -1,6 +1,7 @@
 // Paseo Go shell tabs (DESIGN.md §3): 对话 / 工作区 / 我的. Screens are C1 skeleton
 // probes; later cards fill them. All chrome uses official Unistyles tokens (§2.5);
 // theme-fed non-style props follow the ThemedStack withUnistyles pattern.
+import { ShellSessionHeaderOverlay } from "@/shell/components/shell-session-header";
 import { Tabs, useNavigation } from "expo-router";
 import { FolderTree, MessageCircle, User } from "lucide-react-native";
 import { useEffect, useMemo } from "react";
@@ -122,12 +123,17 @@ export default function ShellTabsLayout() {
   }, [navigation]);
 
   return (
-    <ThemedShellTabs
-      initialRouteName={lastFocusedTab ?? defaultTab}
-      chats={t("tabs.chats")}
-      workspace={t("tabs.workspace")}
-      me={t("tabs.me")}
-    />
+    <>
+      {/* C14: floats over the official session screen via the root floating-panel
+          portal host; renders null unless the C14 visibility predicate holds. */}
+      <ShellSessionHeaderOverlay />
+      <ThemedShellTabs
+        initialRouteName={lastFocusedTab ?? defaultTab}
+        chats={t("tabs.chats")}
+        workspace={t("tabs.workspace")}
+        me={t("tabs.me")}
+      />
+    </>
   );
 }
 

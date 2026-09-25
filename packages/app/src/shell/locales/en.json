@@ -246,5 +246,10 @@
     "shellVersion": "Paseo Go {{version}}",
     "upstream": "upstream paseo @ {{ref}}",
     "license": "License"
+  },
+  "header": {
+    "back": "Back",
+    "menu": "Session actions",
+    "menuFiles": "View project files"
   }
 }

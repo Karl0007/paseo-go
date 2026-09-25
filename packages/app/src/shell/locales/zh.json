@@ -242,5 +242,10 @@
     "shellVersion": "Paseo Go {{version}}",
     "upstream": "上游 paseo @ {{ref}}",
     "license": "许可证"
+  },
+  "header": {
+    "back": "返回",
+    "menu": "会话操作",
+    "menuFiles": "查看项目文件"
   }
 }

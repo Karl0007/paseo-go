@@ -80,7 +80,8 @@ function menuLeading(id: ChatMenuActionId): ReactElement {
   }
 }
 
-function ChatRenamePage({
+// Shared with the C14 session-header menu: same target, same alias semantics.
+export function ChatRenamePage({
   target,
   alias,
   actions,
