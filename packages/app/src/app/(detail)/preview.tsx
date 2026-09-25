@@ -32,6 +32,7 @@ import { SHELL_I18N_NAMESPACE } from "@/shell/i18n";
 import { SHELL } from "@/shell/routes";
 import { previewKind, type ShellPreviewPlan } from "@/shell/files/preview-kind";
 import { resolvePreviewRoot } from "@/shell/files/preview-root";
+import { usePaseoGoFavoritesStore } from "@/shell/stores/favorites";
 import { formatShellFileSize } from "@/shell/files/format-size";
 import { formatMessageTimestamp } from "@/utils/time";
 import { useShellFileActions, type ShellFileTarget } from "@/shell/files/use-shell-file-actions";
@@ -228,23 +229,39 @@ export default function ShellPreviewScreen() {
     serverId ? (state.sessions[serverId]?.client ?? null) : null,
   );
   // F6: the descriptor wins outright — a deep link must not steer a resolved
-  // workspace into a forged root; the param is the offline-favorites fallback only.
-  const workspaceRoot = resolvePreviewRoot({
-    paramRoot: params.workspaceRoot,
-    descriptorRoot: workspace?.workspaceDirectory || workspace?.projectRootPath,
-  });
+  // workspace into a forged root. F6b: with no descriptor the param root+path
+  // is trusted only where it matches the user's own favorites snapshot (same
+  // host, equal root, path at/under the entry); anything else is denied —
+  // empty root, notFound body, no daemon request anywhere below.
+  const favorites = usePaseoGoFavoritesStore((state) => state.items);
+  const access = useMemo(
+    () =>
+      resolvePreviewRoot({
+        hostId: serverId,
+        paramRoot: params.workspaceRoot,
+        paramPath: filePath,
+        descriptorRoot: workspace?.workspaceDirectory || workspace?.projectRootPath,
+        favorites,
+      }),
+    [serverId, params.workspaceRoot, filePath, workspace, favorites],
+  );
+  const denied = access.kind === "denied";
+  const workspaceRoot = denied ? "" : access.root;
+  // The validated path the daemon may be asked about; filePath stays the raw
+  // param for the header only.
+  const scopedPath = denied ? "" : access.path;
 
   // Size/mtime via the official listDirectory RPC on the parent directory — the
   // same call the explorer rows use; never a full read just to stat.
   const [stat, setStat] = useState<FileStat | null>(null);
   useEffect(() => {
     setStat(null);
-    if (!client || !workspaceRoot || !filePath) return undefined;
+    if (!client || !workspaceRoot || !scopedPath) return undefined;
     let disposed = false;
     void (async () => {
       try {
-        const directory = await client.listDirectory(workspaceRoot, parentExplorerPath(filePath));
-        const entry = directory.entries.find((candidate) => candidate.path === filePath);
+        const directory = await client.listDirectory(workspaceRoot, parentExplorerPath(scopedPath));
+        const entry = directory.entries.find((candidate) => candidate.path === scopedPath);
         if (!disposed && entry) setStat({ size: entry.size, mtime: entry.modifiedAt });
       } catch {
         // No stat: the extension-only plan still renders; cards show "—".
@@ -253,27 +270,27 @@ export default function ShellPreviewScreen() {
     return () => {
       disposed = true;
     };
-  }, [client, workspaceRoot, filePath]);
+  }, [client, workspaceRoot, scopedPath]);
 
-  const plan = previewKind(filePath, stat?.size ?? 0);
+  const plan = previewKind(scopedPath, stat?.size ?? 0);
 
   const target = useMemo<ShellFileTarget>(
     () => ({
       hostId: serverId,
       workspaceId,
       workspaceRoot,
-      path: filePath,
+      path: scopedPath,
       name: fileName,
       size: stat?.size,
       mtime: stat?.mtime,
     }),
-    [serverId, workspaceId, workspaceRoot, filePath, fileName, stat],
+    [serverId, workspaceId, workspaceRoot, scopedPath, fileName, stat],
   );
   const fileActions = useShellFileActions(target);
   const downloadFile = useFileDownload({ serverId, workspaceId, workspaceRoot });
   const runDownload = useCallback(() => {
-    downloadFile({ fileName, path: filePath });
-  }, [downloadFile, fileName, filePath]);
+    downloadFile({ fileName, path: scopedPath });
+  }, [downloadFile, fileName, scopedPath]);
 
   const handleBack = useCallback(() => {
     if (router.canGoBack()) router.back();
@@ -319,7 +336,7 @@ export default function ShellPreviewScreen() {
         plan={plan}
         serverId={serverId}
         workspaceRoot={workspaceRoot}
-        filePath={filePath}
+        filePath={scopedPath}
         fileName={fileName}
         stat={stat}
         onDownload={runDownload}
@@ -347,25 +364,29 @@ export default function ShellPreviewScreen() {
             {filePath}
           </Text>
         </View>
-        <Pressable
-          onPress={fileActions.toggleFavorite}
-          accessibilityRole="button"
-          hitSlop={8}
-          style={styles.action}
-          testID="shell-preview-favorite"
-        >
-          <Star
-            size={20}
-            color={fileActions.isFavorite ? styles.favoriteActive.color : styles.actionIcon.color}
-            fill={fileActions.isFavorite ? styles.favoriteActive.color : "transparent"}
+        {!denied && (
+          <Pressable
+            onPress={fileActions.toggleFavorite}
+            accessibilityRole="button"
+            hitSlop={8}
+            style={styles.action}
+            testID="shell-preview-favorite"
+          >
+            <Star
+              size={20}
+              color={fileActions.isFavorite ? styles.favoriteActive.color : styles.actionIcon.color}
+              fill={fileActions.isFavorite ? styles.favoriteActive.color : "transparent"}
+            />
+          </Pressable>
+        )}
+        {!denied && (
+          <ShellFileOverflowMenu
+            actions={menuActions}
+            title={fileName}
+            testID="shell-preview-menu"
+            trigger={overflowTrigger}
           />
-        </Pressable>
-        <ShellFileOverflowMenu
-          actions={menuActions}
-          title={fileName}
-          testID="shell-preview-menu"
-          trigger={overflowTrigger}
-        />
+        )}
       </View>
       <View style={styles.body}>{body}</View>
     </View>
