@@ -84,7 +84,7 @@
     "searchPlaceholder": "搜索文件（即将上线）",
     "searchSoon": "搜索即将上线",
     "favoritesTitle": "收藏夹",
-    "favoritesEmpty": "还没有收藏。浏览项目文件时长按文件即可收藏。",
+    "favoritesEmpty": "还没有收藏——浏览项目文件时点开文件，再点星标即可收藏。",
     "retry": "重试",
     "hostEmpty": "暂无项目，点下方「新建项目」添加。",
     "hostEmptyOffline": "主机离线，重连后显示项目。",
@@ -94,10 +94,44 @@
     "emptyHint": "连接一台 Paseo daemon，项目与文件会出现在这里。"
   },
   "files": {
-    "rootPathLabel": "工作区根目录",
-    "pathUnknown": "（未知路径）",
-    "placeholderHint": "文件浏览即将上线（C6）。",
-    "notFound": "未找到该工作区，可能已归档或主机尚未同步。"
+    "notFound": "找不到该工作区——项目可能已归档或主机尚未同步。",
+    "menu": {
+      "favorite": "收藏",
+      "unfavorite": "取消收藏",
+      "download": "下载",
+      "share": "分享",
+      "copyPath": "复制路径",
+      "addToChat": "添加到对话"
+    },
+    "attach": {
+      "noChat": "请先在本项目里打开一个对话，再向它添加文件。",
+      "added": "已把 {{name}} 添加到对话草稿"
+    }
+  },
+  "favorites": {
+    "added": "已收藏 {{name}}",
+    "removed": "已取消收藏 {{name}}"
+  },
+  "preview": {
+    "missing": "预览缺少文件目标。",
+    "largeTextHint": "该文本文件超过 5MB，不渲染全文；请下载后阅读。",
+    "videoHint": "当前构建未内置视频播放器——下载后从系统分享面板选择播放器打开。",
+    "binaryHint": "该类型不支持内嵌预览；可下载后用其他应用打开。",
+    "card": {
+      "name": "名称",
+      "size": "大小",
+      "modified": "修改时间",
+      "type": "类型"
+    },
+    "type": {
+      "image": "图片",
+      "video": "视频",
+      "markdown": "Markdown 文档",
+      "html": "HTML 网页",
+      "code": "源代码",
+      "text": "纯文本",
+      "binary": "二进制文件"
+    }
   },
   "me": {
     "title": "我的",

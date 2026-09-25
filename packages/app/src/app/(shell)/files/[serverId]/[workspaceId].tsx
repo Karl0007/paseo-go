@@ -1,22 +1,151 @@
-// Files 占位屏 (card C5): the tree's row target. C6 replaces the body with the
-// official FileExplorerPane; for now it proves the route contract — breadcrumb-style
-// header (host › project › workspace) over the workspace root path. The group
-// layout declares it href-hidden with the tab bar suppressed while focused, so it
-// reads as a full-screen push over the tabs.
-import { useCallback } from "react";
+// 文件浏览屏 (card C6, DESIGN §5): the C5 placeholder body is replaced by the
+// official FileExplorerPane (SPIKE A3 — its onOpenFile is fully delegated to the
+// caller). Tapping a file pushes the (detail) preview onto the root stack; the
+// row long-press keeps the official file menu, and the shell adds 添加到对话 via
+// the pane's onAddToChat seam. Long-press also selects the row (official), so the
+// header grows a 收藏 chip for the selected file — the explorer-side favorite
+// entry point, since the official row menu itself is frozen. The breadcrumb header
+// and the in-tab hardware back (this screen is a hidden tab, C5 KI-2) are unchanged.
+import { useCallback, useMemo } from "react";
 import { BackHandler, Platform, Pressable, Text, View } from "react-native";
 import { useFocusEffect, useNavigation } from "@react-navigation/native";
-import { useLocalSearchParams } from "expo-router";
+import { router, useLocalSearchParams, type Href } from "expo-router";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useTranslation } from "react-i18next";
 import { StyleSheet } from "react-native-unistyles";
-import { ChevronLeft, FolderOpen } from "lucide-react-native";
+import { ChevronLeft, Star, StarOff, X } from "lucide-react-native";
+import { FileExplorerPane } from "@/components/file-explorer-pane";
 import { useHosts } from "@/runtime/host-runtime";
-import { useSessionStore } from "@/stores/session-store";
+import {
+  useSessionStore,
+  type ExplorerEntry,
+  type WorkspaceDescriptor,
+} from "@/stores/session-store";
+import {
+  buildWorkspaceExplorerStateKey,
+  useFileExplorerActions,
+} from "@/hooks/use-file-explorer-actions";
+import { parentExplorerPath } from "@/utils/explorer-paths";
 import { SHELL_I18N_NAMESPACE } from "@/shell/i18n";
-import { SHELL_TAB } from "@/shell/routes";
+import { SHELL_TAB, shellPreviewHref } from "@/shell/routes";
+import {
+  useShellAddToChat,
+  useShellFileActions,
+  type ShellFileTarget,
+} from "@/shell/files/use-shell-file-actions";
 
-export default function ShellFilesPlaceholderScreen() {
+// The official rows set selectedEntryPath on press AND long-press; the chip turns
+// that selection into the shell's 收藏 affordance for the explorer surface.
+function SelectionFavoriteChip({
+  serverId,
+  workspaceId,
+  workspaceRoot,
+  entry,
+  onClear,
+}: {
+  serverId: string;
+  workspaceId: string;
+  workspaceRoot: string;
+  entry: ExplorerEntry;
+  onClear: () => void;
+}) {
+  const { t } = useTranslation(SHELL_I18N_NAMESPACE);
+  const target = useMemo<ShellFileTarget>(
+    () => ({
+      hostId: serverId,
+      workspaceId,
+      workspaceRoot,
+      path: entry.path,
+      name: entry.name,
+      size: entry.size,
+      mtime: entry.modifiedAt,
+    }),
+    [serverId, workspaceId, workspaceRoot, entry],
+  );
+  const { isFavorite, toggleFavorite } = useShellFileActions(target);
+  return (
+    <View style={styles.chipRow} testID="shell-files-selection-chip">
+      <Text style={styles.chipName} numberOfLines={1}>
+        {entry.name}
+      </Text>
+      <Pressable
+        onPress={toggleFavorite}
+        accessibilityRole="button"
+        hitSlop={6}
+        style={styles.chipButton}
+        testID="shell-files-selection-favorite"
+      >
+        {isFavorite ? (
+          <StarOff size={14} color={styles.chipIcon.color} />
+        ) : (
+          <Star size={14} color={styles.chipIcon.color} />
+        )}
+        <Text style={styles.chipLabel}>
+          {t(isFavorite ? "files.menu.unfavorite" : "files.menu.favorite")}
+        </Text>
+      </Pressable>
+      <Pressable
+        onPress={onClear}
+        accessibilityRole="button"
+        hitSlop={6}
+        style={styles.chipButton}
+        testID="shell-files-selection-clear"
+      >
+        <X size={14} color={styles.chipIcon.color} />
+      </Pressable>
+    </View>
+  );
+}
+
+// host › project › workspace crumbs over the pane (kept from C5 verbatim, just
+// componentized so the screen body stays about browsing).
+function FilesHeader({
+  hostLabel,
+  workspace,
+  fallbackName,
+  onBack,
+  topInset,
+}: {
+  hostLabel: string;
+  workspace: WorkspaceDescriptor | undefined;
+  fallbackName: string;
+  onBack: () => void;
+  topInset: number;
+}) {
+  const workspaceName = workspace?.title?.trim() || workspace?.name || fallbackName;
+  return (
+    <View style={[styles.header, { paddingTop: topInset }]}>
+      <Pressable
+        onPress={onBack}
+        accessibilityRole="button"
+        hitSlop={8}
+        style={styles.back}
+        testID="shell-files-back"
+      >
+        <ChevronLeft size={22} color={styles.backIcon.color} />
+      </Pressable>
+      <View style={styles.crumbs} testID="shell-files-breadcrumbs">
+        <Text style={styles.crumbMuted} numberOfLines={1}>
+          {hostLabel}
+        </Text>
+        {workspace ? (
+          <>
+            <Text style={styles.crumbSep}>›</Text>
+            <Text style={styles.crumbMuted} numberOfLines={1}>
+              {workspace.projectCustomName?.trim() || workspace.projectDisplayName}
+            </Text>
+            <Text style={styles.crumbSep}>›</Text>
+          </>
+        ) : null}
+        <Text style={styles.crumbCurrent} numberOfLines={1}>
+          {workspaceName}
+        </Text>
+      </View>
+    </View>
+  );
+}
+
+export default function ShellFilesScreen() {
   const navigation = useNavigation();
   const { t } = useTranslation(SHELL_I18N_NAMESPACE);
   const insets = useSafeAreaInsets();
@@ -30,8 +159,57 @@ export default function ShellFilesPlaceholderScreen() {
   );
 
   const hostLabel = hosts.find((host) => host.serverId === serverId)?.label ?? serverId ?? "";
-  const workspaceName = workspace?.title?.trim() || workspace?.name || workspaceId || "";
   const rootPath = workspace?.workspaceDirectory || workspace?.projectRootPath || "";
+
+  const workspaceStateKey = useMemo(
+    () => buildWorkspaceExplorerStateKey({ workspaceId, workspaceRoot: rootPath }),
+    [workspaceId, rootPath],
+  );
+  const explorerState = useSessionStore((state) =>
+    serverId && workspaceStateKey
+      ? state.sessions[serverId]?.fileExplorer.get(workspaceStateKey)
+      : undefined,
+  );
+  const { selectExplorerEntry } = useFileExplorerActions({
+    serverId: serverId ?? "",
+    workspaceId,
+    workspaceRoot: rootPath,
+  });
+  const selectedEntry = useMemo<ExplorerEntry | null>(() => {
+    const selectedPath = explorerState?.selectedEntryPath;
+    if (!explorerState || !selectedPath) return null;
+    const directory = explorerState.directories.get(parentExplorerPath(selectedPath));
+    const entry = directory?.entries.find((candidate) => candidate.path === selectedPath);
+    return entry?.kind === "file" ? entry : null;
+  }, [explorerState]);
+
+  const handleOpenFile = useCallback(
+    (path: string) => {
+      router.push(
+        shellPreviewHref({
+          serverId: serverId ?? "",
+          workspaceId: workspaceId ?? "",
+          path,
+          name: path.split(/[/\\]/).pop() ?? path,
+          workspaceRoot: rootPath,
+        }) as Href,
+      );
+    },
+    [serverId, workspaceId, rootPath],
+  );
+  const addToChat = useShellAddToChat();
+  const handleAddToChat = useCallback(
+    (path: string) => {
+      void addToChat({
+        hostId: serverId ?? "",
+        workspaceId: workspaceId ?? "",
+        workspaceRoot: rootPath,
+        path,
+        name: path.split(/[/\\]/).pop() ?? path,
+      });
+    },
+    [addToChat, serverId, workspaceId, rootPath],
+  );
 
   // The screen is a hidden tab: a path navigate could pop unrelated root-stack
   // screens (restored deep links), so both affordances jump through the tab
@@ -51,49 +229,35 @@ export default function ShellFilesPlaceholderScreen() {
       return () => sub.remove();
     }, [navigation]),
   );
+  const handleClearSelection = useCallback(() => selectExplorerEntry(null), [selectExplorerEntry]);
 
   return (
     <View style={styles.screen}>
-      <View style={[styles.header, { paddingTop: insets.top + 8 }]}>
-        <Pressable
-          onPress={handleBack}
-          accessibilityRole="button"
-          hitSlop={8}
-          style={styles.back}
-          testID="shell-files-back"
-        >
-          <ChevronLeft size={22} color={styles.backIcon.color} />
-        </Pressable>
-        <View style={styles.crumbs} testID="shell-files-breadcrumbs">
-          <Text style={styles.crumbMuted} numberOfLines={1}>
-            {hostLabel}
-          </Text>
-          {workspace ? (
-            <>
-              <Text style={styles.crumbSep}>›</Text>
-              <Text style={styles.crumbMuted} numberOfLines={1}>
-                {workspace.projectCustomName?.trim() || workspace.projectDisplayName}
-              </Text>
-              <Text style={styles.crumbSep}>›</Text>
-            </>
-          ) : null}
-          <Text style={styles.crumbCurrent} numberOfLines={1}>
-            {workspaceName}
-          </Text>
-        </View>
-      </View>
+      <FilesHeader
+        hostLabel={hostLabel}
+        workspace={workspace}
+        fallbackName={workspaceId ?? ""}
+        onBack={handleBack}
+        topInset={insets.top + 8}
+      />
+      {selectedEntry ? (
+        <SelectionFavoriteChip
+          serverId={serverId ?? ""}
+          workspaceId={workspaceId ?? ""}
+          workspaceRoot={rootPath}
+          entry={selectedEntry}
+          onClear={handleClearSelection}
+        />
+      ) : null}
       <View style={styles.body}>
-        {workspace ? (
-          <>
-            <View style={styles.pathCard} testID="shell-files-root-path">
-              <Text style={styles.pathLabel}>{t("files.rootPathLabel")}</Text>
-              <Text style={styles.pathValue}>{rootPath || t("files.pathUnknown")}</Text>
-            </View>
-            <View style={styles.hintWrap}>
-              <FolderOpen size={22} color={styles.hintIcon.color} />
-              <Text style={styles.hint}>{t("files.placeholderHint")}</Text>
-            </View>
-          </>
+        {workspace && serverId ? (
+          <FileExplorerPane
+            serverId={serverId}
+            workspaceId={workspaceId}
+            workspaceRoot={rootPath}
+            onOpenFile={handleOpenFile}
+            onAddToChat={handleAddToChat}
+          />
         ) : (
           <Text style={styles.missing} testID="shell-files-missing">
             {t("files.notFound")}
@@ -145,47 +309,46 @@ const styles = StyleSheet.create((theme) => ({
     fontWeight: theme.fontWeight.semibold,
     color: theme.colors.foreground,
   },
-  body: {
-    flex: 1,
-    padding: theme.spacing[4],
-    gap: theme.spacing[4],
-  },
-  pathCard: {
-    gap: theme.spacing[1],
-    padding: theme.spacing[3],
-    borderRadius: theme.borderRadius.lg,
+  chipRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: theme.spacing[2],
+    paddingHorizontal: theme.spacing[3],
+    paddingVertical: theme.spacing[2],
     backgroundColor: theme.colors.surface1,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: theme.colors.border,
+  },
+  chipName: {
+    flex: 1,
+    fontSize: theme.fontSize.sm,
+    color: theme.colors.foreground,
+  },
+  chipButton: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: theme.spacing[1],
+    paddingHorizontal: theme.spacing[2],
+    paddingVertical: theme.spacing[1],
+    borderRadius: theme.borderRadius.full,
     borderWidth: StyleSheet.hairlineWidth,
     borderColor: theme.colors.border,
   },
-  pathLabel: {
-    fontSize: theme.fontSize.sm,
-    fontWeight: theme.fontWeight.semibold,
-    color: theme.colors.foregroundMuted,
-    textTransform: "uppercase",
-  },
-  pathValue: {
-    fontFamily: theme.fontFamily.mono,
-    fontSize: theme.fontSize.code,
-    color: theme.colors.foreground,
-  },
-  hintWrap: {
-    alignItems: "center",
-    gap: theme.spacing[2],
-    paddingTop: theme.spacing[8],
-  },
-  hintIcon: {
+  chipIcon: {
     color: theme.colors.foregroundMuted,
   },
-  hint: {
+  chipLabel: {
     fontSize: theme.fontSize.sm,
     color: theme.colors.foregroundMuted,
-    textAlign: "center",
+  },
+  body: {
+    flex: 1,
   },
   missing: {
     fontSize: theme.fontSize.sm,
     color: theme.colors.foregroundMuted,
     textAlign: "center",
     paddingTop: theme.spacing[8],
+    paddingHorizontal: theme.spacing[4],
   },
 }));

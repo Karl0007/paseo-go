@@ -1,7 +1,7 @@
 // All route strings the Paseo Go shell navigates with (DESIGN.md §2.3) — single
 // source of truth. Shell screens push SHELL.* within their own group and OFFICIAL.*
-// to reuse upstream routes unchanged (D2). `files`/`preview`/`commandRun` land in
-// later cards (C5-C7); the strings are declared here so call sites never inline paths.
+// to reuse upstream routes unchanged (D2). `commandRun` lands with C7; DETAIL.* is
+// the C6 preview stack. The strings are declared here so call sites never inline paths.
 import type { Href } from "expo-router";
 import {
   buildHostWorkspaceOpenRoute,
@@ -15,9 +15,31 @@ export const SHELL = {
   workspace: "/(shell)/workspace",
   me: "/(shell)/me",
   files: "/(shell)/files/[serverId]/[workspaceId]",
-  preview: "/(shell)/preview",
   commandRun: "/(shell)/run",
 } as const;
+
+// 预览屏 lives in its own top-level group so opening a file is a real root-Stack
+// push (C6 ruling): hardware/gesture back pops it naturally onto the files tab,
+// unlike a hidden-tab screen whose back must be intercepted in-tab.
+export const DETAIL = {
+  preview: "/(detail)/preview",
+} as const;
+
+// Preview params ride the query string: paths carry CJK, spaces, '?' and '%', so
+// they go through the object form and expo-router's own encoding — never a
+// hand-assembled string (routes.test guards the round-trip).
+export interface ShellPreviewParams {
+  serverId: string;
+  workspaceId: string;
+  /** Workspace-relative file path, as the explorer reports it. */
+  path: string;
+  name: string;
+  workspaceRoot?: string;
+}
+
+export function shellPreviewHref(params: ShellPreviewParams): Href {
+  return { pathname: DETAIL.preview, params: { ...params } } as Href;
+}
 
 // Tab screen names for in-navigator jumps (navigation.navigate never pops the root
 // stack, unlike a path navigate — the files placeholder's back must stay in-tabs).

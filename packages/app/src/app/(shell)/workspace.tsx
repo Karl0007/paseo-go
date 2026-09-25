@@ -23,6 +23,8 @@ import { OFFICIAL, shellFilesHref } from "@/shell/routes";
 import { useShellHostStatuses } from "@/shell/runtime/use-shell-host-statuses";
 import { WorkspaceHostHeader } from "@/shell/components/workspace-host-header";
 import { WorkspaceProjectRow } from "@/shell/components/workspace-project-row";
+import { WorkspaceFavoriteRow } from "@/shell/components/workspace-favorite-row";
+import { usePaseoGoFavoritesStore, type ShellFavoriteFile } from "@/shell/stores/favorites";
 import {
   buildWorkspaceTree,
   type ShellHostSection,
@@ -34,12 +36,19 @@ const REFRESH_SETTLE_MS = 700;
 type TreeItem =
   | { type: "favorites-header"; key: string }
   | { type: "favorites-empty"; key: string }
+  | {
+      type: "favorite";
+      key: string;
+      favorite: ShellFavoriteFile;
+      hostLabel: string;
+      dimmed: boolean;
+    }
   | { type: "host"; key: string; section: ShellHostSection }
   | { type: "host-empty"; key: string; label: string }
   | { type: "workspace"; key: string; row: ShellWorkspaceRow; dimmed: boolean };
 
-// 收藏夹区 placeholder — the favorites store lands with C6/C7; until then the card
-// teaches the gesture that will fill it (长按文件收藏).
+// 收藏夹区 empty state — until the first 收藏 lands (files screen chip / preview
+// star), the card teaches the gesture that fills the section below.
 function FavoritesPlaceholder() {
   const { t } = useTranslation(SHELL_I18N_NAMESPACE);
   return (
@@ -115,11 +124,21 @@ export default function ShellWorkspaceScreen() {
     [hosts, statuses, projects, agents],
   );
 
+  const favorites = usePaseoGoFavoritesStore((state) => state.items);
   const items = useMemo<TreeItem[]>(() => {
-    const out: TreeItem[] = [
-      { type: "favorites-header", key: "favorites-header" },
-      { type: "favorites-empty", key: "favorites-empty" },
-    ];
+    const out: TreeItem[] = [{ type: "favorites-header", key: "favorites-header" }];
+    if (favorites.length === 0) {
+      out.push({ type: "favorites-empty", key: "favorites-empty" });
+    }
+    for (const favorite of favorites) {
+      out.push({
+        type: "favorite",
+        key: `favorite:${favorite.hostId}:${favorite.path}`,
+        favorite,
+        hostLabel: hostsById.get(favorite.hostId)?.label ?? favorite.hostId,
+        dimmed: (statuses.get(favorite.hostId) ?? "connecting") !== "online",
+      });
+    }
     for (const section of sections) {
       out.push({ type: "host", key: `host:${section.serverId}`, section });
       if (section.rows.length === 0) {
@@ -134,7 +153,7 @@ export default function ShellWorkspaceScreen() {
       }
     }
     return out;
-  }, [sections, t]);
+  }, [sections, t, favorites, hostsById, statuses]);
 
   const [refreshing, setRefreshing] = useState(false);
   const refreshTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -189,6 +208,14 @@ export default function ShellWorkspaceScreen() {
           );
         case "favorites-empty":
           return <FavoritesPlaceholder />;
+        case "favorite":
+          return (
+            <WorkspaceFavoriteRow
+              favorite={item.favorite}
+              hostLabel={item.hostLabel}
+              dimmed={item.dimmed}
+            />
+          );
         case "host":
           return (
             <WorkspaceHostHeader

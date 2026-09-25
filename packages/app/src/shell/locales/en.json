@@ -84,7 +84,7 @@
     "searchPlaceholder": "Search files (coming soon)",
     "searchSoon": "Search is coming soon",
     "favoritesTitle": "Favorites",
-    "favoritesEmpty": "Nothing starred yet. Long-press a file while browsing to favorite it.",
+    "favoritesEmpty": "Nothing starred yet — tap a file while browsing, then hit the star.",
     "retry": "Retry",
     "hostEmpty": "No projects yet — add one with New project below.",
     "hostEmptyOffline": "Host offline — projects appear once it reconnects.",
@@ -94,10 +94,44 @@
     "emptyHint": "Connect a Paseo daemon and your projects and files show up here."
   },
   "files": {
-    "rootPathLabel": "Workspace root",
-    "pathUnknown": "(unknown path)",
-    "placeholderHint": "File browsing lands with C6.",
-    "notFound": "Workspace not found — it may be archived or the host has not synced."
+    "notFound": "Workspace not found — it may be archived or the host has not synced.",
+    "menu": {
+      "favorite": "Favorite",
+      "unfavorite": "Remove favorite",
+      "download": "Download",
+      "share": "Share",
+      "copyPath": "Copy path",
+      "addToChat": "Add to chat"
+    },
+    "attach": {
+      "noChat": "Open a chat in this project first, then add files to it.",
+      "added": "Added {{name}} to the chat draft"
+    }
+  },
+  "favorites": {
+    "added": "Favorited {{name}}",
+    "removed": "Removed {{name}} from favorites"
+  },
+  "preview": {
+    "missing": "This preview is missing its file target.",
+    "largeTextHint": "This text file is larger than 5 MB, so the full text is not rendered. Download it to read.",
+    "videoHint": "No inline video player is bundled with this build — download the clip and open it from the system share sheet.",
+    "binaryHint": "This file type has no inline preview. Download it to open elsewhere.",
+    "card": {
+      "name": "Name",
+      "size": "Size",
+      "modified": "Modified",
+      "type": "Type"
+    },
+    "type": {
+      "image": "Image",
+      "video": "Video",
+      "markdown": "Markdown",
+      "html": "HTML",
+      "code": "Source code",
+      "text": "Plain text",
+      "binary": "Binary file"
+    }
   },
   "me": {
     "title": "Me",

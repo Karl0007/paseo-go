@@ -7,7 +7,7 @@ import {
   parseHostWorkspaceOpenIntentFromPathname,
   parseHostWorkspaceRouteFromPathname,
 } from "@/utils/host-routes";
-import { OFFICIAL } from "./routes";
+import { DETAIL, OFFICIAL, shellPreviewHref } from "./routes";
 
 describe("OFFICIAL.workspace", () => {
   it("keeps url-safe ids verbatim (no double encoding)", () => {
@@ -51,5 +51,21 @@ describe("OFFICIAL.agentOpen", () => {
     const route = OFFICIAL.agentOpen(serverId, workspaceId, agentId);
     expect(parseHostWorkspaceRouteFromPathname(route)).toEqual({ serverId, workspaceId });
     expect(parseHostWorkspaceOpenIntentFromPathname(route)).toEqual({ kind: "agent", agentId });
+  });
+});
+
+describe("shellPreviewHref", () => {
+  // The C6 preview carries raw workspace paths (CJK, spaces, ?, %, #) through the
+  // query string. expo-router owns the encoding — a builder that pre-encodes here
+  // would double-encode and the preview screen would read mangled paths.
+  it("passes hostile paths through as raw params on the detail route", () => {
+    const params = {
+      serverId: "host 9:80/#%&",
+      workspaceId: "ws 1",
+      path: "docs/中文 100%?#a.md",
+      name: "中文 100%?#a.md",
+      workspaceRoot: "C:\\tmp\\c5-proj",
+    };
+    expect(shellPreviewHref(params)).toEqual({ pathname: DETAIL.preview, params });
   });
 });
