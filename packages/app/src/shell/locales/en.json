@@ -6,13 +6,40 @@
   },
   "chats": {
     "title": "Chats",
-    "hostsHeader": "Hosts · A1 probe",
-    "agentsHeader": "Agents · A2/A4 probe",
     "noHosts": "No hosts configured yet.",
-    "noAgents": "No agents on connected hosts.",
-    "hostLine": "{{label}} · {{status}}",
-    "agentStatusLine": "status={{status}} · turn={{turn}} · attention={{attention}} · pending={{pending}}",
-    "openAgentHint": "Tap an agent to push the official conversation route (A2)."
+    "noHostsShort": "No hosts",
+    "hostsOnline": "{{online}}/{{total}} hosts online",
+    "hostsMenu": "Host status",
+    "hostStatus": {
+      "idle": "Not connected",
+      "connecting": "Connecting",
+      "online": "Online",
+      "offline": "Offline",
+      "error": "Connection error"
+    },
+    "retry": "Retry",
+    "retrying": "Reconnecting to {{label}}…",
+    "section": {
+      "pinned": "Pinned",
+      "needsAttention": "Needs attention",
+      "recent": "Recent"
+    },
+    "activity": {
+      "running": "Running",
+      "needsInput": "Waiting for approval",
+      "finished": "Finished",
+      "failed": "Failed"
+    },
+    "untitled": "Untitled chat",
+    "newMenu": "Create",
+    "newChat": "New chat",
+    "importChat": "Import session",
+    "searchSoon": "Search is coming soon",
+    "importSoon": "Session import is coming soon",
+    "emptyTitle": "No conversations yet",
+    "emptyAgentsHint": "Tap New chat and let an agent get to work.",
+    "emptyHostsHint": "No host to connect to yet — pair or add a daemon first.",
+    "connectHost": "Connect a host"
   },
   "workspace": {
     "title": "Workspace",

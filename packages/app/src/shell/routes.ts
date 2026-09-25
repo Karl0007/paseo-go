@@ -16,4 +16,6 @@ export const SHELL = {
 export const OFFICIAL = {
   agent: (serverId: string, agentId: string) => `/h/${serverId}/agent/${agentId}`,
   hostSettings: (serverId: string) => `/h/${serverId}/settings`,
+  // Official first-run connect/pair flow — the empty-state CTA when no host exists.
+  welcome: "/welcome",
 } as const;

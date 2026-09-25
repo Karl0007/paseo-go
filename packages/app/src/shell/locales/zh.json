@@ -6,13 +6,40 @@
   },
   "chats": {
     "title": "对话",
-    "hostsHeader": "主机 · A1 探针",
-    "agentsHeader": "会话 · A2/A4 探针",
     "noHosts": "尚未配置任何主机。",
-    "noAgents": "已连接主机上暂无会话。",
-    "hostLine": "{{label}} · {{status}}",
-    "agentStatusLine": "status={{status}} · turn={{turn}} · attention={{attention}} · pending={{pending}}",
-    "openAgentHint": "点按会话可 push 官方对话路由（A2）。"
+    "noHostsShort": "无主机",
+    "hostsOnline": "{{online}}/{{total}} 主机在线",
+    "hostsMenu": "主机状态",
+    "hostStatus": {
+      "idle": "未连接",
+      "connecting": "连接中",
+      "online": "在线",
+      "offline": "离线",
+      "error": "连接错误"
+    },
+    "retry": "重试",
+    "retrying": "正在重连 {{label}}…",
+    "section": {
+      "pinned": "置顶",
+      "needsAttention": "需要处理",
+      "recent": "最近"
+    },
+    "activity": {
+      "running": "运行中",
+      "needsInput": "等待批准",
+      "finished": "已完成",
+      "failed": "出错"
+    },
+    "untitled": "未命名会话",
+    "newMenu": "新建",
+    "newChat": "新建对话",
+    "importChat": "导入会话",
+    "searchSoon": "搜索即将上线",
+    "importSoon": "会话导入即将上线",
+    "emptyTitle": "还没有对话",
+    "emptyAgentsHint": "点「新建对话」，让 agent 开始干活。",
+    "emptyHostsHint": "还没有可连接的主机，先连接一台 daemon。",
+    "connectHost": "连接主机"
   },
   "workspace": {
     "title": "工作区",
