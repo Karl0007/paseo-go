@@ -13,3 +13,7 @@ C0 known_issue。本机 `npx vitest run --pool=threads --maxWorkers=2` 基线 = 
 ## 验收
 
 本卡无代码改动，仅作验收口径固化；总验收对照表引用本卡编号。
+
+## 补记（C1，2026-09-25）
+
+本机负载下失败集合会漂移（C1 轮=time x2+parse-changelog x2+forges+input-draft.live 超时，与 C0 轮集合不同）。**验收口径升级为 stash 基线对照法**：`git stash push -u` 后重跑，失败集合逐条相同 = 无新增失败；`*.live.*` beforeAll 超时视为环境性；跑完立即 `git stash pop`（编排者监督）。
