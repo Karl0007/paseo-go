@@ -14,6 +14,7 @@ import {
 } from "@/stores/navigation-active-workspace-store";
 import { shouldUseDesktopDaemon } from "@/desktop/daemon/desktop-daemon";
 import { usePaseoGoShellActive } from "@/shell/stores/settings";
+import { SHELL } from "@/shell/routes";
 
 const isDesktop = shouldUseDesktopDaemon();
 
@@ -34,7 +35,9 @@ export default function Index() {
   );
 
   const paseoGoShellActive = usePaseoGoShellActive();
-  if (paseoGoShellActive) return <Redirect href={"/(shell)/chats" as Href} />;
+  // C8: redirect to the shell group root, not a hardcoded tab — (shell)/_layout's
+  // initialRouteName (last focused tab, else the 默认启动 tab setting) picks the tab.
+  if (paseoGoShellActive) return <Redirect href={SHELL.root as Href} />;
 
   const startupRoute = resolveStartupRoute({
     route: { kind: "index", pathname },

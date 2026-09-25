@@ -67,6 +67,8 @@ export const OFFICIAL = {
   agentOpen: (serverId: string, workspaceId: string, agentId: string) =>
     buildHostWorkspaceOpenRoute(serverId, workspaceId, `agent:${agentId}`),
   hostSettings: (serverId: string) => `/h/${serverId}/settings`,
+  // 全局设置: the official root-stack settings screen (settings/index route).
+  settings: "/settings",
   welcome: "/welcome",
   // 连接新主机: the official add-host intent (settings screen + AddHostMethodModal,
   // direct/SSH/pair-link). Works with hosts already present, unlike /welcome which

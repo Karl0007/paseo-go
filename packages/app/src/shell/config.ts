@@ -1,7 +1,12 @@
 // Paseo Go shell constants (DESIGN.md §2): shell-specific config lives only here.
 
-/** Upstream commit (getpaseo/paseo) this fork's baseline tracks; bump on merge syncs. */
-export const SHELL_UPSTREAM_REF = "db4fd334";
+/**
+ * Upstream commit (getpaseo/paseo) this fork's baseline tracks; bump on merge syncs.
+ * Bundle-time constant: metro inlines `EXPO_PUBLIC_PASEO_GO_UPSTREAM`, so builds
+ * stamp the exact tree with `EXPO_PUBLIC_PASEO_GO_UPSTREAM=$(git rev-parse --short
+ * HEAD)`; the literal is the fallback for bundles built without it.
+ */
+export const SHELL_UPSTREAM_REF = process.env.EXPO_PUBLIC_PASEO_GO_UPSTREAM ?? "db4fd334";
 
 /** Shell display version; bumped by release cards (C13). */
 export const SHELL_VERSION = "0.1.0";
