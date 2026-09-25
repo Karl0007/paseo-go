@@ -39,7 +39,7 @@ import { useAggregatedAgents, type AggregatedAgent } from "@/hooks/use-aggregate
 import { useSessionStore } from "@/stores/session-store";
 import { deriveSidebarStateBucket } from "@/utils/sidebar-agent-state";
 import { SHELL_I18N_NAMESPACE } from "@/shell/i18n";
-import { shellFilesHref } from "@/shell/routes";
+import { shellFilesDetailHref } from "@/shell/routes";
 import { usePaseoGoPinsStore } from "@/shell/stores/pins";
 import { usePaseoGoShellActive } from "@/shell/stores/settings";
 import { useShellAgentActions, type ShellChatTarget } from "@/shell/shellAgentActions";
@@ -183,16 +183,16 @@ function CapsuleInner({
   }, []);
   const openMenu = useCallback(() => menu.setOpen(true), [menu]);
 
-  // 查看项目文件: the shell files screen for THIS session's workspace. Measured
-  // on-device (both router.push and a targeted StackActions.push): expo-router
-  // resolves a group-route push into the existing `(shell)` entry (navigate-reuse),
-  // so the session screen pops and back from files lands on the shell list. The
-  // jump itself is exact (workspace ids round-trip through shellFilesHref); the
-  // stack shape is a framework behavior, recorded as the card's known_issue.
+  // 查看项目文件: the (detail) files instance (C16) — a real root-Stack push on
+  // top of the session screen, so hardware/gesture back pops right back here.
+  // The old shellFilesHref target ((shell) hidden-tab route) resolved into the
+  // existing (shell) entry (navigate-reuse), popping the session — C14's
+  // recorded defect. The jump stays exact (workspace ids round-trip through
+  // the param-object builder).
   const run = useCallback(
     (id: SessionHeaderActionId) => {
       if (id === "files") {
-        router.push(shellFilesHref(workspace.serverId, workspace.workspaceId));
+        router.push(shellFilesDetailHref(workspace.serverId, workspace.workspaceId));
         return;
       }
       if (id === "stop") void actions.stop(target);

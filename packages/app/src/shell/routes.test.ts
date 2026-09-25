@@ -7,7 +7,7 @@ import {
   parseHostWorkspaceOpenIntentFromPathname,
   parseHostWorkspaceRouteFromPathname,
 } from "@/utils/host-routes";
-import { DETAIL, OFFICIAL, shellPreviewHref } from "./routes";
+import { DETAIL, OFFICIAL, SHELL, shellFilesDetailHref, shellPreviewHref } from "./routes";
 
 describe("OFFICIAL.workspace", () => {
   it("keeps url-safe ids verbatim (no double encoding)", () => {
@@ -67,5 +67,25 @@ describe("shellPreviewHref", () => {
       workspaceRoot: "C:\\tmp\\c5-proj",
     };
     expect(shellPreviewHref(params)).toEqual({ pathname: DETAIL.preview, params });
+  });
+});
+
+describe("shellFilesDetailHref", () => {
+  // C16: the capsule must push the (detail) files instance, not the (shell)
+  // hidden-tab route — the two pathnames being distinct IS the fix (a push of a
+  // route whose group entry is absent from the root stack is a real push; a
+  // push resolving into the mounted (shell) entry is the C14 navigate-reuse).
+  it("targets the (detail) files route, distinct from the (shell) one", () => {
+    expect(DETAIL.files).toBe("/(detail)/files/[serverId]/[workspaceId]");
+    expect(DETAIL.files).not.toBe(SHELL.files);
+  });
+
+  it("passes opaque ids through as raw params (expo-router owns the encoding)", () => {
+    const serverId = "host 9:80/#%&";
+    const workspaceId = "C:/work/项目 dir";
+    expect(shellFilesDetailHref(serverId, workspaceId)).toEqual({
+      pathname: DETAIL.files,
+      params: { serverId, workspaceId },
+    });
   });
 });

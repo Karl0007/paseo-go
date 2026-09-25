@@ -1,7 +1,8 @@
 // All route strings the Paseo Go shell navigates with (DESIGN.md §2.3) — single
 // source of truth. Shell screens push SHELL.* within their own group and OFFICIAL.*
 // to reuse upstream routes unchanged (D2). `commandsEdit` lands with C7 (the run
-// flow is a sheet on the 工作区 tab, not a route); DETAIL.* is the C6 preview stack.
+// flow is a sheet on the 工作区 tab, not a route); DETAIL.* is the C6 preview stack
+// plus the C16 files instance (real root-Stack push for the session capsule).
 import type { Href } from "expo-router";
 import {
   buildHostWorkspaceOpenRoute,
@@ -25,6 +26,7 @@ export const SHELL = {
 // unlike a hidden-tab screen whose back must be intercepted in-tab.
 export const DETAIL = {
   preview: "/(detail)/preview",
+  files: "/(detail)/files/[serverId]/[workspaceId]",
 } as const;
 
 // Preview params ride the query string: paths carry CJK, spaces, '?' and '%', so
@@ -51,6 +53,14 @@ export const SHELL_TAB = { chats: "chats", workspace: "workspace", me: "me" } as
 // names stay in one place and expo-router handles encoding (C5 rows → C6 browse).
 export function shellFilesHref(serverId: string, workspaceId: string): Href {
   return { pathname: SHELL.files, params: { serverId, workspaceId } } as Href;
+}
+
+// C16 胶囊入口: the SAME browse screen as SHELL.files, mounted as a real
+// root-Stack push so back pops onto the session screen. Pushing SHELL.files from
+// a session resolves into the existing (shell) entry (navigate-reuse, C14
+// measured) and pops the session — never use it as a capsule target.
+export function shellFilesDetailHref(serverId: string, workspaceId: string): Href {
+  return { pathname: DETAIL.files, params: { serverId, workspaceId } } as Href;
 }
 
 // 快捷指令表单屏: same screen serves 新建 (no id) and 编辑 (?id=) — the id goes
