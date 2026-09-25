@@ -2,8 +2,8 @@
 // shell alias when renamed) | subtitle `project · relative time · last activity` |
 // four-state light | ⋯ overflow. Geometry follows the official agent list (§9); the
 // clock state is confined to the subtitle component so a minute tick never re-renders
-// the row. Tapping pushes the official agent route (temporary direct push; C4 rewires
-// it to the workspace route).
+// the row. Tapping calls the screen's opener (C4: official navigateToAgent — workspace
+// route + open intent — plus the read stamp; never the parse-stub push).
 //
 // C3 interaction layer (card C3): every row wraps the official ContextMenu engine —
 // long press opens the sheet menu, the ⋯ button opens the same menu for accessibility.
@@ -13,7 +13,6 @@
 // keys are stable, so nothing ever re-mounts the whole table.
 import { memo, useCallback, useMemo } from "react";
 import { Pressable, Text, View } from "react-native";
-import { router, type Href } from "expo-router";
 import { StyleSheet } from "react-native-unistyles";
 import { useTranslation } from "react-i18next";
 import { MoreHorizontal } from "lucide-react-native";
@@ -26,7 +25,6 @@ import { joinSubtitleParts } from "@/command-center/results";
 import { useCompactTimeAgo } from "@/hooks/use-compact-time-ago";
 import type { AggregatedAgent } from "@/hooks/use-aggregated-agents";
 import type { ChatRow } from "@/shell/chats/derive";
-import { OFFICIAL } from "@/shell/routes";
 import { SHELL_I18N_NAMESPACE } from "@/shell/i18n";
 import { ChatStatusLight } from "@/shell/components/chat-status-light";
 import { ChatRowMenuContent } from "@/shell/components/chat-row-menu";
@@ -97,6 +95,8 @@ const ChatSubtitle = memo(function ChatSubtitle({
 interface ChatListRowProps {
   row: ChatRow<ShellChatAgent>;
   actions: ShellAgentActions;
+  /** Screen-side C4 opener: read stamp + official navigateToAgent (open intent). */
+  onOpen: (agent: ShellChatAgent) => void;
   /** True for rows inside the 置顶 group on the live filter: long-press arms a drag. */
   draggable?: boolean;
   /** DraggableFlatList's activator for this cell; only used when draggable. */
@@ -108,6 +108,7 @@ interface ChatListRowProps {
 export const ChatListRow = memo(function ChatListRow({
   row,
   actions,
+  onOpen,
   draggable = false,
   drag,
   isActive = false,
@@ -118,6 +119,7 @@ export const ChatListRow = memo(function ChatListRow({
         <ChatRowInner
           row={row}
           actions={actions}
+          onOpen={onOpen}
           draggable={draggable}
           drag={drag ?? NOOP}
           isActive={isActive}
@@ -133,12 +135,14 @@ export const ChatListRow = memo(function ChatListRow({
 function ChatRowInner({
   row,
   actions,
+  onOpen,
   draggable,
   drag,
   isActive,
 }: {
   row: ChatRow<ShellChatAgent>;
   actions: ShellAgentActions;
+  onOpen: (agent: ShellChatAgent) => void;
   draggable: boolean;
   drag: () => void;
   isActive: boolean;
@@ -160,8 +164,8 @@ function ChatRowInner({
       interaction.didLongPressRef.current = false;
       return;
     }
-    router.push(OFFICIAL.agent(agent.serverId, agent.agent.id) as Href);
-  }, [agent.serverId, agent.agent.id, interaction.didLongPressRef]);
+    onOpen(agent);
+  }, [agent, interaction.didLongPressRef, onOpen]);
   const handleMore = useCallback(() => menu.setOpen(true), [menu]);
 
   const target = useMemo<ShellChatTarget>(

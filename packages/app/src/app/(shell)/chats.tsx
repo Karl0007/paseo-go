@@ -2,9 +2,9 @@
 // host's agents. Groups 已置顶 → 需要处理 → 最近, then one greyed group per offline
 // host with retry; unread comes from the readState store, pin order from the pins
 // store, hiding from the archive store. Cold start shows the official sidebar
-// skeleton; pull-to-refresh re-pulls every host directory. Tapping a row pushes the
-// official agent route (temporary direct push until C4 rewires it to the workspace
-// route + open intent).
+// skeleton; pull-to-refresh re-pulls every host directory. Tapping a row enters the
+// official session through the C4 opener (navigateToAgent: workspace route + open
+// intent, never the parse stub) and stamps it read; returning re-stamps the visit.
 //
 // C3: the list rides the official DraggableList wrapper so the 置顶 group can be
 // re-ordered by long-press-drag (only pinned rows arm the drag; the wrapper hides
@@ -14,6 +14,7 @@
 // archived set inverted, and its rows carry the 取消归档/删除 menu.
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Pressable, Text, View } from "react-native";
+import { useFocusEffect } from "@react-navigation/native";
 import { router, type Href } from "expo-router";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useTranslation } from "react-i18next";
@@ -33,6 +34,7 @@ import {
   type ChatListItem,
   type ChatSectionKind,
 } from "@/shell/chats/derive";
+import { createChatOpener } from "@/shell/chats/open-agent";
 import { ChatListRow, type ShellChatAgent } from "@/shell/components/chat-list-row";
 import { ChatSectionHeader } from "@/shell/components/chat-section-header";
 import { ChatsHeader, type ChatListFilter } from "@/shell/components/chats-header";
@@ -44,6 +46,7 @@ import { usePaseoGoReadStateStore } from "@/shell/stores/readState";
 import { useShellAgentActions } from "@/shell/shellAgentActions";
 import { deriveSidebarStateBucket } from "@/utils/sidebar-agent-state";
 import { useShellHostStatuses } from "@/shell/runtime/use-shell-host-statuses";
+import { shellNavigateToAgent } from "@/shell/chats/shell-navigate-to-agent";
 
 const SECTION_TITLE_KEY: Record<Exclude<ChatSectionKind, "offline">, string> = {
   pinned: "chats.section.pinned",
@@ -130,8 +133,36 @@ export default function ShellChatsScreen() {
   const pinnedIds = usePaseoGoPinsStore((state) => state.pinnedIds);
   const archivedIds = usePaseoGoArchiveStore((state) => state.archivedIds);
   const lastReadAt = usePaseoGoReadStateStore((state) => state.lastReadAt);
+  const markRead = usePaseoGoReadStateStore((state) => state.markRead);
 
   const actions = useShellAgentActions();
+
+  // C4: row taps enter the session through the official navigateToAgent tool family
+  // (workspace route + open intent) with a push verb (the official dismissTo pops the
+  // list → back exits the app; the parse stub flashes white, SPIKE A2). The opener
+  // stamps read on entry and again when this screen regains focus, so a reply watched
+  // inside the session never resurfaces as an unread dot.
+  const opener = useMemo(
+    () => createChatOpener({ markRead, navigateToAgent: shellNavigateToAgent, now: Date.now }),
+    [markRead],
+  );
+  const handleOpenChat = useCallback(
+    (agent: ShellChatAgent) =>
+      opener.open({
+        key: agent.key,
+        serverId: agent.serverId,
+        agentId: agent.agent.id,
+        workspaceId: agent.agent.workspaceId,
+      }),
+    [opener],
+  );
+  useFocusEffect(
+    useCallback(() => {
+      opener.onFocus();
+      return undefined;
+    }, [opener]),
+  );
+
   const [filter, setFilter] = useState<ChatListFilter>("active");
   const archivedOnly = filter === "archived";
 
@@ -249,13 +280,14 @@ export default function ShellChatsScreen() {
         <ChatListRow
           row={item.row}
           actions={actions}
+          onOpen={handleOpenChat}
           draggable={draggable}
           drag={draggable ? drag : undefined}
           isActive={isActive}
         />
       );
     },
-    [actions, archivedOnly, hostsById, handleRetryHost, pinnedSet, t],
+    [actions, archivedOnly, handleOpenChat, hostsById, handleRetryHost, pinnedSet, t],
   );
 
   const keyExtractor = useCallback((item: ChatListItem<ShellChatAgent>) => item.key, []);

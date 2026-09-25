@@ -29,3 +29,21 @@ DESIGN.md §7。基线 = C3 HEAD；C1 spike A2 已证明可 push。
 4. 读图：≥3 张（会话全屏、菜单展开、返回后列表态）
 
 - 恰好一次 commit
+
+## 收卡记录（C4 实施，2026-09-25）
+
+- **navigateToAgent 官方 navigate 动词不可用（实测）**：官方 `navigateToAgent` →
+  `navigateToHostWorkspaceRoute` → `router.dismissTo`，dismissTo 会 **pop 掉 chats 屏**，
+  系统返回键直接退出 app（真机复现）。壳改用官方工具族的纯函数层
+  （`resolveNavigateToAgent` + `navigateToWorkspacePure`，`src/shell/chats/shell-navigate-to-agent.ts`），
+  仅 navigate 动词换成 `router.push`：workspace 路由 + open intent（tab reveal）不变、
+  不碰解析桩、返回键弹回列表（连拍+CDP rAF 双证无白屏帧）。
+- **顶栏溢出菜单注入点探测结论：不可注入 → known_issue（排 P1 壳薄顶栏）**。
+  证据：`WorkspaceScreen` props 固定（serverId/workspaceId/isRouteFocused/recoveryRequested，
+  workspace-screen.tsx L255-260）；`WorkspaceHeaderMenuMobile` 菜单项为硬编码 JSX
+  （workspace-header-menu.tsx L216-300），无 props/contexts/registry 注入面；
+  `PluginHeaderButtons` 走 daemon 插件系统，非壳侧注入点。未改任何官方文件。
+- 进会话 markRead（按压即打点）+ 返回聚焦再打点（会话内看到的回复不会返回后重新冒未读），
+  逻辑在 `src/shell/chats/open-agent.ts`（单测覆盖触发时机）。
+- 路由字符串：`OFFICIAL.agent`（解析桩）删除；新增 `OFFICIAL.workspace`/`OFFICIAL.agentOpen`
+  （官方 host-routes 构造函数薄包装），编码往返单测 `src/shell/routes.test.ts`。
