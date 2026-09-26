@@ -42,7 +42,9 @@ describe("createChatOpener", () => {
     expect(markRead).toHaveBeenCalledTimes(1);
     expect(markRead).toHaveBeenCalledWith(target.key, HOST_EVENT);
 
-    // Same-domain comparison: seen → read; a newer host event → unread again.
+    // Same-domain comparison: seen → read; a newer host *attention* event → unread
+    // again. C18 gated unread on attention, so the skew probe rides the attention
+    // stamp; activity alone must stay read no matter how fresh it is.
     const chat = {
       key: target.key,
       serverId: target.serverId,
@@ -51,10 +53,16 @@ describe("createChatOpener", () => {
       attentionTimestamp: null,
     };
     expect(isChatUnread(chat, HOST_EVENT)).toBe(false);
-    expect(isChatUnread({ ...chat, lastActivityAt: HOST_EVENT + 1 }, HOST_EVENT)).toBe(true);
+    expect(isChatUnread({ ...chat, lastActivityAt: HOST_EVENT + 1 }, HOST_EVENT)).toBe(false);
+    const completed = {
+      ...chat,
+      lastActivityAt: HOST_EVENT + 1,
+      attentionTimestamp: HOST_EVENT + 1,
+    };
+    expect(isChatUnread(completed, HOST_EVENT)).toBe(true);
     // The pre-fix device-clock watermark (DEVICE_NOW) would have swallowed every
     // future host event: host stamps stay below DEVICE_NOW for the whole lag hour.
-    expect(isChatUnread({ ...chat, lastActivityAt: HOST_EVENT + 1 }, DEVICE_NOW)).toBe(false);
+    expect(isChatUnread(completed, DEVICE_NOW)).toBe(false);
   });
 
   it("re-marks on return with the fresh host stamp so watched activity stays read", () => {

@@ -68,9 +68,21 @@ export function chatLastEventAtFromAgent(agent: {
   return Math.max(agent.lastActivityAt.getTime(), agent.attentionTimestamp?.getTime() ?? 0);
 }
 
-/** Unread = last event newer than the stored read stamp; never-opened counts unread. */
+/** Unread is completion-gated (DESIGN §14.6, C18): only an attention event
+ *  (finished / error / awaiting approval) newer than the stored read stamp flags a
+ *  chat. Intermediate running activity never does; chats that never completed an
+ *  attention-worthy turn — freshly imported, or still mid-run — read as seen. */
 export function isChatUnread(agent: ChatAgentInput, lastReadAt: number | undefined): boolean {
-  return chatLastEventAt(agent) > (lastReadAt ?? 0);
+  return (agent.attentionTimestamp ?? 0) > (lastReadAt ?? 0);
+}
+
+/** C18 双点收敛: the blue dot is reserved for idle rows. Active buckets carry their
+ *  state on the status light plus the bold title, and needs_input additionally gets
+ *  the count pill — the pill renders on `pendingCount > 0` as a separate judgement,
+ *  so the dot steps aside whenever the pill owns the badge slot. */
+export function showsUnreadDot(bucket: SidebarStateBucket, pendingCount: number): boolean {
+  if (pendingCount > 0) return false;
+  return bucket === "done" || bucket === "attention";
 }
 
 function byNewestEvent(left: ChatAgentInput, right: ChatAgentInput): number {

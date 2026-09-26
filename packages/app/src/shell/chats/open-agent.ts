@@ -11,6 +11,10 @@
 // stamps — a host behind the device read as permanently seen (and one ahead as
 // permanently unread). Both beats now stamp with the chat's last-event time.
 //
+// C18 kept that max-stamp even after unread went attention-only: a completed chat has
+// attention == last-event, so watermark ≥ attention clears it on entry/return, while
+// mid-run activity growth can never re-arm the (attention-gated) unread flag either.
+//
 // React-free and dependency-injected like shellAgentActions, so the markRead timing is
 // unit-testable without a navigator or a store.
 

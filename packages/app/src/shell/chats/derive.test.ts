@@ -4,6 +4,7 @@ import {
   deriveChatSections,
   flattenChatSections,
   isChatUnread,
+  showsUnreadDot,
   type ChatSection,
   type ChatAgentInput,
   type DeriveChatSectionsInput,
@@ -173,36 +174,65 @@ describe("deriveChatSections", () => {
   });
 
   it("unread flags land on rows; a pinned row is unread too", () => {
+    // C18: only attention stamps flag rows — `fresh` ran a newer step but never
+    // completed one, so it stays read even with no watermark at all.
     const sections = derive({
       agents: [
-        agent({ key: "read", lastActivityAt: T0 }),
+        agent({ key: "read", attentionTimestamp: T0 }),
         agent({ key: "fresh", lastActivityAt: T0 + MINUTE }),
-        agent({ key: "star", lastActivityAt: T0 }),
+        agent({ key: "star", attentionTimestamp: T0 + MINUTE }),
       ],
       pinnedIds: ["star"],
-      lastReadAt: { read: T0, star: T0 + MINUTE },
+      lastReadAt: { read: T0, star: T0 },
     });
     const byKey = new Map(sections.flatMap((s) => s.rows).map((r) => [r.agent.key, r.unread]));
     expect(byKey).toEqual(
       new Map([
-        ["star", false],
-        ["fresh", true],
+        ["star", true],
+        ["fresh", false],
         ["read", false],
       ]),
     );
   });
 });
 
-describe("isChatUnread", () => {
-  it("never-opened chats are unread; equal timestamps are read", () => {
-    expect(isChatUnread(agent({ key: "k" }), undefined)).toBe(true);
-    expect(isChatUnread(agent({ key: "k", lastActivityAt: T0 }), T0)).toBe(false);
-    expect(isChatUnread(agent({ key: "k", lastActivityAt: T0 }), T0 - 1)).toBe(true);
+describe("isChatUnread (C18 completion gate)", () => {
+  it("① activity advancing mid-run never flips the chat unread", () => {
+    const running = agent({ key: "k", attentionTimestamp: null });
+    expect(isChatUnread({ ...running, lastActivityAt: T0 + MINUTE }, T0)).toBe(false);
+    expect(isChatUnread({ ...running, lastActivityAt: T0 + 10 * MINUTE }, T0)).toBe(false);
   });
 
-  it("an attention request newer than the read stamp re-flags the chat unread", () => {
-    expect(
-      isChatUnread(agent({ key: "k", lastActivityAt: T0, attentionTimestamp: T0 + MINUTE }), T0),
-    ).toBe(true);
+  it("② attention(finished) newer than the watermark flips unread; equal is read", () => {
+    expect(isChatUnread(agent({ key: "k", attentionTimestamp: T0 + MINUTE }), T0)).toBe(true);
+    // Opening stamps the max watermark, and a completed chat's attention IS its last
+    // event — so equal timestamps must read as seen (else the dot never clears).
+    expect(isChatUnread(agent({ key: "k", lastActivityAt: T0, attentionTimestamp: T0 }), T0)).toBe(
+      false,
+    );
+  });
+
+  it("③ never-opened + attention present is unread", () => {
+    expect(isChatUnread(agent({ key: "k", attentionTimestamp: T0 }), undefined)).toBe(true);
+  });
+
+  it("④ never-opened + no attention is read (imported / never completed)", () => {
+    expect(isChatUnread(agent({ key: "k", lastActivityAt: T0 + MINUTE }), undefined)).toBe(false);
+  });
+});
+
+describe("showsUnreadDot (C18 双点收敛)", () => {
+  it("active buckets never show the dot — status light + bold title carry them", () => {
+    for (const bucket of ["running", "needs_input", "failed"] as const) {
+      expect(showsUnreadDot(bucket, 0)).toBe(false);
+      expect(showsUnreadDot(bucket, 3)).toBe(false);
+    }
+  });
+
+  it("idle buckets show the dot; a pending count hands the badge slot to the pill", () => {
+    expect(showsUnreadDot("done", 0)).toBe(true);
+    expect(showsUnreadDot("attention", 0)).toBe(true);
+    expect(showsUnreadDot("done", 1)).toBe(false);
+    expect(showsUnreadDot("attention", 2)).toBe(false);
   });
 });

@@ -1,5 +1,6 @@
-// Chat list row (DESIGN §4): provider icon | title (bold + badge when unread,
-// shell alias when renamed) | subtitle `project · relative time · last activity` |
+// Chat list row (DESIGN §4): provider icon | title (bold when unread; C18 badge:
+// dot only on idle rows, count pill only while approvals pend) | shell alias when
+// renamed | subtitle `project · relative time · last activity` |
 // four-state light | ⋯ overflow. Geometry follows the official agent list (§9); the
 // clock state is confined to the subtitle component so a minute tick never re-renders
 // the row. Tapping calls the screen's opener (C4: official navigateToAgent — workspace
@@ -24,7 +25,7 @@ import { getProviderIcon } from "@/components/provider-icons";
 import { joinSubtitleParts } from "@/command-center/results";
 import { useCompactTimeAgo } from "@/hooks/use-compact-time-ago";
 import type { AggregatedAgent } from "@/hooks/use-aggregated-agents";
-import type { ChatRow } from "@/shell/chats/derive";
+import { showsUnreadDot, type ChatRow } from "@/shell/chats/derive";
 import { SHELL_I18N_NAMESPACE } from "@/shell/i18n";
 import { ChatStatusLight } from "@/shell/components/chat-status-light";
 import { ChatRowMenuContent } from "@/shell/components/chat-row-menu";
@@ -59,9 +60,22 @@ function selectionHaptic(): void {
   void Haptics.selectionAsync().catch(() => {});
 }
 
-// WeChat-style unread mark: a count pill when the chat is waiting on approvals,
-// otherwise a plain accent dot.
-function UnreadBadge({ count, rowKey }: { count: number; rowKey: string }) {
+// C18 双点收敛 — two independent judgements in the badge slot: the count pill is a
+// state marker (approvals pend) and renders on count>0 alone — permission requests
+// carry no attention stamp, so gating it on `unread` would make it vanish; the dot
+// is the unread mark and only ever shows on idle rows (showsUnreadDot) — active
+// buckets wear their state on the status light + bold title, never a second dot.
+function ChatBadge({
+  bucket,
+  count,
+  unread,
+  rowKey,
+}: {
+  bucket: SidebarStateBucket;
+  count: number;
+  unread: boolean;
+  rowKey: string;
+}) {
   if (count > 0) {
     return (
       <View style={styles.countBadge}>
@@ -69,7 +83,10 @@ function UnreadBadge({ count, rowKey }: { count: number; rowKey: string }) {
       </View>
     );
   }
-  return <View style={styles.unreadDot} testID={`shell-chat-unread-${rowKey}`} />;
+  if (unread && showsUnreadDot(bucket, count)) {
+    return <View style={styles.unreadDot} testID={`shell-chat-unread-${rowKey}`} />;
+  }
+  return null;
 }
 
 const ChatSubtitle = memo(function ChatSubtitle({
@@ -226,7 +243,12 @@ function ChatRowInner({
               <Text style={[styles.title, unread && styles.titleUnread]} numberOfLines={1}>
                 {displayTitle}
               </Text>
-              {unread ? <UnreadBadge count={pendingCount} rowKey={agent.key} /> : null}
+              <ChatBadge
+                bucket={agent.bucket}
+                count={pendingCount}
+                unread={unread}
+                rowKey={agent.key}
+              />
             </View>
             <ChatSubtitle agent={agent.agent} bucket={agent.bucket} />
           </View>
