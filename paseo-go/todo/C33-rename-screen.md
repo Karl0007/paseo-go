@@ -11,6 +11,9 @@ C19 实锤：壳的长按菜单与胶囊 ⋯ 内嵌 `ChatRenamePage`（MenuTextF
 3. `shell-session-header.tsx`：同样改 push；菜单矩阵 rename 项语义不变（enabled 恒真）。
 4. 两个菜单去 sheet 例外：改 `compactMode="popover"`，删 C19 留的 sheet 例外注释。
 5. 返回语义：rename 屏返回=不保存退出（Android BackHandler + 头部返回，同 commands/edit 姿势）。
+6. **C20 接力复验（C20 移交，必做）**：行菜单转 popover 后复跑"长按→(pending-open)窗→滑→拖"全链
+   （popover 同为 MenuOverlay Modal，C20 的 pending-open 姿势预期不变——实测确认；注入速度纪律 ≤10px/s，
+   BUILD.md 补一行）；接力行为若因形态变化破坏，hook 侧最小调整并报告。
 
 ## 范围
 
