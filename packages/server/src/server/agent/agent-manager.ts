@@ -12,6 +12,7 @@ import {
 import {
   getParentAgentIdFromLabels,
   hasOpenAgentTab,
+  IMPORTED_PROVIDER_SESSION_LABEL,
   isDelegatedAgent,
   isOpenAgentTabLabel,
   PARENT_AGENT_ID_LABEL,
@@ -1466,7 +1467,9 @@ export class AgentManager {
 
       handedToRegistration = true;
       const agent = await this.registerSession(imported.session, importedConfig, resolvedAgentId, {
-        labels: input.labels,
+        // Single import choke point: stamp provenance so clients can tell an imported
+        // provider session apart from a natively created Paseo session.
+        labels: { ...input.labels, [IMPORTED_PROVIDER_SESSION_LABEL]: "true" },
         workspaceId: input.workspaceId,
         timelineRows,
         timelineNextSeq: timelineRows.length + 1,

@@ -18,7 +18,11 @@ import type {
   ImportAgentRequestMessageSchema,
   RecentProviderSessionDescriptorPayload,
 } from "@getpaseo/protocol/messages";
-import { getParentAgentIdFromLabels, PARENT_AGENT_ID_LABEL } from "@getpaseo/protocol/agent-labels";
+import {
+  getParentAgentIdFromLabels,
+  IMPORTED_PROVIDER_SESSION_LABEL,
+  PARENT_AGENT_ID_LABEL,
+} from "@getpaseo/protocol/agent-labels";
 import { createRealpathAwarePathMatcher } from "../../utils/path.js";
 
 type ImportAgentRequestMessage = z.infer<typeof ImportAgentRequestMessageSchema>;
@@ -226,6 +230,10 @@ async function importProviderSessionNow(
       Object.hasOwn(input.request.labels ?? {}, PARENT_AGENT_ID_LABEL)
     ) {
       labelPatch[PARENT_AGENT_ID_LABEL] = requestedParentAgentId;
+    }
+    if (!Object.hasOwn(archivedRecord.labels, IMPORTED_PROVIDER_SESSION_LABEL)) {
+      // Archived records predating the provenance stamp get it backfilled on re-import.
+      labelPatch[IMPORTED_PROVIDER_SESSION_LABEL] = "true";
     }
     await unarchiveAgentState(input.agentStorage, input.agentManager, archivedRecord.id, {
       workspaceId,

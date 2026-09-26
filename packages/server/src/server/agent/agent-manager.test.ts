@@ -17,7 +17,12 @@ import { AgentStorage } from "./agent-storage.js";
 import { InMemoryAgentTimelineStore } from "./agent-timeline-store.js";
 import { toAgentPayload } from "./agent-projections.js";
 import { projectTimelineRows } from "./timeline-projection.js";
-import { getOpenAgentTabLabel, PARENT_AGENT_ID_LABEL } from "@getpaseo/protocol/agent-labels";
+import {
+  getOpenAgentTabLabel,
+  IMPORTED_PROVIDER_SESSION_LABEL,
+  isImportedProviderSession,
+  PARENT_AGENT_ID_LABEL,
+} from "@getpaseo/protocol/agent-labels";
 import { formatSystemNotificationPrompt, startAgentRun } from "./agent-prompt.js";
 import { StaleProviderSessionError } from "./stale-provider-session-error.js";
 import { ensureAgentLoaded, ensureUnarchivedAgentLoaded } from "./agent-loading.js";
@@ -4288,6 +4293,7 @@ test("importProviderSession imports the selected session without listing and pub
     providerHandleId: "thread-selected",
     cwd: workdir,
     workspaceId: "ws-imported",
+    labels: { source: "import", [IMPORTED_PROVIDER_SESSION_LABEL]: "false" },
   });
 
   expect(client.listCalls).toBe(0);
@@ -4334,6 +4340,42 @@ test("importProviderSession imports the selected session without listing and pub
     },
   });
   expect((await storage.get(imported.id))?.title).toBe("Trace provider imports");
+  expect(imported.labels).toEqual({
+    source: "import",
+    [IMPORTED_PROVIDER_SESSION_LABEL]: "true",
+  });
+  expect(isImportedProviderSession(imported)).toBe(true);
+  expect((await storage.get(imported.id))?.labels).toEqual({
+    source: "import",
+    [IMPORTED_PROVIDER_SESSION_LABEL]: "true",
+  });
+});
+
+test("createAgent leaves the imported provider session label off native sessions", async () => {
+  const workdir = mkdtempSync(join(tmpdir(), "agent-manager-native-create-label-"));
+  const storagePath = join(workdir, "agents");
+  const storage = new AgentStorage(storagePath, logger);
+  const manager = new AgentManager({
+    clients: {
+      codex: new TestAgentClient(),
+    },
+    registry: storage,
+    logger,
+  });
+
+  const created = await manager.createAgent(
+    {
+      provider: "codex",
+      cwd: workdir,
+      title: "Native create",
+    },
+    undefined,
+    { labels: { source: "native" }, workspaceId: undefined },
+  );
+
+  expect(created.labels).toEqual({ source: "native" });
+  expect(isImportedProviderSession(created)).toBe(false);
+  expect((await storage.get(created.id))?.labels).toEqual({ source: "native" });
 });
 
 test("reloadAgentSession passes daemon launch env through the provider launch context", async () => {

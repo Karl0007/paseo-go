@@ -1,4 +1,5 @@
 export const PARENT_AGENT_ID_LABEL = "paseo.parent-agent-id";
+export const IMPORTED_PROVIDER_SESSION_LABEL = "paseo.imported-provider-session";
 const OPEN_AGENT_TAB_LABEL_PREFIX = "paseo.open-agent-tab.";
 
 export function getOpenAgentTabLabel(clientId: string): string {
@@ -22,6 +23,10 @@ export function getParentAgentIdFromLabels(labels: Record<string, unknown> | nul
 
 export function isDelegatedAgent(agent: AgentLabelSource): boolean {
   return getParentAgentIdFromLabels(agent.labels) !== null;
+}
+
+export function isImportedProviderSession(agent: AgentLabelSource): boolean {
+  return agent.labels?.[IMPORTED_PROVIDER_SESSION_LABEL] === "true";
 }
 
 export function hasOpenAgentTab(labels: Record<string, unknown> | null | undefined): boolean {

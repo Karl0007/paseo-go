@@ -9,7 +9,10 @@ import type {
 } from "./agent-manager.js";
 import { AgentStorage, type StoredAgentRecord } from "./agent-storage.js";
 import type { FetchRecentProviderSessionsRequestMessage } from "@getpaseo/protocol/messages";
-import { PARENT_AGENT_ID_LABEL } from "@getpaseo/protocol/agent-labels";
+import {
+  IMPORTED_PROVIDER_SESSION_LABEL,
+  PARENT_AGENT_ID_LABEL,
+} from "@getpaseo/protocol/agent-labels";
 import type { AgentTimelineItem } from "./agent-sdk-types.js";
 import { createPersistedWorkspaceRecord } from "../workspace-registry.js";
 import type { WorkspaceProvisioningService } from "../session/workspace-provisioning/workspace-provisioning-service.js";
@@ -828,6 +831,10 @@ test("importProviderSession restores an archived session as the same standalone 
   });
   expect((await harness.storage.get(harness.snapshot.id))?.labels).not.toHaveProperty(
     PARENT_AGENT_ID_LABEL,
+  );
+  expect((await harness.storage.get(harness.snapshot.id))?.labels).toHaveProperty(
+    IMPORTED_PROVIDER_SESSION_LABEL,
+    "true",
   );
   expect(harness.resumeAttempts).toBe(1);
   expect(harness.freshImports).toEqual([]);

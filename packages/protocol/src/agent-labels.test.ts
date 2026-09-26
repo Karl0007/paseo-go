@@ -3,7 +3,9 @@ import {
   getParentAgentIdFromLabels,
   getOpenAgentTabLabel,
   hasOpenAgentTab,
+  IMPORTED_PROVIDER_SESSION_LABEL,
   isDelegatedAgent,
+  isImportedProviderSession,
   isOpenAgentTabLabel,
   PARENT_AGENT_ID_LABEL,
 } from "./agent-labels.js";
@@ -20,6 +22,21 @@ describe("agent label policy", () => {
     expect(isDelegatedAgent({ labels: {} })).toBe(false);
     expect(isDelegatedAgent({ labels: { [PARENT_AGENT_ID_LABEL]: "   " } })).toBe(false);
     expect(isDelegatedAgent({ labels: { [PARENT_AGENT_ID_LABEL]: 42 } })).toBe(false);
+  });
+
+  test("recognizes only a literal 'true' imported provider session label", () => {
+    expect(
+      isImportedProviderSession({ labels: { [IMPORTED_PROVIDER_SESSION_LABEL]: "true" } }),
+    ).toBe(true);
+    expect(isImportedProviderSession({ labels: {} })).toBe(false);
+    expect(
+      isImportedProviderSession({ labels: { [IMPORTED_PROVIDER_SESSION_LABEL]: "TRUE" } }),
+    ).toBe(false);
+    expect(isImportedProviderSession({ labels: { [IMPORTED_PROVIDER_SESSION_LABEL]: true } })).toBe(
+      false,
+    );
+    expect(isImportedProviderSession({ labels: null })).toBe(false);
+    expect(isImportedProviderSession({})).toBe(false);
   });
 
   test("treats any true client-scoped open-tab label as open", () => {
