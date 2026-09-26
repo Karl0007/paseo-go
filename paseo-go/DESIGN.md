@@ -178,3 +178,8 @@ intake 原话与取证=`todo/NEXT-requirements.md`（Q1-Q10）；执行细节=�
     `packages/app/src/app/_layout.tsx` AppShell 包装点（净 +3 行，预算 ≤10，单包装零逻辑，
     解缝=重新贴缝；宿主本体 `src/shell/tablet/**` 永不冲突）；宽屏+壳模式=轨+列表+右栏真路由
     三列，竖屏/壳外=透传零变化。实现卡序 C30→C31→C32（C31 另依赖 C17/C26，C32 依赖 C21/C27）。
+14. **壳包解锁横屏（C30 实锤前置）**：装机 APK 的 `orientation:"portrait"`（app.config.js:108，
+    上游值）把壳窗口锁死竖屏=Q10 无法成立。裁定=缝隙②内一行分叉
+    `orientation: isPaseoGo ? "default" : "portrait"`（官方锁竖屏不变，壳跟随系统旋转）；
+    缝隙②行数预算扩至 ≤16 行；生效需 `prebuild --clean`+重打 debug APK（native manifest）。
+    release v0.2.0 构建链同步受益。
