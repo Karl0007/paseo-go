@@ -61,7 +61,7 @@ import { ContextMenu, ContextMenuTrigger, useContextMenu } from "@/components/ui
 import { useFileDownload } from "@/hooks/use-file-download";
 import { useFileExplorerActions } from "@/hooks/use-file-explorer-actions";
 import { useIsLocalDaemon } from "@/hooks/use-is-local-daemon";
-import { buildWorkspaceExplorerStateKey } from "@/hooks/use-file-explorer-actions";
+import { buildWorkspaceExplorerStateKey } from "@/file-explorer/state-keys";
 import { usePanelStore, type ExpandedPathsUpdate, type SortOption } from "@/stores/panel-store";
 import { buildAbsoluteExplorerPath } from "@/utils/explorer-paths";
 import { isHiddenExplorerPath } from "@/file-explorer/visibility";

@@ -38,8 +38,8 @@ import { useShellCommandRunner } from "@/shell/commands/use-shell-command-runner
 import { SearchModeBar } from "@/shell/components/search/search-mode-bar";
 import { FileSearchRow } from "@/shell/components/search/file-search-row";
 import {
+  collectBrowsedWorkspaces,
   searchFileNames,
-  type FileSearchEntry,
   type FileSearchHit,
   type FileSearchSource,
 } from "@/shell/search/file-search";
@@ -196,16 +196,8 @@ export default function ShellWorkspaceScreen() {
     }
     const out: FileSearchSource[] = [];
     for (const [serverId, session] of Object.entries(sessions)) {
-      for (const [stateKey, explorer] of session.fileExplorer) {
-        // Only workspace-scoped states open in the preview (it needs a
-        // workspaceId); the shell only ever creates `workspace:` states anyway.
-        if (!stateKey.startsWith("workspace:")) continue;
-        const workspaceId = stateKey.slice("workspace:".length);
+      for (const { workspaceId, entries } of collectBrowsedWorkspaces(session.fileExplorer)) {
         const descriptor = session.workspaces.get(workspaceId);
-        const entries: FileSearchEntry[] = [];
-        for (const directory of explorer.directories.values()) {
-          entries.push(...directory.entries);
-        }
         out.push({
           serverId,
           hostLabel: hostsById.get(serverId)?.label ?? serverId,

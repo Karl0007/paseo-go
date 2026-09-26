@@ -1,7 +1,14 @@
 // C9 acceptance: 文件名搜索纯函数单测 — 大小写 / CJK / 空串 / 目录不命中 /
 // 跨 host 去重排序 / 上限截断。
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it } from "vitest";
+import { buildWorkspaceExplorerStateKey } from "@/file-explorer/state-keys";
 import {
+  useSessionStore,
+  type AgentFileExplorerState,
+  type ExplorerEntry,
+} from "@/stores/session-store";
+import {
+  collectBrowsedWorkspaces,
   searchFileNames,
   FILE_SEARCH_LIMIT,
   type FileSearchEntry,
@@ -111,5 +118,110 @@ describe("searchFileNames", () => {
       ".md",
     );
     expect(hits.map((hit) => hit.directory)).toEqual([".", "docs/deep", "C:/x"]);
+  });
+});
+
+// C13-F1 (release zero-hit phantom): the browse screen writes explorer state via
+// buildWorkspaceExplorerStateKey + setFileExplorer; the 工作区 search reads it back
+// via collectBrowsedWorkspaces. These tests pin the writer↔reader contract end to
+// end — key format, `root:` exclusion, directory flattening, the sessions-identity
+// swap the search memo depends on, and the final BUILD.md hit. Any drift between
+// the two sides fails here instead of shipping a silent zero-hit search.
+function explorerFile(name: string, path = name): ExplorerEntry {
+  return { ...file(name, path), size: 9, modifiedAt: "2026-09-26T00:00:00Z" };
+}
+
+function explorerStateWith(entries: ExplorerEntry[]): AgentFileExplorerState {
+  return {
+    directories: new Map([
+      ["root", { path: "root", entries }],
+      ["sub", { path: "sub", entries: [] }],
+    ]),
+    files: new Map(),
+    isLoading: false,
+    lastError: null,
+    pendingRequest: null,
+    currentPath: ".",
+    history: ["."],
+    lastVisitedPath: ".",
+    selectedEntryPath: null,
+  };
+}
+
+const C13F1_SERVER_ID = "c13f1-server";
+
+describe("collectBrowsedWorkspaces (C13-F1 writer↔reader contract)", () => {
+  afterEach(() => {
+    useSessionStore.getState().clearSession(C13F1_SERVER_ID);
+  });
+
+  it("reads back exactly the keys buildWorkspaceExplorerStateKey writes", () => {
+    const key = buildWorkspaceExplorerStateKey({
+      workspaceId: " wks_27fe ",
+      workspaceRoot: "C:/work/paseo-go",
+    });
+    expect(key).toBe("workspace:wks_27fe");
+    const browsed = collectBrowsedWorkspaces(
+      new Map([[key!, explorerStateWith([explorerFile("BUILD.md", "paseo-go/BUILD.md")])]]),
+    );
+    expect(browsed).toHaveLength(1);
+    expect(browsed![0]!.workspaceId).toBe("wks_27fe");
+    expect(browsed![0]!.entries.map((entry) => entry.path)).toEqual(["paseo-go/BUILD.md"]);
+  });
+
+  it("skips root: states — only workspace-scoped entries open in the preview", () => {
+    const key = buildWorkspaceExplorerStateKey({ workspaceId: null, workspaceRoot: "/srv/repo" });
+    expect(key).toBe("root:/srv/repo");
+    expect(
+      collectBrowsedWorkspaces(new Map([[key!, explorerStateWith([explorerFile("x.ts")])]])),
+    ).toEqual([]);
+  });
+
+  it("flattens every loaded directory of the workspace", () => {
+    const state = explorerStateWith([]);
+    state.directories.set("root", {
+      path: "root",
+      entries: [explorerFile("README.md"), explorerFile("paseo-go", "paseo-go")],
+    });
+    state.directories.set("sub", {
+      path: "sub",
+      entries: [explorerFile("BUILD.md", "paseo-go/BUILD.md")],
+    });
+    const [browsed] = collectBrowsedWorkspaces(new Map([["workspace:ws", state]]));
+    expect(browsed?.entries.map((entry) => entry.path)).toEqual([
+      "README.md",
+      "paseo-go",
+      "paseo-go/BUILD.md",
+    ]);
+  });
+
+  it("full chain: setFileExplorer write → collect → searchFileNames hits BUILD.md", () => {
+    const store = useSessionStore.getState();
+    store.initializeSession(C13F1_SERVER_ID, null as never);
+    const key = buildWorkspaceExplorerStateKey({
+      workspaceId: "wks_27fe",
+      workspaceRoot: "C:/work/paseo-go",
+    })!;
+
+    const sessionsBefore = useSessionStore.getState().sessions;
+    store.setFileExplorer(C13F1_SERVER_ID, (prev) =>
+      new Map(prev).set(key, explorerStateWith([explorerFile("BUILD.md", "paseo-go/BUILD.md")])),
+    );
+    // The search memo depends on the sessions object identity — it must be replaced.
+    expect(useSessionStore.getState().sessions).not.toBe(sessionsBefore);
+
+    const session = useSessionStore.getState().sessions[C13F1_SERVER_ID]!;
+    const [browsed] = collectBrowsedWorkspaces(session.fileExplorer);
+    const hits = searchFileNames(
+      [
+        source({
+          serverId: C13F1_SERVER_ID,
+          workspaceId: browsed!.workspaceId,
+          entries: browsed!.entries,
+        }),
+      ],
+      "build",
+    );
+    expect(hits.map((hit) => hit.path)).toEqual(["paseo-go/BUILD.md"]);
   });
 });

@@ -1,4 +1,4 @@
-# C13-F1 文件搜索 release 真机零命中(回归,待修)
+# C13-F1 文件搜索 release 真机零命中(已定性关闭:输入法注入伪影,非回归)
 
 ## 现象(C13 冒烟,release 包 0.1.0 @ 463e171c)
 
@@ -26,3 +26,52 @@ release/debug 包:连接 → 工作区 → 打开 paseo-go 文件浏览 → 返�
 ## 验收口径
 
 修复后 release 真机:浏览根目录→返回→`build` 命中 BUILD.md;仅浏览过目录参与(范围提示不变);evidence 截图。
+
+## 定性结论(C13-F1 动态探针,2026-09-26)
+
+**三嫌疑全部排除——不存在代码回归;C13 零命中是输入法文本注入伪影(测试工具层)。**
+
+方法:临时探针(store 模块实例 tag + sessions 对象身份 WeakMap 注册 + searchSources
+各输入)走 debug+metro 快路径(BUILD.md §4;卡内复现口径 release/debug 均可复现,
+debug 足以定性,免构建窗口)。UI 用 uiautomator 驱动,日志 `adb logcat -d -s ReactNativeJS`。
+
+因果链(实测,同设备同 daemon 同操作序列):
+
+1. 浏览写入侧健康:`WRITE key=workspace:wks_27fe… sessionsId=obj6@store#stzgc
+explorer=workspace:wks_27fe…{dirs=2,entries=55}` —— 单 store 实例(全程仅一个
+   tag,嫌疑①死)、`workspace:` 键正确(嫌疑③死)。
+2. 搜索读取侧健康:`MEMO active=true captured=obj6 live=obj6 same=true …
+sources=1 outEntries=55` —— memo 捕获的就是最新 sessions(嫌疑②死);
+   **卡内"searchSources 为空"的前提不成立**。
+3. 决定性实验:百度输入法下 `adb input keyevent` 注入 `build` → 输入框实际内容
+   `builder`/`builder部idbbuidb`(滑词/预测候选吞并了提交文本)→ 空态「没有匹配的文件」
+   ——与 C13 冒烟现象逐字一致。换 ADBKeyboard(`input text` 直提交,无预测)后
+   **debug 与 release(在装正式包,sha 42b55f09)均一发命中** `BUILD.md`
+   (evidence/C13F1/01-debug-clean-build-hit.png、02-release-build-hit.png、
+   03-release-hit-preview.png=预览页实拍)。
+4. 卡内「输入框确认只有 build」为观察误差:候选栏提交后输入框渲染文本与 RN 受控
+   state 可不一致(候选吞字发生在 commitText 之前),截图空态带 icon 行只能证明
+   query 非空,不能证明 query == "build"。
+
+## 根治加固(伪影不可再骗过诊断 + 防真漂移)
+
+- 写读键契约单一化:新增 `src/file-explorer/state-keys.ts`(`workspace:`/`root:`
+  前缀 + `buildWorkspaceExplorerStateKey` 从 hook 迁出),浏览屏(pane/body/hook)与
+  搜索索引共用;搜索侧抽出纯函数 `collectBrowsedWorkspaces`(workspace: 过滤+目录
+  扁平化),workspace.tsx memo 调用它。
+- 回归单测(file-search.test.ts 新增 4 例):真实键构造器写入→收集器读回、`root:`
+  排除、多目录扁平化、`setFileExplorer` 替换 sessions 身份(搜索 memo 依赖)+
+  全链命中 BUILD.md。写读任一侧漂移即红。
+- 装机复验:重构后 debug(metro)真机命中;正式 APK phase1-4 重打后 release 真机
+  复验(见卡尾 sha)。
+- BUILD.md 输入配方更新:自动化文本注入必须 ADBKeyboard(见 BUILD.md §4)。
+
+## 验收对照
+
+- 定性结论:三选之外=第四因(输入法注入伪影),因果链如上。✔
+- release 真机搜索命中实拍:在装正式包(42b55f09)01-03;重构重打正式包(1d4d20df)04-05,均一发命中。✔
+- sha 更新:RELEASE.md 正式 APK 表(105,348,232 B / 1d4d20df…fd64;日志 build-c13f1-rebuild.log)。✔
+- 零新增套件失败:见 stash 对照。
+
+**改判**:C13 冒烟「文件搜索零命中 FAIL」按 PASS 记(勘误已落 todo/C13-release.md 卡尾;
+冒烟全表口径 17/17,拖拽人工项不变)。

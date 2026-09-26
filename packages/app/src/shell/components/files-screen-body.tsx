@@ -24,10 +24,8 @@ import {
   type ExplorerEntry,
   type WorkspaceDescriptor,
 } from "@/stores/session-store";
-import {
-  buildWorkspaceExplorerStateKey,
-  useFileExplorerActions,
-} from "@/hooks/use-file-explorer-actions";
+import { useFileExplorerActions } from "@/hooks/use-file-explorer-actions";
+import { buildWorkspaceExplorerStateKey } from "@/file-explorer/state-keys";
 import { parentExplorerPath } from "@/utils/explorer-paths";
 import { SHELL_I18N_NAMESPACE } from "@/shell/i18n";
 import { shellPreviewHref } from "@/shell/routes";

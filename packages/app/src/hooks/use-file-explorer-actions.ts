@@ -5,6 +5,11 @@ import {
   type AgentFileExplorerState,
   type ExplorerDirectory,
 } from "@/stores/session-store";
+import {
+  buildWorkspaceExplorerStateKey,
+  normalizeWorkspaceValue,
+  type FileExplorerWorkspaceScope,
+} from "@/file-explorer/state-keys";
 import { explorerFileFromReadResult } from "@/file-explorer/read-result";
 import { parentExplorerPath } from "@/utils/explorer-paths";
 
@@ -29,31 +34,6 @@ function pushHistory(history: string[], path: string): string[] {
     return normalizedHistory;
   }
   return [...normalizedHistory, path];
-}
-
-export interface FileExplorerWorkspaceScope {
-  workspaceId?: string | null;
-  workspaceRoot?: string | null;
-}
-
-function normalizeWorkspaceValue(value: string | null | undefined): string | null {
-  if (typeof value !== "string") {
-    return null;
-  }
-  const trimmed = value.trim();
-  return trimmed.length > 0 ? trimmed : null;
-}
-
-export function buildWorkspaceExplorerStateKey(scope: FileExplorerWorkspaceScope): string | null {
-  const normalizedWorkspaceId = normalizeWorkspaceValue(scope.workspaceId);
-  if (normalizedWorkspaceId) {
-    return `workspace:${normalizedWorkspaceId}`;
-  }
-  const normalizedWorkspaceRoot = normalizeWorkspaceValue(scope.workspaceRoot);
-  if (!normalizedWorkspaceRoot) {
-    return null;
-  }
-  return `root:${normalizedWorkspaceRoot}`;
 }
 
 export function useFileExplorerActions(params: { serverId: string } & FileExplorerWorkspaceScope) {

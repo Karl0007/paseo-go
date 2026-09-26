@@ -6,6 +6,7 @@
 // explorer cache holds (directories browsed in this app run via the 文件浏览屏).
 // Known limitation, surfaced in the UI hint: 只覆盖已浏览目录 — no repo-wide scan,
 // and none may be invented (content search awaits upstream PR #4659).
+import { WORKSPACE_EXPLORER_STATE_PREFIX } from "@/file-explorer/state-keys";
 import { normalizeSearchQuery } from "./query";
 
 /** Structural slice of the official ExplorerEntry the matcher needs. */
@@ -43,6 +44,34 @@ export interface FileSearchHit {
 
 /** Guard rail for the (client-side) result list; matches are cheap but the UI is not. */
 export const FILE_SEARCH_LIMIT = 60;
+
+/** Structural slice of AgentFileExplorerState the index reads. */
+export interface FileSearchExplorerState {
+  directories: ReadonlyMap<string, { entries: readonly FileSearchEntry[] }>;
+}
+
+/**
+ * Store-key contract half of the search index (C13-F1): flatten every loaded
+ * directory listing per workspace. Only `workspace:{id}` states participate —
+ * the preview needs a workspaceId, so `root:` states are skipped. The keys come
+ * from `buildWorkspaceExplorerStateKey` (shared module), so writer and reader
+ * cannot drift silently.
+ */
+export function collectBrowsedWorkspaces(
+  fileExplorer: ReadonlyMap<string, FileSearchExplorerState>,
+): { workspaceId: string; entries: FileSearchEntry[] }[] {
+  const out: { workspaceId: string; entries: FileSearchEntry[] }[] = [];
+  for (const [stateKey, explorer] of fileExplorer) {
+    if (!stateKey.startsWith(WORKSPACE_EXPLORER_STATE_PREFIX)) continue;
+    const workspaceId = stateKey.slice(WORKSPACE_EXPLORER_STATE_PREFIX.length);
+    const entries: FileSearchEntry[] = [];
+    for (const directory of explorer.directories.values()) {
+      entries.push(...directory.entries);
+    }
+    out.push({ workspaceId, entries });
+  }
+  return out;
+}
 
 function parentDirectoryOf(path: string): string {
   const slash = Math.max(path.lastIndexOf("/"), path.lastIndexOf("\\"));
