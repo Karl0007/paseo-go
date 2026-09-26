@@ -260,5 +260,8 @@
     "back": "返回",
     "menu": "会话操作",
     "menuFiles": "查看项目文件"
+  },
+  "tablet": {
+    "listPlaceholder": "列表内容将在此显示"
   }
 }

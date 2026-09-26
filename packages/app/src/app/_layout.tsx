@@ -131,6 +131,7 @@ import {
 import { buildNotificationRoute, resolveNotificationTarget } from "@/utils/notification-routing";
 import { navigateToAgent } from "@/utils/navigate-to-agent";
 import { PluginCatalogSync } from "@/plugins";
+import ShellTabletSplitHost from "@/shell/tablet/split-host";
 import {
   ensureOsNotificationPermission,
   WEB_NOTIFICATION_CLICK_EVENT,
@@ -932,10 +933,12 @@ function AppShell() {
       <HorizontalScrollProvider>
         <OpenProjectListener />
         <AgentNavigationListener />
-        <AppWithSidebar>
-          <WorkspaceRouteNavigationBridge />
-          <RootStack />
-        </AppWithSidebar>
+        <ShellTabletSplitHost>
+          <AppWithSidebar>
+            <WorkspaceRouteNavigationBridge />
+            <RootStack />
+          </AppWithSidebar>
+        </ShellTabletSplitHost>
       </HorizontalScrollProvider>
     </MobilePanelsProvider>
   );

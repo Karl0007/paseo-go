@@ -105,7 +105,9 @@ export default {
     name: isPaseoGo ? goName : variant.name,
     slug: isPaseoGo ? "paseo-go" : "voice-mobile",
     version: nativeReleaseVersion.appVersion,
-    orientation: "portrait",
+    // C30 (DESIGN §14.14): the shell package unlocks landscape (tablet split host
+    // needs a landscape window); the official package keeps the portrait lock.
+    orientation: isPaseoGo ? "default" : "portrait",
     icon: isPaseoGo ? "../../paseo-go/assets/icon.png" : "./assets/images/icon.png",
     scheme: isPaseoGo ? "paseogo" : "paseo",
     userInterfaceStyle: "automatic",

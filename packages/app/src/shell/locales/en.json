@@ -260,5 +260,8 @@
     "back": "Back",
     "menu": "Session actions",
     "menuFiles": "View project files"
+  },
+  "tablet": {
+    "listPlaceholder": "Lists appear here"
   }
 }
