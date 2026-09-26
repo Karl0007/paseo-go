@@ -128,3 +128,14 @@ Android 返回键/手势 = Stack pop；tab 间不叠栈。
 ## 12. 卡序
 
 C0 构建链 → C1 缝隙+骨架+spike → C2 对话列表 → C3 对话交互 → C4 对话接线 → C5 工作区树 → C6 文件+预览+收藏 → C7 快捷指令 → C8 我的 → C9 搜索 → C10 导入 → C11 通知 → C12 打磨 → C13 发布构建 → review 轮 → 总验收
+
+## 13. 冻结后裁定增补（验收日，只增不改上文；事实细节以链接为准）
+
+正文冻结于 2026-09-25；以下决策发生在执行期，与正文冲突处以本节为准。
+
+1. **缝隙扩容为"2 缝隙 + 1 组键契约微缝"**（§2.1 修订）：C13-F1 把 explorer 状态键构造器抽到 `src/file-explorer/state-keys.ts` 供上下游共用，动了 §2.1 之外的 3 个上游文件。裁定接受；逐文件解缝口径见 ACCEPTANCE §1a。
+2. **scheme 分叉**（§2 品牌延伸）：壳 build 用 `paseogo://`，官方配对链接归官方 app；壳深链/恢复 recipe 同步改。
+3. **会话屏薄顶栏实现 = content-floating-panels Portal 浮层**（§7 "自建薄顶栏"分支的实现裁定）：Modal 方案实测不可行（覆盖屏下 dialog 不挂载），Portal 实测可行；胶囊仅在壳来源会话屏显示。详见 `todo/C14-shell-header.md`。
+4. **文件屏双实例**（§5 延伸）：`(shell)/files` 为 tab 内隐藏实例，`(detail)/files` 为真栈实例（胶囊"查看项目文件"用后者，返回落会话屏）；共享 body 组件。见 `todo/C16-files-stack-fix.md`。
+5. **release 构建 = 整机内存分时纪律**（§11 证据契约执行环境补充）：hermesc 需 FreeVis≥23GB 独占 5-9 分钟，构建期 metro/daemon/vitest 全停；一键链 `release/build-release-wsl.sh`，五坑与结论在 BUILD.md §3.5。
+6. **本地数据不加密裁定**：见 §6 威胁模型记录（验收轮复核维持）。
