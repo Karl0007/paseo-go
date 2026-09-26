@@ -139,3 +139,38 @@ C0 构建链 → C1 缝隙+骨架+spike → C2 对话列表 → C3 对话交互 
 4. **文件屏双实例**（§5 延伸）：`(shell)/files` 为 tab 内隐藏实例，`(detail)/files` 为真栈实例（胶囊"查看项目文件"用后者，返回落会话屏）；共享 body 组件。见 `todo/C16-files-stack-fix.md`。
 5. **release 构建 = 整机内存分时纪律**（§11 证据契约执行环境补充）：hermesc 需 FreeVis≥23GB 独占 5-9 分钟，构建期 metro/daemon/vitest 全停；一键链 `release/build-release-wsl.sh`，五坑与结论在 BUILD.md §3.5。
 6. **本地数据不加密裁定**：见 §6 威胁模型记录（验收轮复核维持）。
+
+## 14. 批次二（NEXT）冻结裁定（2026-09-27；与上文冲突以本节为准）
+
+intake 原话与取证=`todo/NEXT-requirements.md`（Q1-Q10）；执行细节=各正式卡（C17-C30）。
+
+1. **上游触点扩容**（§2.1 再修订）：批次二新增正式触点——`server/agent/agent-manager.ts` +
+   `protocol/agent-labels.ts`（导入出处 label 盖章，C22）、`protocol/messages.ts` +
+   `server/agent/providers/omp/session-descriptor.ts`（导入 descriptor optional 父链/活跃字段，C25）。
+   协议纯增 optional、COMPAT 规则适用；其余改动仍限既有 6 文件预算与壳域。
+2. **语音**（Q1）：provider 切官方 OpenAI 兼容面（**纯配置**，`PASEO_*_STT_PROVIDER=openai` +
+   `OPENAI_STT_BASE_URL/API_KEY`），local 模型下载路径整体绕开；交付=dev daemon 配置落地 +
+   `VOICE-DEPLOY.md` 部署规格；真机端到端**挂起待用户端点**（known_issue，不算欠账）。
+3. **菜单形态**（Q3）：壳菜单 compact 形态 sheet→**锚定 popover**（官方引擎 `compactMode` 默认值，
+   零新轮子）；含输入框的菜单页保留 sheet（引擎约束）。
+4. **长按接力**（Q5）：长按停留→锚触点小窗；**窗开+滑动→关窗起拖**（同一触摸流）；全行接入
+   （非置顶行走 hook+禁引擎原生触发）；非置顶行拖落=置顶并插入落点。
+5. **会话屏顶栏替换**（Q7）：胶囊上移全宽覆盖官方 header；⋯ 聚合官方右侧动作
+   （查看文件/diff=切工作区 tab、运行脚本、停止、重命名——复用官方动作层）；边缘手势改道=
+   `mobile-panels setOpenGestureBlocked` 注册 blocker + 壳左缘滑动 `router.back()`；**壳外零行为变化**。
+6. **未读完结制**（Q4）：未读判据 `attentionTimestamp > 水位`（运行中中间步骤不翻未读）；
+   状态灯活跃态抑制蓝点（未读靠加粗），done 灰灯时蓝点=「完成未看」；计数 pill 保留。
+7. **新建对话**（Q6）：直达官方 `/new`（NewWorkspaceScreen）；add-project 流程保留给「＋新建项目」。
+8. **工作区三层树**（Q8）：L1 工程（主视觉=工程名，chevron 角标=聚合运行信息，点行体=展开）→
+   L2 worktree（**按物理身份 cwd+分支合并重复记录**；点行体=该 worktree 文件页）→
+   L3 session（沿用 C3 五动作菜单；点击=会话屏）。L1/L2 长按菜单由卡内设计定稿。
+9. **文件屏**（Q8）：头部只留项目路径；页内文件名搜索（已浏览目录口径，无上游 RPC）；
+   `文件|diff|git 记录` 三段页签（嵌官方 `DiffPane`/`CommitsSection`，不重造）。
+10. **导入屏**（Q2）：搜索=query 透传（daemon 已支持）+ 旧 daemon 客户端过滤降级；
+    「刷新（从源重建）」动作 + **分叉警示**（仅 `paseo.imported` 标记会话；发送前源活跃启发式）；
+    父链与「可能活跃」= descriptor optional 字段（omp 头部 parentId 解析；mtime 启发式，
+    外部会话无可靠存活信号=如实限制）。
+11. **平板横屏**（Q10）：设计卡先行（C29），出稿后**按编排者推荐直接落地**（用户预授权），
+    设计文档留档事后审；若设计引入新上游触点，增补记入本节后续条目。
+12. **批次终态**：release APK **v0.2.0**（debug keystore）+ ACCEPTANCE 增补对照表；
+    语音端到端与 Q10 事后审为两项明示挂起项（非欠账）。
