@@ -167,9 +167,13 @@ intake 原话与取证=`todo/NEXT-requirements.md`（Q1-Q10）；执行细节=�
 9. **文件屏**（Q8）：头部只留项目路径；页内文件名搜索（已浏览目录口径，无上游 RPC）；
    `文件|diff|git 记录` 三段页签（嵌官方 `DiffPane`/`CommitsSection`，不重造）。
 10. **导入屏**（Q2）：搜索=query 透传（daemon 已支持）+ 旧 daemon 客户端过滤降级；
-    「刷新（从源重建）」动作 + **分叉警示**（仅 `paseo.imported` 标记会话；发送前源活跃启发式）；
+    「刷新（从源重新同步）」动作 + **分叉警示**（仅 `paseo.imported` 标记会话；发送前源活跃启发式）；
     父链与「可能活跃」= descriptor optional 字段（omp 头部 parentId 解析；mtime 启发式，
     外部会话无可靠存活信号=如实限制）。
+    **勘误（C25 实测，5533 transcript 取证）**：omp session 头 parentId 实存 0 例——真正跨会话
+    父链=**嵌套目录布局 `<parentStem>/<AgentName>.jsonl`**；实现=header parentId 优先（前向兼容）
+    - 嵌套布局兜底，均限同次扫描索引零二次扫盘。looksActive 已知假阴性：父只跑子代理期间
+      自身不写 → 父行「不活跃」子行「可能活跃」=启发式固有边界，UI 文案保持「可能活跃」措辞。
 11. **平板横屏**（Q10）：设计卡先行（C29），出稿后**按编排者推荐直接落地**（用户预授权），
     设计文档留档事后审；若设计引入新上游触点，增补记入本节后续条目。
 12. **批次终态**：release APK **v0.2.0**（debug keystore）+ ACCEPTANCE 增补对照表；
