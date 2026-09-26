@@ -174,3 +174,7 @@ intake 原话与取证=`todo/NEXT-requirements.md`（Q1-Q10）；执行细节=�
     设计文档留档事后审；若设计引入新上游触点，增补记入本节后续条目。
 12. **批次终态**：release APK **v0.2.0**（debug keystore）+ ACCEPTANCE 增补对照表；
     语音端到端与 Q10 事后审为两项明示挂起项（非欠账）。
+13. **平板横屏 T-A 案获准**（§14.11 落地，设计稿=`DESIGN-tablet.md`）：批准唯一新上游触点
+    `packages/app/src/app/_layout.tsx` AppShell 包装点（净 +3 行，预算 ≤10，单包装零逻辑，
+    解缝=重新贴缝；宿主本体 `src/shell/tablet/**` 永不冲突）；宽屏+壳模式=轨+列表+右栏真路由
+    三列，竖屏/壳外=透传零变化。实现卡序 C30→C31→C32（C31 另依赖 C17/C26，C32 依赖 C21/C27）。
