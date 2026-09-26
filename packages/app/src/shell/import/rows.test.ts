@@ -5,6 +5,7 @@ import type { FetchRecentProviderSessionEntry } from "@getpaseo/client/internal/
 import {
   buildImportToastParts,
   classifyImportError,
+  deriveImportParentLabel,
   deriveImportStatus,
   filterImportEntriesByQuery,
   importEntryMatchesQuery,
@@ -249,5 +250,48 @@ describe("deriveImportStatus search branches", () => {
     expect(deriveImportStatus({ ...ready, rowCount: 0, alreadyImportedCount: 4 })?.key).toBe(
       "import.alreadyHidden",
     );
+  });
+});
+
+// C25-UI 验收：父链副标题与「可能活跃」徽标的映射矩阵（字段缺席=不渲染）。
+describe("import row parent chain + looksActive", () => {
+  it("prefers parentTitle, else falls back to the parentHandleId tail", () => {
+    expect(
+      deriveImportParentLabel({ parentTitle: "C13 发布闸", parentHandleId: "x/y.jsonl" }),
+    ).toBe("C13 发布闸");
+    expect(deriveImportParentLabel({ parentHandleId: "C:\\paseo\\s\\C13-release.jsonl" })).toBe(
+      "C13-release",
+    );
+    expect(deriveImportParentLabel({ parentHandleId: "sess/inner/agent-7.jsonl" })).toBe("agent-7");
+    // 父未进扫描窗=daemon 只给原始父 id（无路径无扩展名）→ 原样尾段。
+    expect(deriveImportParentLabel({ parentHandleId: " 0198ab " })).toBe("0198ab");
+  });
+
+  it("yields null when both fields are absent or blank (旧 daemon / claude codex)", () => {
+    expect(deriveImportParentLabel({})).toBeNull();
+    expect(deriveImportParentLabel({ parentTitle: "   ", parentHandleId: "" })).toBeNull();
+    expect(deriveImportParentLabel({ parentHandleId: "///" })).toBeNull();
+    // 标题只有空白时仍回退 handleId，不渲染空徽标。
+    expect(deriveImportParentLabel({ parentTitle: " ", parentHandleId: "a/b.jsonl" })).toBe("b");
+  });
+
+  it("maps onto rows: parentLabel + looksActive only when the daemon sent them", () => {
+    const [child, plain, idle] = mapEntriesToImportRows(
+      [
+        entry({
+          providerId: "omp",
+          providerHandleId: "child",
+          parentHandleId: "C:/omp/sessions/C13-release.jsonl",
+          parentTitle: "C13 发布闸",
+          looksActive: true,
+        }),
+        entry({ providerId: "omp", providerHandleId: "plain" }),
+        entry({ providerId: "omp", providerHandleId: "idle", looksActive: false }),
+      ],
+      () => null,
+    );
+    expect(child).toMatchObject({ parentLabel: "C13 发布闸", looksActive: true });
+    expect(plain).toMatchObject({ parentLabel: null, looksActive: false });
+    expect(idle).toMatchObject({ parentLabel: null, looksActive: false });
   });
 });

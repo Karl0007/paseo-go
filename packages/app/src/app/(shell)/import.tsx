@@ -85,6 +85,7 @@ function ImportRowCell({
   disabled: boolean;
   onToggle: (key: string) => void;
 }) {
+  const { t } = useTranslation(SHELL_I18N_NAMESPACE);
   const ProviderIcon = getProviderIcon(row.providerId, serverId);
   const meta = [row.folder, formatCompactTimeAgo(new Date(row.lastActivityAt))]
     .filter(Boolean)
@@ -101,9 +102,29 @@ function ImportRowCell({
     >
       <ProviderIcon size={16} color={styles.rowIcon.color} />
       <View style={styles.rowBody}>
-        <Text style={styles.rowTitle} numberOfLines={1}>
-          {row.title}
-        </Text>
+        <View style={styles.rowTitleRow}>
+          <Text style={styles.rowTitle} numberOfLines={1}>
+            {row.title}
+          </Text>
+          {/* C25: 「可能活跃」= mtime 新鲜度启发式，非存活证明；token 色小徽标
+              （刻意不用状态灯，避免与会话 tab 四态灯混淆）。 */}
+          {row.looksActive ? (
+            <Text style={styles.rowActiveBadge} testID={`shell-import-row-${index}-active`}>
+              {t("import.activeBadge")}
+            </Text>
+          ) : null}
+        </View>
+        {/* C25: 父链=副标题位（主标题不动）；字段缺席（旧 daemon/无父链
+            provider）=整行不渲染。 */}
+        {row.parentLabel ? (
+          <Text
+            style={styles.rowParent}
+            numberOfLines={1}
+            testID={`shell-import-row-${index}-parent`}
+          >
+            {t("import.subsession", { parent: row.parentLabel })}
+          </Text>
+        ) : null}
         <Text style={styles.rowMeta} numberOfLines={1}>
           {meta}
         </Text>
@@ -550,8 +571,23 @@ const styles = StyleSheet.create((theme) => ({
     flex: 1,
     gap: 2,
   },
+  rowTitleRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: theme.spacing[2],
+  },
   rowTitle: {
+    flexShrink: 1,
     color: theme.colors.foreground,
+    fontSize: theme.fontSize.sm,
+    fontWeight: theme.fontWeight.medium,
+  },
+  rowParent: {
+    color: theme.colors.foregroundMuted,
+    fontSize: theme.fontSize.sm,
+  },
+  rowActiveBadge: {
+    color: theme.colors.statusWarning,
     fontSize: theme.fontSize.sm,
     fontWeight: theme.fontWeight.medium,
   },

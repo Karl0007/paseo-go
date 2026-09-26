@@ -26,6 +26,8 @@
     "searchPlaceholder": "Search sessions (title/preview/folder)",
     "searchEmpty": "No matching sessions.",
     "searchEmptyLocal": "No matching sessions (older hosts only filter loaded entries).",
+    "subsession": "↳ Sub-session · {{parent}}",
+    "activeBadge": "possibly active",
     "providerError": "{{provider}}: {{message}}",
     "submit": "Import ({{count}})",
     "importing": "Importing {{current}}/{{total}}…",

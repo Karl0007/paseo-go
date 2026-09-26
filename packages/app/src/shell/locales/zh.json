@@ -26,6 +26,8 @@
     "searchPlaceholder": "搜索会话（标题/预览/目录）",
     "searchEmpty": "没有匹配的会话。",
     "searchEmptyLocal": "没有匹配的会话（旧版主机只在已加载的条目里筛选）。",
+    "subsession": "↳ 子会话 · {{parent}}",
+    "activeBadge": "可能活跃",
     "providerError": "{{provider}}：{{message}}",
     "submit": "导入（{{count}}）",
     "importing": "正在导入 {{current}}/{{total}}…",

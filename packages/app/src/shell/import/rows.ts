@@ -18,6 +18,34 @@ export interface ImportRow {
   /** 项目目录的短标签（官方 resolveDirectoryLabel 结果）；未知目录为 null。 */
   folder: string | null;
   lastActivityAt: number;
+  /**
+   * C25 父链副标题的父名段：parentTitle 优先，缺席时取 parentHandleId 尾段
+   * （omp=父 transcript 路径的文件名去扩展名）；两者都无（claude/codex 或旧
+   * daemon 字段缺席）= null=不渲染。
+   */
+  parentLabel: string | null;
+  /** C25「可能活跃」= descriptor looksActive===true；缺席/false 都不渲染。 */
+  looksActive: boolean;
+}
+
+/**
+ * C25 父链副标题的父名段（纯函数，屏只负责 t() 包裹措辞）。
+ * parentTitle（含纯空白判定）优先；否则取 parentHandleId 尾段——omp 的
+ * handleId 是父 transcript 路径（`\` 或 `/` 分隔），尾段再去掉 `.jsonl`
+ * 扩展名；父未进扫描窗时 daemon 只给原始父 id=同样走尾段规则。
+ */
+export function deriveImportParentLabel(
+  entry: Pick<FetchRecentProviderSessionEntry, "parentHandleId" | "parentTitle">,
+): string | null {
+  const title = entry.parentTitle?.trim();
+  if (title) return title;
+  const handle = entry.parentHandleId?.trim();
+  if (!handle) return null;
+  const segments = handle.split(/[/\\]+/).filter(Boolean);
+  const tail = segments[segments.length - 1];
+  if (!tail) return null;
+  const stem = tail.toLowerCase().endsWith(".jsonl") ? tail.slice(0, -".jsonl".length) : tail;
+  return stem.length > 0 ? stem : null;
 }
 
 export function importRowKey(
@@ -50,6 +78,8 @@ export function mapEntriesToImportRows(
       preview: getPromptPreview(entry),
       folder: folderFor(entry.cwd),
       lastActivityAt: new Date(entry.lastActivityAt).getTime(),
+      parentLabel: deriveImportParentLabel(entry),
+      looksActive: entry.looksActive === true,
     });
   }
   rows.sort((a, b) => b.lastActivityAt - a.lastActivityAt);
