@@ -145,4 +145,132 @@ describe("OMP session descriptor", () => {
       expect.objectContaining({ providerHandleId: sessionFile, cwd }),
     ]);
   });
+
+  test("labels nested subagent rows with the parent parsed in the same scan", async () => {
+    const root = await mkdtemp(path.join(tmpdir(), "paseo-omp-session-parent-chain-"));
+    const cwd = path.join(root, "repo");
+    const parent = await writeSession(root, "project/parent.jsonl", [
+      {
+        type: "session",
+        id: "parent-session",
+        parentId: null,
+        timestamp: "2026-06-10T00:00:00.000Z",
+        cwd,
+      },
+      { type: "title", id: "parent-title", title: "Ship the import screen" },
+      {
+        type: "message",
+        id: "parent-user",
+        timestamp: "2026-06-10T00:00:01.000Z",
+        message: { role: "user", content: "parent prompt" },
+      },
+    ]);
+    const child = await writeSession(root, "project/parent/Explore.jsonl", [
+      // OMP builds that omit a cross-session parentId: the nested layout is the link.
+      { type: "session", id: "child-session", timestamp: "2026-06-10T00:00:02.000Z", cwd },
+      {
+        type: "message",
+        id: "child-user",
+        timestamp: "2026-06-10T00:00:03.000Z",
+        message: { role: "user", content: "child prompt" },
+      },
+    ]);
+    const stale = new Date("2026-06-10T00:00:00.000Z");
+    await utimes(parent, stale, stale);
+    await utimes(child, stale, stale);
+
+    const sessions = await listOmpImportableSessions({ sessionDir: path.join(root, "sessions") });
+
+    expect(sessions.map((session) => session.providerHandleId)).toEqual([child, parent]);
+    expect(sessions[0]).toMatchObject({
+      parentHandleId: parent,
+      parentTitle: "Ship the import screen",
+    });
+    // The parent is a root transcript: it has no parent chain to report.
+    expect(sessions[1]).not.toHaveProperty("parentHandleId");
+    expect(sessions[1]).not.toHaveProperty("parentTitle");
+  });
+
+  test("keeps the parent handle when the parent never entered the parsed window", async () => {
+    const root = await mkdtemp(path.join(tmpdir(), "paseo-omp-session-parent-window-"));
+    const cwd = path.join(root, "repo");
+    const parent = await writeSession(root, "project/parent.jsonl", [
+      { type: "session", id: "parent-session", timestamp: "2026-06-09T00:00:00.000Z", cwd },
+      { type: "title", id: "parent-title", title: "Ship the import screen" },
+    ]);
+    const child = await writeSession(root, "project/parent/Explore.jsonl", [
+      { type: "session", id: "child-session", timestamp: "2026-06-10T00:00:00.000Z", cwd },
+    ]);
+    await utimes(parent, new Date("2026-06-09"), new Date("2026-06-09"));
+    await utimes(child, new Date("2026-06-10"), new Date("2026-06-10"));
+
+    const sessions = await listOmpImportableSessions({
+      sessionDir: path.join(root, "sessions"),
+      limit: 1,
+    });
+
+    expect(sessions).toHaveLength(1);
+    expect(sessions[0]).toMatchObject({ providerHandleId: child, parentHandleId: parent });
+    expect(sessions[0]).not.toHaveProperty("parentTitle");
+  });
+
+  test("resolves parentHandleId through the session header parentId", async () => {
+    const root = await mkdtemp(path.join(tmpdir(), "paseo-omp-session-parent-id-"));
+    const cwd = path.join(root, "repo");
+    const spawner = await writeSession(root, "project/alpha/main.jsonl", [
+      { type: "session", id: "root-session", timestamp: "2026-06-08T00:00:00.000Z", cwd },
+      { type: "title", id: "root-title", title: "Root task" },
+    ]);
+    const linked = await writeSession(root, "project/beta/helper.jsonl", [
+      {
+        type: "session",
+        id: "helper-session",
+        parentId: "root-session",
+        timestamp: "2026-06-09T00:00:00.000Z",
+        cwd,
+      },
+    ]);
+    const orphaned = await writeSession(root, "project/gamma/orphan.jsonl", [
+      {
+        type: "session",
+        id: "orphan-session",
+        parentId: "deleted-session",
+        timestamp: "2026-06-10T00:00:00.000Z",
+        cwd,
+      },
+    ]);
+
+    const sessions = await listOmpImportableSessions({ sessionDir: path.join(root, "sessions") });
+    const byHandle = new Map(sessions.map((session) => [session.providerHandleId, session]));
+
+    // Cross-directory link: no nested layout here, only the header id.
+    expect(byHandle.get(linked)).toMatchObject({
+      parentHandleId: spawner,
+      parentTitle: "Root task",
+    });
+    // Parent transcript is gone: the opaque id still groups siblings, no title invented.
+    expect(byHandle.get(orphaned)).toMatchObject({ parentHandleId: "deleted-session" });
+    expect(byHandle.get(orphaned)).not.toHaveProperty("parentTitle");
+  });
+
+  test("marks only recently touched transcripts as possibly active", async () => {
+    const root = await mkdtemp(path.join(tmpdir(), "paseo-omp-session-looks-active-"));
+    const cwd = path.join(root, "repo");
+    const touched = await writeSession(root, "project/touched.jsonl", [
+      { type: "session", id: "touched-session", timestamp: "2026-06-10T00:00:00.000Z", cwd },
+    ]);
+    const idle = await writeSession(root, "project/idle.jsonl", [
+      { type: "session", id: "idle-session", timestamp: "2026-06-10T00:00:00.000Z", cwd },
+    ]);
+    const now = new Date();
+    await utimes(touched, now, now);
+    const idleAt = new Date(now.getTime() - 6 * 60 * 1000);
+    await utimes(idle, idleAt, idleAt);
+
+    const sessions = await listOmpImportableSessions({ sessionDir: path.join(root, "sessions") });
+    const byHandle = new Map(sessions.map((session) => [session.providerHandleId, session]));
+
+    expect(byHandle.get(touched)?.looksActive).toBe(true);
+    expect(byHandle.get(idle)?.looksActive).toBe(false);
+  });
 });

@@ -873,6 +873,19 @@ export const RecentProviderSessionDescriptorPayloadSchema = z.object({
   firstPromptPreview: z.string().nullable(),
   lastPromptPreview: z.string().nullable(),
   lastActivityAt: z.string(),
+  // COMPAT(importDescriptorParentChain): added 2026-09-27 (Paseo Go C25), optional
+  // while clients support older daemons. Providers that have no parent-chain
+  // concept (claude/codex/pi) omit these entirely. `parentHandleId` is
+  // provider-opaque (for omp it is the parent transcript path, falling back to
+  // the raw parent session id when the parent transcript was not scanned);
+  // `parentTitle` is only present when the daemon also parsed the parent.
+  // `looksActive` is a freshness heuristic, never a liveness proof.
+  parentHandleId: z.string().optional(),
+  parentTitle: z.string().optional(),
+  // COMPAT(importDescriptorLooksActive): added 2026-09-27 (Paseo Go C25).
+  // Absent means the provider offers no activity signal at all; false means
+  // the provider checked and the transcript looks idle.
+  looksActive: z.boolean().optional(),
 });
 
 export type RecentProviderSessionDescriptorPayload = z.infer<

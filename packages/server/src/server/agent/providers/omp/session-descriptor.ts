@@ -8,7 +8,10 @@ import type {
   ListImportableSessionsOptions,
 } from "../../agent-sdk-types.js";
 import type { ProviderRuntimeSettings } from "../../provider-launch-config.js";
-import { createRealpathAwarePathMatcher } from "../../../../utils/path.js";
+import {
+  createRealpathAwarePathMatcher,
+  looksLikeDefiniteWindowsPath,
+} from "../../../../utils/path.js";
 
 const OMP_CONFIG_DIR_NAME = ".omp";
 const OMP_AGENT_DIR_ENV = "OMP_AGENT_DIR";
@@ -23,6 +26,10 @@ const FULL_SCAN_LINE_LIMIT = 2_000;
 // remains recursive rather than applying Pi's historical parent-only depth cap.
 const IMPORT_CANDIDATE_OVERSCAN = 40;
 const IMPORT_CANDIDATE_MIN = 400;
+// Freshness heuristic, not a liveness proof. Imported sessions are plain jsonl
+// transcripts owned by another process; the daemon has no watcher and no probe,
+// so a recently touched mtime is the strongest available "possibly active" cue.
+const LOOKS_ACTIVE_MTIME_WINDOW_MS = 5 * 60 * 1000;
 
 interface OmpSessionDescriptorOptions extends ListImportableSessionsOptions {
   sessionDir?: string;
@@ -33,6 +40,7 @@ interface OmpSessionDescriptorOptions extends ListImportableSessionsOptions {
 
 interface OmpSessionHeader {
   sessionId: string;
+  parentId: string | null;
   cwd: string;
   createdAt: Date | null;
 }
@@ -53,6 +61,8 @@ interface OmpSessionHead {
 }
 
 interface OmpSessionDescriptor {
+  sessionId: string;
+  parentId: string | null;
   cwd: string;
   title: string | null;
   firstUserMessage: string | null;
@@ -85,21 +95,37 @@ export async function listOmpImportableSessions(
   );
   const candidates =
     options.scanLimit === undefined && matchesCwd ? ranked : ranked.slice(0, candidateLimit);
-  const sessions: ImportableProviderSession[] = [];
+  // Parent-chain resolution never re-walks the tree: every path this scan already
+  // discovered is indexed up front, and each transcript parsed below contributes
+  // its session id and title. A parent outside the parsed window keeps its handle
+  // id but loses its title.
+  const index: OmpScanIndex = {
+    discovered: new Set(ranked.map((entry) => sessionPathKey(entry.file))),
+    parsedByKey: new Map(),
+    pathBySessionId: new Map(),
+  };
+  const scannedAt = Date.now();
+  const rows: ScannedOmpSession[] = [];
 
   for (const entry of candidates) {
-    const session = await readOmpImportableSession(entry.file);
-    if (!session) continue;
-    if (matchesCwd && !matchesCwd(session.cwd)) continue;
-    sessions.push(session);
-    if (sessions.length >= limit) {
+    const descriptor = await readOmpSessionDescriptor(entry.file);
+    if (!descriptor) continue;
+    index.parsedByKey.set(sessionPathKey(entry.file), descriptor);
+    if (!index.pathBySessionId.has(descriptor.sessionId)) {
+      index.pathBySessionId.set(descriptor.sessionId, entry.file);
+    }
+    if (matchesCwd && !matchesCwd(descriptor.cwd)) continue;
+    rows.push({ filePath: entry.file, mtime: entry.mtime, descriptor });
+    if (rows.length >= limit) {
       break;
     }
   }
 
-  return sessions.sort(
-    (left, right) => right.lastActivityAt.getTime() - left.lastActivityAt.getTime(),
-  );
+  // Links resolve after the parse pass so a parent parsed later in the window
+  // still labels the children listed ahead of it.
+  return rows
+    .map((row) => toOmpImportableSession(row, index, scannedAt))
+    .sort((left, right) => right.lastActivityAt.getTime() - left.lastActivityAt.getTime());
 }
 
 export async function readOmpImportSessionConfig(
@@ -219,14 +245,35 @@ async function rankSessionFilesByMtime(files: string[]): Promise<RankedSessionFi
     .sort((left, right) => right.mtime.getTime() - left.mtime.getTime());
 }
 
-async function readOmpImportableSession(
-  filePath: string,
-): Promise<ImportableProviderSession | null> {
-  const descriptor = await readOmpSessionDescriptor(filePath);
-  if (!descriptor) return null;
+interface ScannedOmpSession {
+  filePath: string;
+  mtime: Date;
+  descriptor: OmpSessionDescriptor;
+}
 
+interface OmpScanIndex {
+  /** Every transcript path this scan discovered, keyed by `sessionPathKey`. */
+  discovered: Set<string>;
+  /** Transcripts this scan actually parsed, keyed by `sessionPathKey`. */
+  parsedByKey: Map<string, OmpSessionDescriptor>;
+  /** Session id -> transcript path as scanned; the first claimer of an id wins. */
+  pathBySessionId: Map<string, string>;
+}
+
+interface OmpParentLink {
+  parentHandleId: string;
+  parentTitle?: string;
+}
+
+function toOmpImportableSession(
+  row: ScannedOmpSession,
+  index: OmpScanIndex,
+  scannedAt: number,
+): ImportableProviderSession {
+  const { descriptor } = row;
+  const parent = resolveOmpParentChain(row.filePath, descriptor, index);
   return {
-    providerHandleId: filePath,
+    providerHandleId: row.filePath,
     cwd: descriptor.cwd,
     title: descriptor.title,
     firstPromptPreview: normalizePromptPreview(descriptor.firstUserMessage),
@@ -234,7 +281,52 @@ async function readOmpImportableSession(
       descriptor.lastUserMessage ?? descriptor.firstUserMessage,
     ),
     lastActivityAt: descriptor.lastActivityAt,
+    looksActive: scannedAt - row.mtime.getTime() < LOOKS_ACTIVE_MTIME_WINDOW_MS,
+    ...parent,
   };
+}
+
+function resolveOmpParentChain(
+  filePath: string,
+  descriptor: OmpSessionDescriptor,
+  index: OmpScanIndex,
+): OmpParentLink | null {
+  // OMP links a subagent transcript to its spawner two ways: the session header's
+  // cross-session `parentId`, and its nested layout, where children spawn into
+  // `<parentStem>/<agentName>.jsonl`. Header first, layout as the fallback.
+  const parentPath =
+    (descriptor.parentId ? index.pathBySessionId.get(descriptor.parentId) : undefined) ??
+    findNestedParentPath(filePath, index.discovered);
+  if (parentPath === undefined) {
+    // Parent transcript never entered this scan: hand back the opaque id so the
+    // client can still group siblings, without inventing a path or a title.
+    return descriptor.parentId ? { parentHandleId: descriptor.parentId } : null;
+  }
+
+  const parent = index.parsedByKey.get(sessionPathKey(parentPath));
+  return {
+    parentHandleId: parentPath,
+    ...(parent?.title ? { parentTitle: parent.title } : {}),
+  };
+}
+
+function findNestedParentPath(filePath: string, discovered: Set<string>): string | undefined {
+  const transcriptDir = path.dirname(filePath);
+  const parentStem = path.basename(transcriptDir);
+  if (!parentStem) return undefined;
+  const candidate = path.join(path.dirname(transcriptDir), `${parentStem}.jsonl`);
+  if (sessionPathKey(candidate) === sessionPathKey(filePath)) return undefined;
+  return discovered.has(sessionPathKey(candidate)) ? candidate : undefined;
+}
+
+/**
+ * Key for paths that came out of the same scan. The nested-layout parent path is
+ * derived from the child's spelling, which can differ in case only on
+ * case-insensitive filesystems, so Windows keys fold case.
+ */
+function sessionPathKey(filePath: string): string {
+  const resolved = path.resolve(filePath);
+  return looksLikeDefiniteWindowsPath(resolved) ? resolved.toLowerCase() : resolved;
 }
 
 async function readOmpSessionDescriptor(filePath: string): Promise<OmpSessionDescriptor | null> {
@@ -258,6 +350,8 @@ async function readOmpSessionDescriptor(filePath: string): Promise<OmpSessionDes
     tailInfo.lastActivityAt ?? (await readFileMtime(filePath)) ?? header.createdAt ?? new Date(0);
 
   return {
+    sessionId: header.sessionId,
+    parentId: header.parentId,
     cwd: header.cwd,
     title,
     firstUserMessage: headInfo.firstUserMessage,
@@ -364,7 +458,11 @@ function parseSessionHeader(firstLine: string): OmpSessionHeader | null {
   const cwd = typeof entry.cwd === "string" ? entry.cwd : null;
   if (!sessionId || !cwd) return null;
   const createdAt = parseDate(entry.timestamp);
-  return { sessionId, cwd, createdAt };
+  // OMP writes the spawning session's id here for subagent transcripts (`null` for
+  // roots). Older builds omit the key entirely; the nested transcript layout then
+  // carries the link.
+  const parentId = readNonEmptyString(entry.parentId);
+  return { sessionId, parentId, cwd, createdAt };
 }
 
 function parseSessionTail(tail: string): OmpSessionTail {

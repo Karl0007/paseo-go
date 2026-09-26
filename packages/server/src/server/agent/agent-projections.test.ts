@@ -527,4 +527,27 @@ describe("toRecentProviderSessionDescriptorPayload", () => {
       lastPromptPreview: null,
     });
   });
+
+  it("carries parent chain and freshness only when the provider reports them", () => {
+    const subagent: ImportableProviderSession & { provider: string } = {
+      provider: "omp",
+      providerHandleId: "/tmp/sessions/project/parent/Explore.jsonl",
+      cwd: "/tmp/project",
+      title: "Explore",
+      firstPromptPreview: "child prompt",
+      lastPromptPreview: "child prompt",
+      lastActivityAt: new Date("2026-04-30T12:34:56.000Z"),
+      parentHandleId: "/tmp/sessions/project/parent.jsonl",
+      parentTitle: "Ship the import screen",
+      looksActive: false,
+    };
+
+    expect(
+      toRecentProviderSessionDescriptorPayload(subagent, { providerLabel: "OMP" }),
+    ).toMatchObject({
+      parentHandleId: "/tmp/sessions/project/parent.jsonl",
+      parentTitle: "Ship the import screen",
+      looksActive: false,
+    });
+  });
 });

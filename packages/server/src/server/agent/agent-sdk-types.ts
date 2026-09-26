@@ -571,6 +571,19 @@ export interface ImportableProviderSession {
   firstPromptPreview: string | null;
   lastPromptPreview: string | null;
   lastActivityAt: Date;
+  /**
+   * Optional provider-reported parent session handle (OMP subagent transcripts).
+   * Providers without a parent-chain concept omit it.
+   */
+  parentHandleId?: string;
+  /** Parent title; present only when the parent was resolved in the same scan. */
+  parentTitle?: string;
+  /**
+   * Freshness heuristic (`false` = checked and idle). External sessions are disk
+   * transcripts with no liveness signal, so this is never a liveness proof.
+   * Providers with no activity signal omit it.
+   */
+  looksActive?: boolean;
 }
 
 export interface ImportProviderSessionInput {

@@ -288,6 +288,11 @@ export function toRecentProviderSessionDescriptorPayload(
     firstPromptPreview: session.firstPromptPreview,
     lastPromptPreview: session.lastPromptPreview,
     lastActivityAt: session.lastActivityAt.toISOString(),
+    // Providers that report no parent chain / no activity signal leave the wire
+    // fields absent so old and new clients render the plain row.
+    ...(session.parentHandleId ? { parentHandleId: session.parentHandleId } : {}),
+    ...(session.parentTitle ? { parentTitle: session.parentTitle } : {}),
+    ...(session.looksActive !== undefined ? { looksActive: session.looksActive } : {}),
   };
 }
 
