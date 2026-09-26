@@ -82,6 +82,11 @@ export const OFFICIAL = {
   // 全局设置: the official root-stack settings screen (settings/index route).
   settings: "/settings",
   welcome: "/welcome",
+  // C17 新建对话: the official New Workspace screen (app/new.tsx → NewWorkspaceScreen,
+  // 项目/主机/Chat 三选择器 + composer). Object form by ruling — real host ids carry
+  // `/` and `:` (`.dev/paseo-home@192.168.31.190:6767`), so expo-router owns the query
+  // encoding instead of a hand-assembled `?serverId=` string (routes.test pins it).
+  newWorkspace: (serverId: string): Href => ({ pathname: "/new", params: { serverId } }) as Href,
   // 连接新主机: the official add-host intent (settings screen + AddHostMethodModal,
   // direct/SSH/pair-link). Works with hosts already present, unlike /welcome which
   // only offers the connect cards on first run.

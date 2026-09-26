@@ -31,7 +31,6 @@ import { DraggableList } from "@/components/draggable-list";
 import type { DraggableRenderItemInfo } from "@/components/draggable-list.types";
 import { useToast } from "@/contexts/toast-context";
 import { useAggregatedAgents } from "@/hooks/use-aggregated-agents";
-import { useOpenAddProject } from "@/hooks/use-open-add-project";
 import { getHostRuntimeStore, useHostRegistryStatus, useHosts } from "@/runtime/host-runtime";
 import { useSessionStore } from "@/stores/session-store";
 import {
@@ -220,7 +219,6 @@ export default function ShellChatsScreen() {
   const { t } = useTranslation(SHELL_I18N_NAMESPACE);
   const insets = useSafeAreaInsets();
   const toast = useToast();
-  const openAddProject = useOpenAddProject();
 
   const hosts = useHosts();
   const hostRegistryStatus = useHostRegistryStatus();
@@ -381,8 +379,20 @@ export default function ShellChatsScreen() {
     },
     [hostsById, toast, t],
   );
-  const handleNewChat = useCallback(() => openAddProject(), [openAddProject]);
   const handleConnectHost = useCallback(() => router.push(OFFICIAL.welcome as Href), []);
+  // C17 (DESIGN §14.7): 新建对话 goes straight to the official New Workspace screen —
+  // the add-project flow stays behind the 工作区 tab's ＋新建项目. serverId comes from
+  // the R1-safe per-host status read: first online host, else the first host (the
+  // screen renders its own offline state), else the connect-host guidance, which is
+  // what the no-host empty state does anyway.
+  const handleNewChat = useCallback(() => {
+    const serverId = hostIds.find((id) => statuses.get(id) === "online") ?? hostIds[0] ?? undefined;
+    if (serverId === undefined) {
+      handleConnectHost();
+      return;
+    }
+    router.push(OFFICIAL.newWorkspace(serverId));
+  }, [hostIds, statuses, handleConnectHost]);
   const handleSearchOpen = useCallback(() => setSearchActive(true), []);
   const handleSearchClose = useCallback(() => {
     setSearchActive(false);

@@ -54,6 +54,32 @@ describe("OFFICIAL.agentOpen", () => {
   });
 });
 
+describe("OFFICIAL.newWorkspace", () => {
+  // C17: ＋菜单 → 新建对话 lands on the official New Workspace screen. Object form by
+  // ruling: the target is the ROOT route "/new" (not a shell group path), the param
+  // name is exactly the one app/new.tsx reads, and expo-router owns the encoding —
+  // a builder that pre-encoded would fail the raw-value assertions below.
+  it("targets the official /new route with serverId as a raw param", () => {
+    expect(OFFICIAL.newWorkspace("srv-1")).toEqual({
+      pathname: "/new",
+      params: { serverId: "srv-1" },
+    });
+  });
+
+  it("passes host ids carrying reserved characters through untouched", () => {
+    for (const serverId of [
+      ".dev/paseo-home@192.168.31.190:6767",
+      "host 9:80/#%&",
+      "主机 dir 100%",
+    ]) {
+      expect(OFFICIAL.newWorkspace(serverId), serverId).toEqual({
+        pathname: "/new",
+        params: { serverId },
+      });
+    }
+  });
+});
+
 describe("shellPreviewHref", () => {
   // The C6 preview carries raw workspace paths (CJK, spaces, ?, %, #) through the
   // query string. expo-router owns the encoding — a builder that pre-encodes here
