@@ -33,19 +33,18 @@ import {
   ContextMenuItem,
   useContextMenu,
 } from "@/components/ui/context-menu";
-import { MenuSubTrigger } from "@/components/ui/menu";
 import { DEFAULT_FLOATING_PANEL_PORTAL_HOST } from "@/components/ui/floating-panel-portal";
 import { useAggregatedAgents, type AggregatedAgent } from "@/hooks/use-aggregated-agents";
 import { useSessionStore } from "@/stores/session-store";
 import { deriveSidebarStateBucket } from "@/utils/sidebar-agent-state";
 import { SHELL_I18N_NAMESPACE } from "@/shell/i18n";
-import { shellFilesDetailHref } from "@/shell/routes";
+import { shellFilesDetailHref, shellRenameHref } from "@/shell/routes";
 import { usePaseoGoPinsStore } from "@/shell/stores/pins";
 import { usePaseoGoShellActive } from "@/shell/stores/settings";
 import { useShellAgentActions, type ShellChatTarget } from "@/shell/shellAgentActions";
-import { ChatRenamePage } from "@/shell/components/chat-row-menu";
 import { ChatStatusLight } from "@/shell/components/chat-status-light";
 import {
+  createSessionHeaderRunner,
   resolveShellSessionWorkspace,
   sessionHeaderMenuPlan,
   type SessionHeaderActionId,
@@ -54,7 +53,6 @@ import {
 
 /** Stable portal slot: one header capsule app-wide. */
 const SESSION_HEADER_PORTAL_NAME = "paseoGo-session-header";
-const RENAME_PAGE_ID = "sessionRename";
 
 /** The composer dock's minimum footprint (input bubble + control chips row), dp.
  *  Measured on-device: 130dp total, of which insets.bottom ≈ 20dp — the fixed part
@@ -72,6 +70,12 @@ const ThemedFolderTree = withUnistyles(FolderTree, (theme) => ({
 }));
 const ThemedSquare = withUnistyles(Square, (theme) => ({ color: theme.colors.foregroundMuted }));
 const ThemedPenLine = withUnistyles(PenLine, (theme) => ({ color: theme.colors.foregroundMuted }));
+
+const HEADER_LABEL_KEY: Record<SessionHeaderActionId, string> = {
+  files: "header.menuFiles",
+  stop: "chats.menu.stop",
+  rename: "chats.menu.rename",
+};
 
 function actionLeading(id: SessionHeaderActionId) {
   switch (id) {
@@ -135,12 +139,8 @@ function ShellSessionHeaderCapsule({
   agent: AggregatedAgent;
 }) {
   return (
-    // C19 (DESIGN §14.3): stays a sheet on purpose — the capsule menu carries the
-    // rename page (a MenuTextField), and compact popovers have no keyboard avoidance
-    // (docs/menus.md: input pages must be sheets). The rename input page is C33's
-    // move-out target; this menu flips to popover when that lands.
     <Portal hostName={DEFAULT_FLOATING_PANEL_PORTAL_HOST} name={SESSION_HEADER_PORTAL_NAME}>
-      <ContextMenu compactMode="sheet">
+      <ContextMenu compactMode="popover">
         <CapsuleInner workspace={workspace} agent={agent} />
       </ContextMenu>
     </Portal>
@@ -187,41 +187,35 @@ function CapsuleInner({
   }, []);
   const openMenu = useCallback(() => menu.setOpen(true), [menu]);
 
-  // 查看项目文件: the (detail) files instance (C16) — a real root-Stack push on
-  // top of the session screen, so hardware/gesture back pops right back here.
-  // The old shellFilesHref target ((shell) hidden-tab route) resolved into the
-  // existing (shell) entry (navigate-reuse), popping the session — C14's
-  // recorded defect. The jump stays exact (workspace ids round-trip through
-  // the param-object builder).
-  const run = useCallback(
-    (id: SessionHeaderActionId) => {
-      if (id === "files") {
-        router.push(shellFilesDetailHref(workspace.serverId, workspace.workspaceId));
-        return;
-      }
-      if (id === "stop") void actions.stop(target);
-    },
+  // The dispatch table is the pure `createSessionHeaderRunner` (matrix test pins
+  // it): 查看项目文件 is the (detail) files instance (C16) — a real root-Stack push
+  // on top of the session screen, so hardware/gesture back pops right back here.
+  // 重命名 (C33) pushes the (shell)/rename hidden tab: like the C14 finding for
+  // SHELL.files, that resolves into the mounted (shell) entry (navigate-reuse), so
+  // the capsule's rename chain lands on the rename screen and returns to the 对话
+  // list — the card's 回列表 semantics, not a session-preserving push.
+  const run = useMemo(
+    () =>
+      createSessionHeaderRunner({
+        openFiles: () =>
+          router.push(shellFilesDetailHref(workspace.serverId, workspace.workspaceId)),
+        stop: () => void actions.stop(target),
+        openRename: () => router.push(shellRenameHref(target)),
+      }),
     [actions, target, workspace.serverId, workspace.workspaceId],
   );
   const runFiles = useCallback(() => run("files"), [run]);
   const runStop = useCallback(() => run("stop"), [run]);
+  const runRename = useCallback(() => run("rename"), [run]);
+  const handlers = useMemo(
+    () => ({ files: runFiles, stop: runStop, rename: runRename }),
+    [runFiles, runRename, runStop],
+  );
 
   // Stable style fn (the row-press pattern): an inline arrow would rebuild per render.
   const iconButtonStyle = useCallback(
     ({ pressed }: { pressed: boolean }) => [styles.iconButton, pressed && styles.iconButtonPressed],
     [],
-  );
-
-  const pages = useMemo(
-    () => [
-      {
-        id: RENAME_PAGE_ID,
-        title: t("chats.menu.renameTitle"),
-        hoverIntent: false,
-        content: <ChatRenamePage target={target} alias={alias} actions={actions} />,
-      },
-    ],
-    [actions, alias, t, target],
   );
 
   return (
@@ -243,6 +237,10 @@ function CapsuleInner({
           </Text>
           <ChatStatusLight agent={agent} bucket={bucket} />
           <Pressable
+            // C33 popover form needs an anchor: the engine measures this button
+            // through its trigger ref (the row menus get it from ContextMenuTrigger).
+            ref={menu.triggerRef}
+            collapsable={false}
             onPress={openMenu}
             accessibilityRole="button"
             accessibilityLabel={t("header.menu")}
@@ -254,36 +252,17 @@ function CapsuleInner({
           </Pressable>
         </View>
       </View>
-      <ContextMenuContent
-        sheetTitle={displayTitle}
-        pages={pages}
-        width={280}
-        testID={`shell-session-menu-${key}`}
-      >
+      <ContextMenuContent width={280} testID={`shell-session-menu-${key}`}>
         {sessionHeaderMenuPlan({ stoppable }).map((item) => {
-          if (item.id === "rename") {
-            return (
-              <MenuSubTrigger
-                key={item.id}
-                id={RENAME_PAGE_ID}
-                leading={actionLeading(item.id)}
-                testID="shell-session-menu-rename"
-              >
-                {t("chats.menu.rename")}
-              </MenuSubTrigger>
-            );
-          }
-          const label = item.id === "files" ? t("header.menuFiles") : t("chats.menu.stop");
-          const onSelect = item.id === "files" ? runFiles : runStop;
           return (
             <ContextMenuItem
               key={item.id}
               leading={actionLeading(item.id)}
               disabled={!item.enabled}
-              onSelect={onSelect}
+              onSelect={handlers[item.id]}
               testID={`shell-session-menu-${item.id}`}
             >
-              {label}
+              {t(HEADER_LABEL_KEY[item.id])}
             </ContextMenuItem>
           );
         })}

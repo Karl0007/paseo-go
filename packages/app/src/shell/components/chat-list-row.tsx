@@ -8,10 +8,9 @@
 //
 // C3 interaction layer (card C3): every row wraps the official ContextMenu engine —
 // long press opens the menu, the ⋯ button opens the same menu for accessibility.
-// C19 (DESIGN §14.3) keeps this one a sheet on purpose: the menu carries the rename
-// page (a MenuTextField), and a compact popover has no keyboard avoidance — the
-// engine's hard rule is that input pages stay sheets (docs/menus.md). The rename
-// input page is C33's move-out target; this menu flips to popover when that lands.
+// C19/C33 (DESIGN §14.3): the menu is the anchored popover — 重命名 left it for the
+// (shell)/rename screen, so the engine's "input pages stay sheets" rule no longer
+// applies here.
 // C20 (DESIGN §14.4): on the live filter EVERY row rides the DraggableFlatList
 // through this arbitration hook — long-press decides the anchored window (shown
 // on release), and sliding past the relay slop dismisses it and lifts the row in
@@ -21,6 +20,7 @@
 // table.
 import { memo, useCallback, useMemo } from "react";
 import { Pressable, Text, View } from "react-native";
+import { router } from "expo-router";
 import { StyleSheet } from "react-native-unistyles";
 import { useTranslation } from "react-i18next";
 import { MoreHorizontal } from "lucide-react-native";
@@ -34,6 +34,7 @@ import { useCompactTimeAgo } from "@/hooks/use-compact-time-ago";
 import type { AggregatedAgent } from "@/hooks/use-aggregated-agents";
 import { showsUnreadDot, type ChatRow } from "@/shell/chats/derive";
 import { SHELL_I18N_NAMESPACE } from "@/shell/i18n";
+import { shellRenameHref } from "@/shell/routes";
 import { ChatStatusLight } from "@/shell/components/chat-status-light";
 import { ChatRowMenuContent } from "@/shell/components/chat-row-menu";
 import { usePaseoGoArchiveStore } from "@/shell/stores/archive";
@@ -149,7 +150,7 @@ export const ChatListRow = memo(function ChatListRow({
 }: ChatListRowProps) {
   return (
     <Animated.View entering={FadeIn.duration(140)} exiting={FadeOut.duration(120)}>
-      <ContextMenu compactMode="sheet">
+      <ContextMenu compactMode="popover">
         <ChatRowInner
           row={row}
           actions={actions}
@@ -235,9 +236,11 @@ function ChatRowInner({
     .join(" · ");
   // 停止 only acts on an abortable turn: running, or blocked on an approval.
   const stoppable = agent.bucket === "running" || agent.bucket === "needs_input";
-  const menuState = useMemo(
-    () => ({ pinned, archived, stoppable, alias }),
-    [pinned, archived, stoppable, alias],
+  const menuState = useMemo(() => ({ pinned, archived, stoppable }), [pinned, archived, stoppable]);
+  // C33: 重命名 pushes the hidden-tab rename screen (object params, hostile ids).
+  const openRename = useCallback(
+    (renameTarget: ShellChatTarget) => router.push(shellRenameHref(renameTarget)),
+    [],
   );
 
   const triggerStyle = useCallback(
@@ -304,6 +307,7 @@ function ChatRowInner({
         state={menuState}
         actions={actions}
         displayTitle={displayTitle}
+        openRename={openRename}
       />
     </>
   );

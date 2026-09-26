@@ -3,9 +3,10 @@
 // screen — a false positive is a shell bar on official IA, a false negative is the
 // missing P1 feature. Route strings go through the real builders (routes.test.ts
 // already guards their round-trips), so this pins the composition.
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { OFFICIAL } from "@/shell/routes";
 import {
+  createSessionHeaderRunner,
   HOST_ROOT_ROUTE,
   SHELL_ROOT_ROUTE,
   resolveShellSessionWorkspace,
@@ -108,5 +109,32 @@ describe("sessionHeaderMenuPlan", () => {
       { id: "stop", enabled: true },
       { id: "rename", enabled: true },
     ]);
+  });
+});
+
+describe("createSessionHeaderRunner (C33 dispatch)", () => {
+  // The capsule menu's rows all funnel their id through this table. 重命名 is the
+  // row the menu never acts on itself (the C33 rename screen push lives with the
+  // caller): it must reach the injected opener and nothing else.
+  it("routes 重命名 to the injected screen opener only", () => {
+    const openFiles = vi.fn();
+    const stop = vi.fn();
+    const openRename = vi.fn();
+    createSessionHeaderRunner({ openFiles, stop, openRename })("rename");
+    expect(openRename).toHaveBeenCalledTimes(1);
+    expect(openFiles).not.toHaveBeenCalled();
+    expect(stop).not.toHaveBeenCalled();
+  });
+
+  it("routes 查看项目文件/停止 to their own callbacks", () => {
+    const openFiles = vi.fn();
+    const stop = vi.fn();
+    const openRename = vi.fn();
+    const run = createSessionHeaderRunner({ openFiles, stop, openRename });
+    run("files");
+    run("stop");
+    expect(openFiles).toHaveBeenCalledTimes(1);
+    expect(stop).toHaveBeenCalledTimes(1);
+    expect(openRename).not.toHaveBeenCalled();
   });
 });

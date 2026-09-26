@@ -19,6 +19,9 @@ export const SHELL = {
   commandsEdit: "/(shell)/commands/edit",
   // C10 导入屏: 隐藏 tab（同 files/commands 的 C5 KI-2 模式），＋菜单 push 进入。
   import: "/(shell)/import",
+  // C33 重命名屏: 隐藏 tab（同 files/commands/import 模式），行长按菜单与胶囊 ⋯ 的
+  // rename 项 push 进入；菜单本体因此去掉了输入子页、转回 popover（DESIGN §14.3/§14.4）。
+  rename: "/(shell)/rename",
 } as const;
 
 // 预览屏 lives in its own top-level group so opening a file is a real root-Stack
@@ -67,6 +70,18 @@ export function shellFilesDetailHref(serverId: string, workspaceId: string): Hre
 // through the object form so expo-router owns the encoding, like the preview params.
 export function shellCommandEditHref(id?: string): Href {
   return (id ? { pathname: SHELL.commandsEdit, params: { id } } : SHELL.commandsEdit) as Href;
+}
+
+// C33 重命名屏: the target rides the object params (serverId/agentId can carry `/`
+// and `:` — expo-router owns the encoding, routes.test pins the round-trip); the
+// screen rebuilds the pins-store key `${serverId}:${agentId}` from them.
+export interface ShellRenameParams {
+  serverId: string;
+  agentId: string;
+}
+
+export function shellRenameHref(params: ShellRenameParams): Href {
+  return { pathname: SHELL.rename, params: { ...params } } as Href;
 }
 
 // Workspace routes wrap the official builders (host-routes) so the shell never

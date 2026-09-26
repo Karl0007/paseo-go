@@ -88,10 +88,6 @@
       "pin": "Pin",
       "unpin": "Unpin",
       "rename": "Rename",
-      "renameTitle": "Rename",
-      "renamePlaceholder": "Display name (empty resets)",
-      "renameSave": "Save",
-      "renameClear": "Reset to original name",
       "archive": "Archive",
       "unarchive": "Unarchive",
       "stop": "Stop",
@@ -101,6 +97,14 @@
       "deleteConfirm": "Delete",
       "deleteCancel": "Cancel",
       "more": "More actions"
+    },
+    "rename": {
+      "title": "Rename",
+      "name": "Display name",
+      "placeholder": "Display name (empty resets)",
+      "hint": "Save with an empty name to reset it",
+      "save": "Save",
+      "cancel": "Cancel"
     },
     "toast": {
       "pinned": "Pinned",

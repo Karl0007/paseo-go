@@ -7,7 +7,14 @@ import {
   parseHostWorkspaceOpenIntentFromPathname,
   parseHostWorkspaceRouteFromPathname,
 } from "@/utils/host-routes";
-import { DETAIL, OFFICIAL, SHELL, shellFilesDetailHref, shellPreviewHref } from "./routes";
+import {
+  DETAIL,
+  OFFICIAL,
+  SHELL,
+  shellFilesDetailHref,
+  shellPreviewHref,
+  shellRenameHref,
+} from "./routes";
 
 describe("OFFICIAL.workspace", () => {
   it("keeps url-safe ids verbatim (no double encoding)", () => {
@@ -112,6 +119,20 @@ describe("shellFilesDetailHref", () => {
     expect(shellFilesDetailHref(serverId, workspaceId)).toEqual({
       pathname: DETAIL.files,
       params: { serverId, workspaceId },
+    });
+  });
+});
+
+describe("shellRenameHref", () => {
+  // C33: rename moved out of the menu pages into a hidden-tab screen. The target
+  // goes through the object form (host ids carry `/` and `:` in the live .dev
+  // setup); a builder that hand-assembled a query string would fail below.
+  it("targets the (shell) rename route with raw serverId/agentId params", () => {
+    const serverId = ".dev/paseo-home@192.168.31.190:6767";
+    const agentId = "agent 9/#%&中文";
+    expect(shellRenameHref({ serverId, agentId })).toEqual({
+      pathname: SHELL.rename,
+      params: { serverId, agentId },
     });
   });
 });

@@ -68,3 +68,27 @@ export function sessionHeaderMenuPlan(state: { stoppable: boolean }): SessionHea
     { id: "rename", enabled: true },
   ];
 }
+
+// ---------------------------------------------------------------------------
+// Menu dispatch — the header sibling of `createChatMenuRunner` (chat-row-menu):
+// every capsule row funnels its id through this table. 重命名 is the row the menu
+// never acts on itself (C33): it hands off to the injected screen opener that
+// pushes the (shell)/rename screen, so this module stays React- and router-free
+// and the routing is unit-testable.
+// ---------------------------------------------------------------------------
+
+export interface SessionHeaderRunnerDeps {
+  openFiles: () => void;
+  stop: () => void;
+  openRename: () => void;
+}
+
+export function createSessionHeaderRunner(
+  deps: SessionHeaderRunnerDeps,
+): (id: SessionHeaderActionId) => void {
+  return (id) => {
+    if (id === "files") deps.openFiles();
+    else if (id === "stop") deps.stop();
+    else deps.openRename();
+  };
+}
