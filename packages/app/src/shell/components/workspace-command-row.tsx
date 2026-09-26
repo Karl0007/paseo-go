@@ -115,8 +115,10 @@ export function WorkspaceCommandRow({
   const rowLabel = dimmed
     ? `${command.name} · ${subtitle} · ${t("chats.hostStatus.offline")}`
     : `${command.name} · ${subtitle}`;
+  // C19 (DESIGN §14.3): the ContextMenu wrapper defaults its compact mode to sheet;
+  // this row's menu takes no input page, so it rides the anchored popover explicitly.
   return (
-    <ContextMenu>
+    <ContextMenu compactMode="popover">
       <ContextMenuTrigger
         onPress={handlePress}
         onLongPress={handleLongPress}

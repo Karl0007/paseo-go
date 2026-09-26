@@ -1,10 +1,11 @@
 // File action menus (card C6): the ruling's action set — 收藏｜下载｜分享｜复制路径｜
-// 添加到对话 — on the official menu engine (docs/menus.md), same sheet presentation
-// C3's chat rows use. Two shapes share one row list: the preview screen's overflow
-// (press-to-open DropdownMenu) and the 工作区 favorites rows' long-press ContextMenu
-// (取消收藏/分享/复制路径 subset). 下载 and 分享 both ride the official
-// download-store pipeline — on native it ends in the system share sheet, which is
-// also how a downloaded file is opened elsewhere.
+// 添加到对话 — on the official menu engine (docs/menus.md), in its anchored-popover
+// presentation (C19, DESIGN §14.3: none of these pages takes input, so the compact
+// popover is the right shape). Two shapes share one row list: the preview screen's
+// overflow (press-to-open DropdownMenu) and the 工作区 favorites rows' long-press
+// ContextMenu (取消收藏/分享/复制路径 subset). 下载 and 分享 both ride the official
+// download-store pipeline — on native it ends in the system share sheet, which
+// is also how a downloaded file is opened elsewhere.
 import { useCallback, type ReactElement, type ReactNode } from "react";
 import { useTranslation } from "react-i18next";
 import { withUnistyles } from "react-native-unistyles";
@@ -189,7 +190,7 @@ export function ShellFileOverflowMenu({
 }): ReactElement {
   const labels = useFileMenuLabels();
   return (
-    <DropdownMenu compactMode="sheet">
+    <DropdownMenu>
       <DropdownMenuTrigger
         testID={testID}
         accessibilityRole="button"
@@ -229,7 +230,9 @@ export function ShellFavoriteRowMenu({
     void Haptics.selectionAsync().catch(() => {});
   }, []);
   return (
-    <ContextMenu>
+    // The ContextMenu wrapper defaults its compact mode to sheet; C19 opts this
+    // row menu into the anchored popover explicitly (docs/menus.md).
+    <ContextMenu compactMode="popover">
       <ContextMenuTrigger
         onPress={onPress}
         onLongPress={handleLongPress}

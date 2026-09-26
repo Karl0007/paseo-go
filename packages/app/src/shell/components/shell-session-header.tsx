@@ -135,8 +135,12 @@ function ShellSessionHeaderCapsule({
   agent: AggregatedAgent;
 }) {
   return (
+    // C19 (DESIGN §14.3): stays a sheet on purpose — the capsule menu carries the
+    // rename page (a MenuTextField), and compact popovers have no keyboard avoidance
+    // (docs/menus.md: input pages must be sheets). The rename input page is C33's
+    // move-out target; this menu flips to popover when that lands.
     <Portal hostName={DEFAULT_FLOATING_PANEL_PORTAL_HOST} name={SESSION_HEADER_PORTAL_NAME}>
-      <ContextMenu>
+      <ContextMenu compactMode="sheet">
         <CapsuleInner workspace={workspace} agent={agent} />
       </ContextMenu>
     </Portal>

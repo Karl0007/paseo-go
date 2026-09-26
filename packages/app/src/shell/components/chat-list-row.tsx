@@ -7,7 +7,11 @@
 // route + open intent — plus the read stamp; never the parse-stub push).
 //
 // C3 interaction layer (card C3): every row wraps the official ContextMenu engine —
-// long press opens the sheet menu, the ⋯ button opens the same menu for accessibility.
+// long press opens the menu, the ⋯ button opens the same menu for accessibility.
+// C19 (DESIGN §14.3) keeps this one a sheet on purpose: the menu carries the rename
+// page (a MenuTextField), and a compact popover has no keyboard avoidance — the
+// engine's hard rule is that input pages stay sheets (docs/menus.md). The rename
+// input page is C33's move-out target; this menu flips to popover when that lands.
 // Pinned rows additionally ride the DraggableFlatList: the shell's own arbitration
 // hook splits 长按停留 (menu, 450ms stationary) from 长按拖动 (drag armed at 180ms,
 // activated on movement), so drag and menu never fight. Rows fade in/out individually —
@@ -133,7 +137,7 @@ export const ChatListRow = memo(function ChatListRow({
 }: ChatListRowProps) {
   return (
     <Animated.View entering={FadeIn.duration(140)} exiting={FadeOut.duration(120)}>
-      <ContextMenu>
+      <ContextMenu compactMode="sheet">
         <ChatRowInner
           row={row}
           actions={actions}

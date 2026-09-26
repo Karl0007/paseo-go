@@ -1,10 +1,11 @@
-// 对话 tab top bar (DESIGN §4): 连接状态胶囊 (tap = per-host status sheet with
+// 对话 tab top bar (DESIGN §4): 连接状态胶囊 (tap = per-host status popover with
 // single-host retry) | 进行中/已归档 filter segment (C3: archived rows hide from the
 // live list; the filter reveals them and their 取消归档/删除 menu) | 搜索 (C9: the
 // icon opens the header's search mode — the whole bar morphs into input + 取消,
 // filtering the list below instantly) | ＋菜单 (新建对话 = official add-project flow,
-// 导入会话 = C10 push of the shell import screen). Menus ride the official menu engine in sheet
-// presentation, the compact-native shape the composer already uses.
+// 导入会话 = C10 push of the shell import screen). Menus ride the official menu engine
+// in its anchored-popover presentation (C19, DESIGN §14.3): the engine default compact
+// mode, anchoring under the trigger and clamping at the right edge.
 import { useCallback, useMemo } from "react";
 import { Pressable, Text, View } from "react-native";
 import { StyleSheet } from "react-native-unistyles";
@@ -38,7 +39,7 @@ function pillDotStyleFor(total: number, online: number) {
   return styles.dotPartial;
 }
 
-// One row of the host-status sheet: live dot + name + status; online hosts are inert,
+// One row of the host-status popover: live dot + name + status; online hosts are inert,
 // anything else retries that single host.
 function HostMenuItem({
   host,
@@ -173,7 +174,7 @@ export function ChatsHeader({
     <View style={styles.header}>
       <Text style={styles.title}>{t("chats.title")}</Text>
       <View style={styles.controlsRow}>
-        <DropdownMenu compactMode="sheet">
+        <DropdownMenu>
           <DropdownMenuTrigger
             testID="shell-host-pill"
             accessibilityRole="button"
@@ -239,7 +240,7 @@ export function ChatsHeader({
         >
           <Search size={18} color={styles.iconColor.color} />
         </Pressable>
-        <DropdownMenu compactMode="sheet">
+        <DropdownMenu>
           <DropdownMenuTrigger
             testID="shell-plus-menu"
             accessibilityRole="button"
