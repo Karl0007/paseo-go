@@ -56,6 +56,31 @@ export function mapEntriesToImportRows(
   return rows;
 }
 
+/**
+ * C23 旧 daemon 降级：capability `importSessionSearch`=false 时 query 不进 RPC，
+ * 改在已载条目上做小写子串过滤。haystack 对齐服务端检索面：title /
+ * firstPromptPreview / lastPromptPreview / cwd（null 字段跳过）。
+ * `normalizedQuery` 来自 normalizeSearchQuery；空 query 恒真（restore-on-clear）。
+ */
+export function importEntryMatchesQuery(
+  entry: FetchRecentProviderSessionEntry,
+  normalizedQuery: string,
+): boolean {
+  if (normalizedQuery.length === 0) return true;
+  return [entry.title, entry.firstPromptPreview, entry.lastPromptPreview, entry.cwd].some(
+    (field) => typeof field === "string" && field.toLowerCase().includes(normalizedQuery),
+  );
+}
+
+/** 已载条目的本地过滤（保序）；空 query 原样返回同一数组语义的新数组。 */
+export function filterImportEntriesByQuery(
+  entries: ReadonlyArray<FetchRecentProviderSessionEntry>,
+  normalizedQuery: string,
+): FetchRecentProviderSessionEntry[] {
+  if (normalizedQuery.length === 0) return [...entries];
+  return entries.filter((entry) => importEntryMatchesQuery(entry, normalizedQuery));
+}
+
 /** 勾选/取消勾选；重复勾选不产生重复项（幂等）。 */
 export function toggleRowSelection(selected: readonly string[], key: string): string[] {
   return selected.includes(key)
@@ -109,6 +134,10 @@ export interface ImportStatusInput {
   rowCount: number;
   alreadyImportedCount: number;
   hasNoImportableProviders: boolean;
+  /** C23: 搜索态——非空 query（服务端或本地降级过滤均计入）。 */
+  hasQuery?: boolean;
+  /** C23: true=过滤发生在客户端（旧 daemon），空态文案据此区分。 */
+  queryRunsLocally?: boolean;
 }
 
 /** 状态行判定（优先级自上而下）：无主机 → 未选 host → 旧 daemon → 未连接 → 加载失败 → 无 provider → 加载 → 空态。 */
@@ -125,6 +154,11 @@ export function deriveImportStatus(
   if (input.listStatus === "loading" && input.rowCount === 0)
     return { key: "import.status.loading" };
   if (input.listStatus === "ready" && input.rowCount === 0) {
+    // C23: 搜索无结果优先于「已隐藏已导入」——查询态下那句是噪音；再按降级
+    // 开关区分「服务端无结果」与「本地过滤无结果（只覆盖已载条目）」。
+    if (input.hasQuery) {
+      return { key: input.queryRunsLocally ? "import.searchEmptyLocal" : "import.searchEmpty" };
+    }
     return input.alreadyImportedCount > 0
       ? { key: "import.alreadyHidden", params: { count: input.alreadyImportedCount } }
       : { key: "import.empty" };

@@ -6,6 +6,8 @@ import {
   buildImportToastParts,
   classifyImportError,
   deriveImportStatus,
+  filterImportEntriesByQuery,
+  importEntryMatchesQuery,
   importRowKey,
   mapEntriesToImportRows,
   summarizeImportAttempts,
@@ -175,5 +177,77 @@ describe("buildImportToastParts", () => {
     expect(buildImportToastParts({ imported: 0, alreadyImported: 3, failed: 0 })).toEqual([
       { key: "already", count: 3 },
     ]);
+  });
+});
+
+// C23 验收 2：旧 daemon 降级的本地过滤纯函数 + 空态文案分流。
+describe("filterImportEntriesByQuery (旧 daemon 本地降级)", () => {
+  it("matches title / first / last preview / cwd, case-insensitively", () => {
+    const cases: Array<[string, Partial<FetchRecentProviderSessionEntry>]> = [
+      ["c13", { title: "C13 Release Gate" }],
+      ["c13", { firstPromptPreview: "run the C13 smoke", title: null, lastPromptPreview: null }],
+      ["c13", { lastPromptPreview: "C13 done", title: null, firstPromptPreview: null }],
+      ["deploy", { cwd: "C:/work/deploy-repo", title: null }],
+      ["中文", { title: "发布 中文 文档" }],
+    ];
+    for (const [query, overrides] of cases) {
+      expect(importEntryMatchesQuery(entry(overrides), query)).toBe(true);
+    }
+  });
+
+  it("misses when no haystack field contains the query; null fields never match", () => {
+    expect(importEntryMatchesQuery(entry({ title: null }), "anything")).toBe(false);
+    expect(
+      importEntryMatchesQuery(
+        entry({ title: "Alpha", firstPromptPreview: null, lastPromptPreview: "beta" }),
+        "omega",
+      ),
+    ).toBe(false);
+  });
+
+  it("empty query keeps everything; filter preserves order and drops misses", () => {
+    const entries = [
+      entry({ providerHandleId: "h1", title: "C13 gate" }),
+      entry({ providerHandleId: "h2", title: "Other" }),
+      entry({ providerHandleId: "h3", title: "ship C13 notes" }),
+    ];
+    expect(filterImportEntriesByQuery(entries, "").map((e) => e.providerHandleId)).toEqual([
+      "h1",
+      "h2",
+      "h3",
+    ]);
+    expect(filterImportEntriesByQuery(entries, "c13").map((e) => e.providerHandleId)).toEqual([
+      "h1",
+      "h3",
+    ]);
+  });
+});
+
+describe("deriveImportStatus search branches", () => {
+  const ready: ImportStatusInput = {
+    hostCount: 1,
+    hasServerId: true,
+    supportsSnapshot: true,
+    hasClient: true,
+    listStatus: "ready",
+    rowCount: 3,
+    alreadyImportedCount: 0,
+    hasNoImportableProviders: false,
+  };
+
+  it("distinguishes server-side miss from local-filter miss and outranks alreadyHidden", () => {
+    expect(deriveImportStatus({ ...ready, rowCount: 0, hasQuery: true })?.key).toBe(
+      "import.searchEmpty",
+    );
+    expect(
+      deriveImportStatus({ ...ready, rowCount: 0, hasQuery: true, queryRunsLocally: true })?.key,
+    ).toBe("import.searchEmptyLocal");
+    expect(
+      deriveImportStatus({ ...ready, rowCount: 0, hasQuery: true, alreadyImportedCount: 4 })?.key,
+    ).toBe("import.searchEmpty");
+    // 无 query 时空态回到既有文案。
+    expect(deriveImportStatus({ ...ready, rowCount: 0, alreadyImportedCount: 4 })?.key).toBe(
+      "import.alreadyHidden",
+    );
   });
 });

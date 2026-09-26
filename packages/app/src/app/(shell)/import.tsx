@@ -21,7 +21,7 @@ import { router, type Href } from "expo-router";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useTranslation } from "react-i18next";
 import { StyleSheet } from "react-native-unistyles";
-import { Check, ChevronDown, ChevronLeft, Inbox, RotateCw } from "lucide-react-native";
+import { Check, ChevronDown, ChevronLeft, Inbox, RotateCw, Search } from "lucide-react-native";
 import * as Haptics from "expo-haptics";
 import { Button } from "@/components/ui/button";
 import { LoadingSpinner } from "@/components/ui/loading-spinner";
@@ -37,6 +37,10 @@ import { useHostChooser } from "@/hosts/host-chooser";
 import { useHostProjects } from "@/projects/host-projects";
 import { useHostRuntimeClient, useHosts } from "@/runtime/host-runtime";
 import { useToast } from "@/contexts/toast-context";
+import { useDebouncedValue } from "@/hooks/use-debounced-value";
+import { useHostFeature } from "@/runtime/host-features";
+import { SearchModeBar } from "@/shell/components/search/search-mode-bar";
+import { normalizeSearchQuery } from "@/shell/search/query";
 import { formatCompactTimeAgo } from "@/utils/time";
 import { SHELL_I18N_NAMESPACE } from "@/shell/i18n";
 import { OFFICIAL, SHELL_TAB } from "@/shell/routes";
@@ -44,6 +48,7 @@ import {
   buildImportToastParts,
   classifyImportError,
   deriveImportStatus,
+  filterImportEntriesByQuery,
   mapEntriesToImportRows,
   summarizeImportAttempts,
   toggleRowSelection,
@@ -53,6 +58,8 @@ import {
 import { useImportList } from "@/shell/import/use-import-list";
 
 const IMPORT_LIST_LIMIT = 60;
+// C23: 搜索防抖（对齐官方 import-session-sheet 姿势，卡口径 ~300ms）。
+const IMPORT_SEARCH_DEBOUNCE_MS = 300;
 
 // Stable prop identities (react-perf lint): the checkbox state objects and the
 // pressable style callback are created once at module scope.
@@ -176,9 +183,25 @@ export default function ShellImportScreen() {
     }
   }, [hosts.length, openHostChooser, serverId]);
 
+  // C23 搜索：bar morph 复用 chats/workspace 的 SearchModeBar。capability gate
+  // `importSessionSearch`=false（旧 daemon）时 query 不进 RPC，改在已载条目上
+  // 本地过滤（rows.filterImportEntriesByQuery）；空态文案据 queryRunsLocally 区分。
+  const [searchActive, setSearchActive] = useState(false);
+  const [searchInput, setSearchInput] = useState("");
+  const supportsSearch = useHostFeature(serverId, "importSessionSearch");
+  const debouncedInput = useDebouncedValue(searchInput, IMPORT_SEARCH_DEBOUNCE_MS);
+  const normalizedQuery = normalizeSearchQuery(debouncedInput);
+  const remoteQuery = supportsSearch ? normalizedQuery : "";
+  const handleSearchOpen = useCallback(() => setSearchActive(true), []);
+  const handleSearchClose = useCallback(() => {
+    setSearchActive(false);
+    setSearchInput("");
+  }, []);
+
   // F1 (review): the fetch lifecycle lives in useImportList — its stale-host guard
   // is what stops a mid-import host switch from letting A's closure overwrite B.
-  const { listState, load } = useImportList(IMPORT_LIST_LIMIT, serverId, client);
+  // C23: query 进 hook（requestSeq 覆盖 query 竞态；旧 query 响应不落地）。
+  const { listState, load } = useImportList(IMPORT_LIST_LIMIT, serverId, client, remoteQuery);
   const handleRefresh = useCallback(() => {
     void load();
   }, [load]);
@@ -208,10 +231,13 @@ export default function ShellImportScreen() {
     [hostProjects],
   );
 
-  const rows = useMemo(
-    () => mapEntriesToImportRows(listState.entries, folderFor),
-    [listState.entries, folderFor],
-  );
+  const rows = useMemo(() => {
+    const entries =
+      !supportsSearch && normalizedQuery.length > 0
+        ? filterImportEntriesByQuery(listState.entries, normalizedQuery)
+        : listState.entries;
+    return mapEntriesToImportRows(entries, folderFor);
+  }, [folderFor, listState.entries, normalizedQuery, supportsSearch]);
 
   const [selectedKeys, setSelectedKeys] = useState<string[]>([]);
   const selectedSet = useMemo(() => new Set(selectedKeys), [selectedKeys]);
@@ -290,6 +316,8 @@ export default function ShellImportScreen() {
     rowCount: rows.length,
     alreadyImportedCount: listState.alreadyImportedCount,
     hasNoImportableProviders: providersToFetch !== null && providersToFetch.length === 0,
+    hasQuery: normalizedQuery.length > 0,
+    queryRunsLocally: !supportsSearch && normalizedQuery.length > 0,
   });
   // JSX-as-prop 规避：header/footer 元素在 memo 里成形，FlatList 拿到稳定引用。
   const listHeader = useMemo(
@@ -346,40 +374,74 @@ export default function ShellImportScreen() {
   return (
     <View style={styles.screen}>
       <View style={[styles.header, { paddingTop: insets.top + 8 }]}>
-        <Pressable
-          onPress={goBackToChats}
-          accessibilityRole="button"
-          hitSlop={10}
-          testID="shell-import-back"
-          style={styles.headerButton}
-        >
-          <ChevronLeft size={20} color={styles.headerIcon.color} />
-        </Pressable>
-        <View style={styles.headerTitleWrap}>
-          <Text style={styles.headerTitle}>{t("import.title")}</Text>
-          <Pressable
-            onPress={handleHostChip}
-            accessibilityRole="button"
-            hitSlop={HOST_CHIP_HIT_SLOP}
-            testID="shell-import-host"
-            style={styles.hostRow}
-          >
-            <Text style={styles.hostLabel} numberOfLines={1}>
-              {hostLabel || t("import.noHost")}
-            </Text>
-            <ChevronDown size={13} color={styles.headerIcon.color} />
-          </Pressable>
-        </View>
-        <Pressable
-          onPress={handleRefresh}
-          accessibilityRole="button"
-          hitSlop={10}
-          disabled={isBusy || !client}
-          testID="shell-import-refresh"
-          style={styles.headerButton}
-        >
-          <RotateCw size={17} color={styles.headerIcon.color} />
-        </Pressable>
+        {searchActive ? (
+          <>
+            <Pressable
+              onPress={goBackToChats}
+              accessibilityRole="button"
+              hitSlop={10}
+              testID="shell-import-back"
+              style={styles.headerButton}
+            >
+              <ChevronLeft size={20} color={styles.headerIcon.color} />
+            </Pressable>
+            <View style={styles.searchWrap}>
+              <SearchModeBar
+                onQueryChange={setSearchInput}
+                onCancel={handleSearchClose}
+                placeholder={t("import.searchPlaceholder")}
+                inputTestID="shell-import-search-input"
+                cancelTestID="shell-import-search-cancel"
+              />
+            </View>
+          </>
+        ) : (
+          <>
+            <Pressable
+              onPress={goBackToChats}
+              accessibilityRole="button"
+              hitSlop={10}
+              testID="shell-import-back"
+              style={styles.headerButton}
+            >
+              <ChevronLeft size={20} color={styles.headerIcon.color} />
+            </Pressable>
+            <View style={styles.headerTitleWrap}>
+              <Text style={styles.headerTitle}>{t("import.title")}</Text>
+              <Pressable
+                onPress={handleHostChip}
+                accessibilityRole="button"
+                hitSlop={HOST_CHIP_HIT_SLOP}
+                testID="shell-import-host"
+                style={styles.hostRow}
+              >
+                <Text style={styles.hostLabel} numberOfLines={1}>
+                  {hostLabel || t("import.noHost")}
+                </Text>
+                <ChevronDown size={13} color={styles.headerIcon.color} />
+              </Pressable>
+            </View>
+            <Pressable
+              onPress={handleSearchOpen}
+              accessibilityRole="search"
+              hitSlop={10}
+              testID="shell-import-search"
+              style={styles.headerButton}
+            >
+              <Search size={17} color={styles.headerIcon.color} />
+            </Pressable>
+            <Pressable
+              onPress={handleRefresh}
+              accessibilityRole="button"
+              hitSlop={10}
+              disabled={isBusy || !client}
+              testID="shell-import-refresh"
+              style={styles.headerButton}
+            >
+              <RotateCw size={17} color={styles.headerIcon.color} />
+            </Pressable>
+          </>
+        )}
       </View>
 
       <FlatList
@@ -450,6 +512,9 @@ const styles = StyleSheet.create((theme) => ({
     color: theme.colors.foregroundMuted,
     fontSize: theme.fontSize.sm,
     maxWidth: 180,
+  },
+  searchWrap: {
+    flex: 1,
   },
   listContent: {
     paddingBottom: theme.spacing[4],

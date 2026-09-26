@@ -4,13 +4,15 @@
 // a `load` closure bound to host A must not run after the screen moved to host B.
 // Without the latter, the tail of a mid-import host switch calls A's closure, its
 // `++requestSeq` grabs the newest slot, and A's response overwrites B's list.
+// C23: `query` joins the fetch input and the `load` identity, so a query edit also
+// advances the seq — a response for an old query can never overwrite a newer one.
 // React-free of the screen's chrome so the race is unit-testable with renderHook.
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { FetchRecentProviderSessionEntry } from "@getpaseo/client/internal/daemon-client";
 
 /** The one RPC the loader needs; `DaemonClient` satisfies it structurally. */
 export interface ImportListClient {
-  fetchRecentProviderSessions(input: { limit: number }): Promise<{
+  fetchRecentProviderSessions(input: { limit: number; query?: string }): Promise<{
     entries: FetchRecentProviderSessionEntry[];
     filteredAlreadyImportedCount?: number;
     providerErrors?: Array<{ provider: string; message: string }>;
@@ -37,6 +39,7 @@ export function useImportList(
   limit: number,
   serverId: string | null,
   client: ImportListClient | null,
+  query: string,
 ): { listState: ImportListState; load: () => Promise<void> } {
   const [listState, setListState] = useState<ImportListState>(INITIAL_STATE);
   const requestSeq = useRef(0);
@@ -51,7 +54,9 @@ export function useImportList(
     const seq = ++requestSeq.current;
     setListState((prev) => ({ ...prev, status: "loading" }));
     try {
-      const payload = await client.fetchRecentProviderSessions({ limit });
+      const payload = await client.fetchRecentProviderSessions(
+        query ? { limit, query } : { limit },
+      );
       if (seq !== requestSeq.current) return;
       setListState({
         status: "ready",
@@ -70,7 +75,7 @@ export function useImportList(
         error: error instanceof Error ? error.message : String(error),
       });
     }
-  }, [client, limit, serverId]);
+  }, [client, limit, query, serverId]);
 
   useEffect(() => {
     void load();

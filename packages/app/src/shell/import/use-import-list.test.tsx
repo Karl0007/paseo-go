@@ -28,7 +28,7 @@ describe("useImportList host-switch race", () => {
     const clientB = { fetchRecentProviderSessions: fetchB } as unknown as ImportListClient;
 
     const { result, rerender } = renderHook(
-      ({ serverId, client }) => useImportList(60, serverId, client),
+      ({ serverId, client }) => useImportList(60, serverId, client, ""),
       { initialProps: { serverId: "A", client: clientA } },
     );
     // The closure the import tail will call when it finishes on host A.
@@ -56,7 +56,7 @@ describe("useImportList host-switch race", () => {
   it("same-host reloads still commit (guard does not eat fresh loads)", async () => {
     const fetchA = vi.fn(async () => ({ entries: [ENTRY_A] }));
     const clientA = { fetchRecentProviderSessions: fetchA } as unknown as ImportListClient;
-    const { result } = renderHook(() => useImportList(60, "A", clientA));
+    const { result } = renderHook(() => useImportList(60, "A", clientA, ""));
     await act(async () => {
       await Promise.resolve();
       await Promise.resolve();
@@ -67,5 +67,83 @@ describe("useImportList host-switch race", () => {
     });
     expect(result.current.listState.status).toBe("ready");
     expect(fetchA).toHaveBeenCalledTimes(2);
+  });
+});
+
+// C23 验收 2：query 进 RPC 的口径 + query 竞态（requestSeq 覆盖 query 变化）。
+describe("useImportList query pass-through", () => {
+  it("sends query only when non-empty", async () => {
+    const fetchA = vi.fn(async () => ({ entries: [ENTRY_A] }));
+    const clientA = { fetchRecentProviderSessions: fetchA } as unknown as ImportListClient;
+    const { rerender } = renderHook(({ query }) => useImportList(60, "A", clientA, query), {
+      initialProps: { query: "" },
+    });
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    expect(fetchA).toHaveBeenCalledWith({ limit: 60 });
+    rerender({ query: "C13" });
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    expect(fetchA).toHaveBeenLastCalledWith({ limit: 60, query: "C13" });
+  });
+
+  it("an old query's late response cannot overwrite the newest query's list", async () => {
+    const pendingOld = deferred<{ entries: FetchRecentProviderSessionEntry[] }>();
+    const calls: Array<{ query?: string }> = [];
+    const fetchA = vi.fn((input: { limit: number; query?: string }) => {
+      calls.push(input);
+      return calls.length === 1 ? pendingOld.promise : Promise.resolve({ entries: [ENTRY_B] });
+    });
+    const clientA = { fetchRecentProviderSessions: fetchA } as unknown as ImportListClient;
+    const { result, rerender } = renderHook(({ query }) => useImportList(60, "A", clientA, query), {
+      initialProps: { query: "old" },
+    });
+    await act(async () => {
+      await Promise.resolve();
+    });
+    rerender({ query: "new" });
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    expect(result.current.listState.entries).toEqual([ENTRY_B]);
+    // 旧 query 的响应此刻才到：seq 守卫必须丢弃它，列表保持新 query 结果。
+    await act(async () => {
+      pendingOld.resolve({ entries: [ENTRY_A] });
+      await pendingOld.promise;
+    });
+    expect(result.current.listState.entries).toEqual([ENTRY_B]);
+    expect(calls).toEqual([
+      { limit: 60, query: "old" },
+      { limit: 60, query: "new" },
+    ]);
+  });
+
+  it("query change on a stale host still cannot fetch (host guard kept)", async () => {
+    const fetchA = vi.fn(async () => ({ entries: [ENTRY_A] }));
+    const clientA = { fetchRecentProviderSessions: fetchA } as unknown as ImportListClient;
+    const { rerender } = renderHook(
+      ({
+        serverId,
+        client,
+        query,
+      }: {
+        serverId: string | null;
+        client: ImportListClient | null;
+        query: string;
+      }) => useImportList(60, serverId, client, query),
+      { initialProps: { serverId: "A", client: clientA as ImportListClient | null, query: "" } },
+    );
+    rerender({ serverId: "B", client: null, query: "new" });
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    // A 的 client 再也不会被新 query 的 effect 触发（load 身份属于 B/null）。
+    expect(fetchA).toHaveBeenCalledTimes(1);
   });
 });
