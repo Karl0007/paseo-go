@@ -21,7 +21,7 @@ vi.mock("@react-native-async-storage/async-storage", () => {
 
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { usePaseoGoArchiveStore } from "@/shell/stores/archive";
-import { usePaseoGoPinsStore } from "@/shell/stores/pins";
+import { pinnedDropIndex, usePaseoGoPinsStore } from "@/shell/stores/pins";
 
 const PINS_KEY = "paseoGo.pins";
 const ARCHIVE_KEY = "paseoGo.archive";
@@ -141,5 +141,90 @@ describe("archive store", () => {
   it("unarchiving a live row is a no-op", () => {
     usePaseoGoArchiveStore.getState().unarchive("s1:ghost");
     expect(usePaseoGoArchiveStore.getState().archivedIds).toEqual([]);
+  });
+});
+
+// C20 (DESIGN §14.4): an unpinned row dragged into the 置顶 group pins itself
+// and inserts at the drop slot; the slot arrives group-relative because the
+// flat list interleaves headers and other groups — pinnedDropIndex is that
+// conversion, pinAt is the clamped write.
+describe("pins store: C20 pinAt (drop into 置顶)", () => {
+  it("pins an unpinned row and inserts it at the drop slot", () => {
+    usePaseoGoPinsStore.getState().setOrder(["s1:a1", "s1:a2", "s1:a3"]);
+    usePaseoGoPinsStore.getState().pinAt("s1:x", 1);
+    expect(usePaseoGoPinsStore.getState().pinnedIds).toEqual(["s1:a1", "s1:x", "s1:a2", "s1:a3"]);
+  });
+
+  it("clamps out-of-range slots to the group edges", () => {
+    usePaseoGoPinsStore.getState().setOrder(["s1:a1", "s1:a2"]);
+    usePaseoGoPinsStore.getState().pinAt("s1:top", -5);
+    expect(usePaseoGoPinsStore.getState().pinnedIds).toEqual(["s1:top", "s1:a1", "s1:a2"]);
+    usePaseoGoPinsStore.getState().pinAt("s1:tail", 99);
+    expect(usePaseoGoPinsStore.getState().pinnedIds).toEqual([
+      "s1:top",
+      "s1:a1",
+      "s1:a2",
+      "s1:tail",
+    ]);
+  });
+
+  it("an already-pinned drop moves within the group and never duplicates", () => {
+    usePaseoGoPinsStore.getState().setOrder(["s1:a1", "s1:a2", "s1:a3"]);
+    usePaseoGoPinsStore.getState().pinAt("s1:a1", 2);
+    expect(usePaseoGoPinsStore.getState().pinnedIds).toEqual(["s1:a2", "s1:a3", "s1:a1"]);
+  });
+
+  it("pinAt persists and survives a simulated restart", async () => {
+    usePaseoGoPinsStore.getState().setOrder(["s1:a1"]);
+    usePaseoGoPinsStore.getState().pinAt("s1:x", 0);
+    await vi.waitFor(async () => {
+      const saved = (await persisted(PINS_KEY)) as { state: { pinnedIds: string[] } } | null;
+      expect(saved?.state.pinnedIds).toEqual(["s1:x", "s1:a1"]);
+    });
+    const snapshot = await persisted(PINS_KEY);
+    usePaseoGoPinsStore.setState({ pinnedIds: [], aliases: {} });
+    await simulateRestart(PINS_KEY, snapshot, () => usePaseoGoPinsStore.persist.rehydrate());
+    expect(usePaseoGoPinsStore.getState().pinnedIds).toEqual(["s1:x", "s1:a1"]);
+  });
+});
+
+describe("pinnedDropIndex: flat drop slot → group-relative index", () => {
+  const PINNED = ["p1", "p2", "p3"];
+  const at = (droppedKey: string, visibleRowKeys: string[]) =>
+    pinnedDropIndex({ droppedKey, visibleRowKeys, pinnedIds: PINNED });
+
+  it("a drop between two pinned rows lands in the matching group slot", () => {
+    expect(at("u1", ["p1", "u1", "p2", "p3"])).toBe(1);
+  });
+
+  it("other groups offset the position but never count", () => {
+    // The drop sits deep in 需要处理/最近, right after two pinned rows.
+    expect(at("u1", ["p1", "p2", "n1", "u1", "r1", "r2"])).toBe(2);
+  });
+
+  it("a drop below the whole group saturates to the group tail", () => {
+    expect(at("u1", ["p1", "p2", "p3", "n1", "u1"])).toBe(3);
+  });
+
+  it("a drop above the first pinned row yields 0", () => {
+    expect(at("u1", ["u1", "p1", "p2"])).toBe(0);
+  });
+
+  it("a dropped pinned row counts siblings only — never itself", () => {
+    expect(at("p2", ["p1", "n1", "p2", "p3"])).toBe(1);
+  });
+
+  it("a droppedKey missing from the visible list clamps to the tail", () => {
+    expect(at("ghost", ["p1", "p2", "p3", "n1"])).toBe(3);
+  });
+
+  it("stale hidden pins are not counted (index is visible-relative)", () => {
+    expect(
+      pinnedDropIndex({
+        droppedKey: "u1",
+        visibleRowKeys: ["p1", "u1", "p2"],
+        pinnedIds: ["p1", "gone", "p2"],
+      }),
+    ).toBe(1);
   });
 });

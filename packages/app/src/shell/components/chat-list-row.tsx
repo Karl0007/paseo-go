@@ -12,10 +12,13 @@
 // page (a MenuTextField), and a compact popover has no keyboard avoidance — the
 // engine's hard rule is that input pages stay sheets (docs/menus.md). The rename
 // input page is C33's move-out target; this menu flips to popover when that lands.
-// Pinned rows additionally ride the DraggableFlatList: the shell's own arbitration
-// hook splits 长按停留 (menu, 450ms stationary) from 长按拖动 (drag armed at 180ms,
-// activated on movement), so drag and menu never fight. Rows fade in/out individually —
-// keys are stable, so nothing ever re-mounts the whole table.
+// C20 (DESIGN §14.4): on the live filter EVERY row rides the DraggableFlatList
+// through this arbitration hook — long-press decides the anchored window (shown
+// on release), and sliding past the relay slop dismisses it and lifts the row in
+// touch stream (menu→drag relay). Unpinned rows dropped into the group pin
+// themselves at the drop slot (the screen owns that semantics). Rows fade
+// in/out individually — keys are stable, so nothing ever re-mounts the whole
+// table.
 import { memo, useCallback, useMemo } from "react";
 import { Pressable, Text, View } from "react-native";
 import { StyleSheet } from "react-native-unistyles";
@@ -119,10 +122,17 @@ interface ChatListRowProps {
   actions: ShellAgentActions;
   /** Screen-side C4 opener: read stamp + official navigateToAgent (open intent). */
   onOpen: (agent: ShellChatAgent) => void;
-  /** True for rows inside the 置顶 group on the live filter: long-press arms a drag. */
+  /** True on the live filter (C20): long-press runs the arbitration hook —
+   * menu window, and menu→drag relay onto any drop slot. */
   draggable?: boolean;
   /** DraggableFlatList's activator for this cell; only used when draggable. */
   drag?: () => void;
+  /** C20: fires in the same frame as drag() with the row's key; the screen
+   * records it there so its drop handler knows what moved. */
+  onDragStart?: (key: string) => void;
+  /** C20: row gesture armed/released — the screen freezes list scrolling
+   * while a drag-vs-menu decision is live (native ScrollView steal guard). */
+  onGestureLockChange?: (locked: boolean) => void;
   /** DraggableFlatList reports the lifted cell; drives the raised style. */
   isActive?: boolean;
 }
@@ -133,6 +143,8 @@ export const ChatListRow = memo(function ChatListRow({
   onOpen,
   draggable = false,
   drag,
+  onDragStart,
+  onGestureLockChange,
   isActive = false,
 }: ChatListRowProps) {
   return (
@@ -144,6 +156,8 @@ export const ChatListRow = memo(function ChatListRow({
           onOpen={onOpen}
           draggable={draggable}
           drag={drag ?? NOOP}
+          onDragStart={onDragStart}
+          onGestureLockChange={onGestureLockChange}
           isActive={isActive}
         />
       </ContextMenu>
@@ -152,14 +166,16 @@ export const ChatListRow = memo(function ChatListRow({
 });
 
 // Lives under the ContextMenu provider so it can hold the menu controller: draggable
-// rows open the sheet through the arbitration hook (which anchors at the touch point),
-// everything else through the trigger's own long press.
+// rows (every row on the live filter, C20) open the window through the arbitration
+// hook (which anchors at the touch point), the rest through the trigger's own long press.
 function ChatRowInner({
   row,
   actions,
   onOpen,
   draggable,
   drag,
+  onDragStart,
+  onGestureLockChange,
   isActive,
 }: {
   row: ChatRow<ShellChatAgent>;
@@ -167,6 +183,8 @@ function ChatRowInner({
   onOpen: (agent: ShellChatAgent) => void;
   draggable: boolean;
   drag: () => void;
+  onDragStart?: (key: string) => void;
+  onGestureLockChange?: (locked: boolean) => void;
   isActive: boolean;
 }) {
   const { t } = useTranslation(SHELL_I18N_NAMESPACE);
@@ -177,7 +195,17 @@ function ChatRowInner({
   const pinned = usePaseoGoPinsStore((state) => state.pinnedIds.includes(agent.key));
   const archived = usePaseoGoArchiveStore((state) => state.archivedIds.includes(agent.key));
 
-  const interaction = useShellRowDragMenu({ drag, menuController: menu });
+  // Stable per row: the screen's recorder stays referentially stable while the
+  // key is captured here (DraggableFlatList keeps cell props identity-tight).
+  const handleDragStart = useCallback(() => {
+    onDragStart?.(agent.key);
+  }, [agent.key, onDragStart]);
+  const interaction = useShellRowDragMenu({
+    drag,
+    menuController: menu,
+    onDragStart: handleDragStart,
+    onGestureLockChange,
+  });
 
   const handlePress = useCallback(() => {
     // A finished long press (menu or drag) swallows the press that follows it —
@@ -230,8 +258,10 @@ function ChatRowInner({
           accessibilityRole="button"
           accessibilityLabel={rowLabel}
           onPress={handlePress}
-          // Draggable rows hand long press to the arbitration hook; plain rows let
-          // the engine's own native long press open the menu (with a selection tick).
+          // Draggable rows (every live-filter row since C20) hand long press to the
+          // arbitration hook — the hook fires its own tick when the window opens, so
+          // the engine's native mobile trigger stays disabled and onLongPress unset.
+          // Archived/search-view rows keep the engine's own native long press.
           enabledOnMobile={!draggable}
           onLongPress={draggable ? undefined : selectionHaptic}
           onPressIn={draggable ? interaction.handlePressIn : undefined}

@@ -17,6 +17,12 @@
 // grouping kept — a 置顶 hit stays in 置顶), the empty query restores the full list.
 // Drag is inert while searching so a filtered pinned subset can never rewrite the
 // pin order (handleDragEnd only sees visible rows).
+// C20 (DESIGN §14.4): every live-filter row rides the drag layer through the
+// arbitration hook (long-press → anchored window → sliding past the relay slop
+// closes it and lifts the row in ONE touch stream). Drop semantics branch on what
+// was dragged: a pinned row re-orders inside the 置顶 group (C3, reorderPinned);
+// an unpinned row PINS itself and inserts at the drop slot (pins.pinAt with the
+// pinnedDropIndex group-offset conversion, clamped to the group).
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Text, View } from "react-native";
 import { useFocusEffect } from "@react-navigation/native";
@@ -25,6 +31,7 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useTranslation } from "react-i18next";
 import { StyleSheet } from "react-native-unistyles";
 import { Archive, MessageCircle, SearchX, WifiOff } from "lucide-react-native";
+import * as Haptics from "expo-haptics";
 import { SidebarAgentListSkeleton } from "@/components/sidebar-agent-list-skeleton";
 import { Button } from "@/components/ui/button";
 import { DraggableList } from "@/components/draggable-list";
@@ -59,7 +66,7 @@ import { normalizeSearchQuery } from "@/shell/search/query";
 import { resolveProjectPlacement } from "@/utils/project-placement";
 import { OFFICIAL, SHELL } from "@/shell/routes";
 import { usePaseoGoArchiveStore } from "@/shell/stores/archive";
-import { usePaseoGoPinsStore } from "@/shell/stores/pins";
+import { pinnedDropIndex, usePaseoGoPinsStore } from "@/shell/stores/pins";
 import { usePaseoGoReadStateStore } from "@/shell/stores/readState";
 import { useShellAgentActions } from "@/shell/shellAgentActions";
 import { deriveSidebarStateBucket } from "@/utils/sidebar-agent-state";
@@ -354,6 +361,20 @@ export default function ShellChatsScreen() {
     [],
   );
 
+  // C20: the row the arbitration hook lifted this gesture — recorded in the same
+  // frame as drag(), consumed when the drop lands.
+  const draggedKeyRef = useRef<string | null>(null);
+  const handleRowDragStart = useCallback((key: string) => {
+    draggedKeyRef.current = key;
+  }, []);
+
+  // C20 device finding #2: the native ScrollView steals a vertical drag at
+  // ~12-20px, before the movement-based drag() can lift the row (the pre-C20
+  // C3 recipe loses the same race on the current build). While a row gesture
+  // is armed (180ms stationary — a real scroll never pauses first), the screen
+  // freezes list scrolling; the hook releases the lock with the touch stream.
+  const [gestureLock, setGestureLock] = useState(false);
+
   // The library hands back the whole list reordered; only the pinned rows' relative
   // order is its opinion we keep — headers and unpinned rows are re-derived anyway.
   const handleDragEnd = useCallback(
@@ -362,14 +383,27 @@ export default function ShellChatsScreen() {
       // subset — persisting it would drop the hidden pins. Drag is also disabled
       // in renderItem, so this is the belt to that braces.
       if (normalizedQuery.length > 0) return;
-      const order: string[] = [];
+      const droppedKey = draggedKeyRef.current;
+      draggedKeyRef.current = null;
+      const visibleRowKeys: string[] = [];
       for (const item of nextItems) {
-        if (item.type === "row" && pinnedSet.has(item.row.agent.key))
-          order.push(item.row.agent.key);
+        if (item.type === "row") visibleRowKeys.push(item.row.agent.key);
       }
-      actions.reorderPinned(order);
+      if (droppedKey !== null && !pinnedSet.has(droppedKey)) {
+        // C20: an unpinned row dropped anywhere pins itself and inserts at the
+        // drop slot; a drop past either group edge clamps to that edge.
+        const index = pinnedDropIndex({ droppedKey, visibleRowKeys, pinnedIds });
+        usePaseoGoPinsStore.getState().pinAt(droppedKey, index);
+        void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => {});
+        toast.show(t("chats.toast.pinned"));
+        return;
+      }
+      // C3 in-group reorder, unchanged — and the belt for a drag-end that ever
+      // arrives without a recorded drag-start: the visible pinned rows in their
+      // new relative order.
+      actions.reorderPinned(visibleRowKeys.filter((key) => pinnedSet.has(key)));
     },
-    [actions, pinnedSet, normalizedQuery],
+    [actions, pinnedSet, pinnedIds, normalizedQuery, toast, t],
   );
 
   const handleRetryHost = useCallback(
@@ -424,7 +458,9 @@ export default function ShellChatsScreen() {
           />
         );
       }
-      const draggable = !archivedOnly && !searchActive && pinnedSet.has(item.row.agent.key);
+      // C20: every live-filter row can drag (an unpinned drop pins at the slot);
+      // the archived filter and search mode stay drag-inert (C9 discipline).
+      const draggable = !archivedOnly && !searchActive;
       return (
         <ChatListRow
           row={item.row}
@@ -432,11 +468,23 @@ export default function ShellChatsScreen() {
           onOpen={handleOpenChat}
           draggable={draggable}
           drag={draggable ? drag : undefined}
+          onDragStart={handleRowDragStart}
+          onGestureLockChange={setGestureLock}
           isActive={isActive}
         />
       );
     },
-    [actions, archivedOnly, searchActive, handleOpenChat, hostsById, handleRetryHost, pinnedSet, t],
+    [
+      actions,
+      archivedOnly,
+      searchActive,
+      handleOpenChat,
+      handleRowDragStart,
+      setGestureLock,
+      hostsById,
+      handleRetryHost,
+      t,
+    ],
   );
 
   const keyExtractor = useCallback((item: ChatListItem<ShellChatAgent>) => item.key, []);
@@ -506,6 +554,7 @@ export default function ShellChatsScreen() {
           keyExtractor={keyExtractor}
           renderItem={renderItem}
           onDragEnd={handleDragEnd}
+          scrollEnabled={!gestureLock}
           contentContainerStyle={styles.listContent}
           refreshing={refreshing}
           onRefresh={handleRefresh}
