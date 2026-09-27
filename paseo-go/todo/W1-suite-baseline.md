@@ -17,3 +17,7 @@ C0 known_issue。本机 `npx vitest run --pool=threads --maxWorkers=2` 基线 = 
 ## 补记（C1，2026-09-25）
 
 本机负载下失败集合会漂移（C1 轮=time x2+parse-changelog x2+forges+input-draft.live 超时，与 C0 轮集合不同）。**验收口径升级为 stash 基线对照法**：`git stash push -u` 后重跑，失败集合逐条相同 = 无新增失败；`*.live.*` beforeAll 超时视为环境性；跑完立即 `git stash pop`（编排者监督）。
+
+## 补记（批次二收尾，2026-09-27）：server 套件基线项
+
+`workspace-same-cwd-isolation.e2e.test.ts` ×2 失败（"Provider mock is not configured"）=**上游测试腐化，非 fork 回归**：失败用例由上游 `3288e1cf` 引入且未传 `isDev:true`，其后上游 #4314/#4332 把 `DEV_AGENT_PROVIDER_DEFINITIONS`（mock）注册收进 isDev 闸；fork 对全因果链文件（测试/`test-utils`/`provider-registry`/`provider-snapshot-manager`/`provider-manifest`/`create.ts`）零改动（`git diff --name-only db4fd334..HEAD` 核对在案）。记入基线失败集合；上游修复或 fork 侧禁改纪律保持。
