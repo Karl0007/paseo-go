@@ -12,12 +12,17 @@
 
 `shell/workspace/archive-gate.ts`：confirm 判定从 `kind==="worktree"` 改为 `kind==="worktree" || kind==="local_checkout"`（风险字段=同套 live overlay 按 cwd 实取 + null fail-closed 通用告警）；locales 复用既有 archiveGate.\* 键。这是对官方语义的**有意偏离**，注释注明事故证据（CLOSE-DEV3/4）+ UPSTREAM-ISSUES #3 关联。
 
+### 并入项（CloseDev4 item8 设备实锤）：tab 行遮蔽竖屏差 4px
+
+`tab-row-cover.ts` compact 分支 cover=37dp=92.5px，但官方 tab 行上沿实测比 token 数学低 ~4px（RN 逐节点整数取整），bar 底边露 4px 窄条 → 点 (800,309/311) 可弹「切换标签」sheet → 关 tab→归档入口竖屏仍可触达（g6-05/06）。修法=compact cover +4dp 冗余+注释钉实测差；横屏 native-wide 分支全覆盖无需动。验收=行底边三点注入零反应 + 壳外官方 tab 行不受影响 + tab-row-cover.test 对拍闸同步。
+
 ## 验收
 
 1. 回归先红：local_checkout 脏→必弹（官方富文本）；null→通用告警；干净→直通保持；directory-kind skip 保持；级联计数进告警文案（若官方 message 不含会话级联事实，壳侧在通用告警文案补一句"其 N 个会话将一并归档"——N=合并行 workspaceIds 对应 agent 数，取证后定）。
-2. 定向 archive-gate/derive/locales 全绿；tsgo 绿。
-3. 设备复验（窗口五）：gate-main 形态 local_checkout 脏→弹框；主 worktree 行长按→弹框（取消 no-op，不实弹主行）。
-4. 恰一次 commit；UPSTREAM-ISSUES #3 补句。
+2. tab 行遮蔽：cover 纯函数矩阵（compact +4dp 冗余后高度钉值）+对拍闸更新绿。
+3. 定向 archive-gate/derive/locales/tab-row-cover 全绿；tsgo 绿。
+4. 设备复验（窗口五）：gate-main 形态 local_checkout 脏→弹框；主 worktree 行长按→弹框（取消 no-op，不实弹主行）；竖屏 tab 行底边三点（y=309/311/312）注入零反应。
+5. 恰一次 commit；UPSTREAM-ISSUES #3 补句。
 
 ## 范围
 
