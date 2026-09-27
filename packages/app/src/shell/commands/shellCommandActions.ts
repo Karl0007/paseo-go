@@ -18,6 +18,7 @@ import { queryClient } from "@/data/query-client";
 import { useToast } from "@/contexts/toast-context";
 import { SHELL_I18N_NAMESPACE } from "@/shell/i18n";
 import { shellNavigateToAgent } from "@/shell/chats/shell-navigate-to-agent";
+import { recordVisit } from "@/shell/chats/visit-ledger";
 import { usePaseoGoCommandsStore, type ShellCommand } from "@/shell/stores/commands";
 import type { ShellActionTranslate } from "@/shell/shellAgentActions";
 import { resolveCommandRunPlan } from "./run-plan";
@@ -101,6 +102,18 @@ export function createShellCommandActions(deps: ShellCommandActionDeps): ShellCo
         const agent = await client.createAgent(plan.request);
         // C12: 发起 tick 之外补“成功落地”反馈——会话即将切换，触觉是唯一的即时确认。
         successHaptic();
+        // R2-02 (指令进入): entering the fresh session IS a visit — record it on
+        // the module ledger so leaving settles the activity watched during it (a
+        // fast completion must not resurface as unread). Floor 0: the agent was
+        // just created, there is no earlier watermark to protect; the settle
+        // stamps lastEventAtOf at the leave moment.
+        recordVisit({
+          section: "chats",
+          key: `${command.hostId}:${agent.id}`,
+          serverId: command.hostId,
+          agentId: agent.id,
+          at: 0,
+        });
         deps.navigateToAgent({
           serverId: command.hostId,
           agentId: agent.id,

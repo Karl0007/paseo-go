@@ -6,9 +6,10 @@
 // navigateToAgent's job; the opener is judged on "called exactly once, with the
 // target's ids". C24 adds the fork guard: an imported chat's first open awaits the
 // injected confirmation BEFORE any stamp or navigation; confirming acks once.
-import { describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import { isChatUnread } from "./derive";
 import { createChatOpener, type ChatOpenTarget, type ChatOpenerDeps } from "./open-agent";
+import { resetVisitLedger, settleVisits } from "./visit-ledger";
 
 const DEVICE_NOW = 1_700_000_000_000; // device wall clock, 1h ahead of the host
 const HOST_LAG = 3_600_000;
@@ -31,6 +32,7 @@ function harness(latestHostEvent = HOST_EVENT) {
     confirmFork,
     forkAcknowledged,
     acknowledgeFork,
+    section: "chats",
   };
   return {
     opener: createChatOpener(deps),
@@ -50,6 +52,11 @@ const target: ChatOpenTarget = {
   lastEventAt: HOST_EVENT,
   imported: false,
 };
+
+// The ledger is module-global (like the section bus); every test starts clean.
+beforeEach(() => {
+  resetVisitLedger();
+});
 
 describe("createChatOpener", () => {
   it("stamps the chat's own last-event clock, keeping unread semantics under host skew", async () => {
@@ -91,6 +98,7 @@ describe("createChatOpener", () => {
       confirmFork: async () => true,
       forkAcknowledged: () => false,
       acknowledgeFork: () => {},
+      section: "chats",
     });
     await opener.open(target);
     opener.onFocus();
@@ -115,6 +123,7 @@ describe("createChatOpener", () => {
       confirmFork: async () => true,
       forkAcknowledged: () => false,
       acknowledgeFork: () => {},
+      section: "chats",
     });
     await opener.open(target);
     opener.onFocus(); // directory empty: nothing stamped, visit still pending
@@ -132,18 +141,96 @@ describe("createChatOpener", () => {
     expect(markRead).not.toHaveBeenCalled();
   });
 
-  it("the return stamp only ever clears the most recent visit", async () => {
-    const { opener, markRead } = harness();
+  // R2-03 (结算时点): the switch to B is A's LEAVE moment — A settles right there,
+  // with the watermark read then. The return beat afterwards settles only B, and
+  // a beat after an empty ledger clears nothing (settlement is idempotent).
+  it("opening B settles A at once; the return beat then settles only B", async () => {
+    let fresh = HOST_EVENT;
+    const markRead = vi.fn();
+    const opener = createChatOpener({
+      markRead,
+      navigateToAgent: vi.fn(),
+      lastEventAtOf: () => fresh,
+      confirmFork: async () => true,
+      forkAcknowledged: () => false,
+      acknowledgeFork: () => {},
+      section: "chats",
+    });
     const other: ChatOpenTarget = { ...target, key: "srv-1:agent-2", agentId: "agent-2" };
-    await opener.open(target);
-    await opener.open(other);
+    await opener.open(target); // #1: entry A @ HOST_EVENT
+    fresh = HOST_EVENT + 30_000; // activity watched inside A's visit
+    await opener.open(other); // #2: entry B, then #3: A settles AT THE SWITCH
+    expect(markRead).toHaveBeenNthCalledWith(2, other.key, HOST_EVENT);
+    expect(markRead).toHaveBeenNthCalledWith(3, target.key, HOST_EVENT + 30_000);
     markRead.mockClear();
-    opener.onFocus();
+    opener.onFocus(); // return beat: only B is left on the ledger
     expect(markRead).toHaveBeenCalledTimes(1);
-    expect(markRead).toHaveBeenCalledWith(other.key, HOST_EVENT);
+    expect(markRead).toHaveBeenCalledWith(other.key, HOST_EVENT + 30_000);
     markRead.mockClear();
     opener.onFocus();
     expect(markRead).not.toHaveBeenCalled();
+  });
+
+  // R2-02 regression (分栏翻转丢拍): the pending visit lived in the opener's
+  // closure; a body remount (wide↔compact flip, section switch) hands the screen
+  // a FRESH opener whose return beat settled nothing — the visit was lost. The
+  // visit must outlive the opener instance that recorded it (module ledger).
+  it("a NEW opener instance settles the visit an older instance recorded", async () => {
+    const first = harness();
+    await first.opener.open(target);
+    const second = harness(); // body remount: fresh opener, same pending visit
+    second.opener.onFocus();
+    expect(second.markRead).toHaveBeenCalledWith(target.key, HOST_EVENT);
+  });
+
+  // R2-02 regression (覆盖点 B): opening B overwrote A's single pending slot —
+  // A's return beat was lost and A's watched activity resurfaced as unread.
+  // Both visits must settle, each with its own watermark.
+  it("settles BOTH visits when B is opened over a still-pending A", async () => {
+    const { opener, markRead } = harness();
+    const other: ChatOpenTarget = { ...target, key: "srv-1:agent-2", agentId: "agent-2" };
+    await opener.open(target);
+    await opener.open(other); // wide: the detail swaps A→B without any focus event
+    opener.onFocus();
+    const stamps = markRead.mock.calls.map(([key]) => key);
+    expect(stamps.filter((k) => k === target.key)).toHaveLength(2); // entry + settle
+    expect(stamps.filter((k) => k === other.key)).toHaveLength(2);
+  });
+
+  // R2-03 regression (结算时点): leaving the session settles the visit AT THAT
+  // MOMENT. Activity that lands afterwards must re-arm the unread flag — a late
+  // focus beat must never stamp it as seen (the wide-screen silent-read chain).
+  it("leaving settles the visit immediately; later attention is not swallowed", async () => {
+    let fresh = HOST_EVENT;
+    const markRead = vi.fn();
+    const opener = createChatOpener({
+      markRead,
+      navigateToAgent: vi.fn(),
+      lastEventAtOf: () => fresh,
+      confirmFork: async () => true,
+      forkAcknowledged: () => false,
+      acknowledgeFork: () => {},
+      section: "chats",
+    });
+    await opener.open(target);
+    expect(settleVisits("section-switch")).toEqual([target.key]); // leave = NOW
+    expect(markRead).toHaveBeenCalledTimes(2); // entry + settle, nothing later
+    fresh = HOST_EVENT + 60_000; // activity AFTER leaving
+    opener.onFocus(); // late compensation beat
+    expect(markRead).toHaveBeenCalledTimes(2); // stamped nothing
+    // The new attention event surfaces as unread instead of being swallowed.
+    expect(
+      isChatUnread(
+        {
+          key: target.key,
+          serverId: target.serverId,
+          bucket: "done",
+          lastActivityAt: fresh,
+          attentionTimestamp: fresh,
+        },
+        HOST_EVENT,
+      ),
+    ).toBe(true);
   });
 
   it("navigates once with the target's ids, passing a missing workspaceId through", async () => {
@@ -202,6 +289,7 @@ describe("C24 fork guard (imported chats)", () => {
         }),
       forkAcknowledged: () => false,
       acknowledgeFork: () => {},
+      section: "chats",
     });
     const opening = opener.open(importedTarget);
     await Promise.resolve();
@@ -239,6 +327,7 @@ describe("C24 fork guard (imported chats)", () => {
       },
       forkAcknowledged: () => false,
       acknowledgeFork: () => {},
+      section: "chats",
     });
     await opener.open(importedTarget); // target.lastEventAt = HOST_EVENT (press snapshot)
     expect(markRead).toHaveBeenCalledWith(importedTarget.key, HOST_EVENT + 5_000);
@@ -258,6 +347,7 @@ describe("C24 fork guard (imported chats)", () => {
       },
       forkAcknowledged: () => false,
       acknowledgeFork: () => {},
+      section: "chats",
     });
     await opener.open(importedTarget);
     expect(markRead).toHaveBeenCalledWith(importedTarget.key, HOST_EVENT);

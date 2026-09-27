@@ -264,8 +264,9 @@ export function ChatsScreenBody({ selectedAgentKey = null }: ShellScreenBodyProp
   // C4: row taps enter the session through the official navigateToAgent tool family
   // (workspace route + open intent) with a push verb (the official dismissTo pops the
   // list → back exits the app; the parse stub flashes white, SPIKE A2). The opener
-  // stamps read on entry and again when this screen regains focus, so a reply watched
-  // inside the session never resurface as an unread dot. F4: both beats stamp with
+  // stamps read on entry and records the visit on the module ledger (R2-02); the
+  // return stamp settles at the leave moments — rail section switch, the next open,
+  // or this screen's focus beat as compensation (R2-03). F4: both beats stamp with
   // the chat's own host-domain last-event time, never the device wall clock.
   // C24: an imported chat's FIRST open passes the fork warning (official confirm
   // dialog); confirming persists a per-row ack in the forkAck store, cancelling
@@ -290,6 +291,7 @@ export function ChatsScreenBody({ selectedAgentKey = null }: ShellScreenBodyProp
           }),
         forkAcknowledged: (key) => usePaseoGoForkAckStore.getState().ackedKeys.includes(key),
         acknowledgeFork: (key) => usePaseoGoForkAckStore.getState().ack(key),
+        section: "chats",
       }),
     [markRead, t],
   );
@@ -308,9 +310,10 @@ export function ChatsScreenBody({ selectedAgentKey = null }: ShellScreenBodyProp
   // C31: the C18 second beat used to ride this screen's useFocusEffect. The body now
   // lives outside the navigator on wide screens, so the tab screen emits the focus
   // beat onto the section bus and it lands here in BOTH positions (compact included
-  // — the trigger point is the same real focus event; the beat itself is a no-op
-  // unless a visit is pending, so the extra beats the old [opener]-dep re-arm used
-  // to fire on language switches carry no semantics).
+  // — the trigger point is the same real focus event). R2-03 re-scoped the beat to
+  // a compensation settle on the module ledger: leave moments (rail switch, the
+  // next open) normally drain the slots first, so this clears nothing unless a
+  // slot survived one (directory row absent at the leave moment).
   useEffect(() => subscribeSectionFocus("chats", () => opener.onFocus()), [opener]);
 
   // C31 §4-8: rail retap = 回顶. The official DraggableList exposes no scroll ref,

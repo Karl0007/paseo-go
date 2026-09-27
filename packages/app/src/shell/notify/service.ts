@@ -20,6 +20,7 @@ import { Platform } from "react-native";
 import * as Notifications from "expo-notifications";
 import { shellNavigateToAgent } from "@/shell/chats/shell-navigate-to-agent";
 import { chatLastEventAtFromAgent } from "@/shell/chats/derive";
+import { recordVisit } from "@/shell/chats/visit-ledger";
 import { useSessionStore } from "@/stores/session-store";
 import { usePaseoGoReadStateStore } from "@/shell/stores/readState";
 import { decodeAttentionPayload, encodeAttentionPayload, type AttentionPayload } from "./payload";
@@ -87,6 +88,19 @@ function openFromResponse(response: Notifications.NotificationResponse): void {
   if (at !== null) {
     usePaseoGoReadStateStore.getState().markRead(`${payload.serverId}:${payload.agentId}`, at);
   }
+  // R2-02 (通知进入): the tap IS a visit — record it on the module ledger so the
+  // leave moments (rail switch / next open / focus-beat compensation) settle the
+  // activity watched inside the session. No trustworthy entry stamp (cold tap)
+  // still records, with floor 0: the session screen shows the full timeline, so
+  // everything up to the settle moment was seen; the slot merely survives until
+  // the directory row exists.
+  recordVisit({
+    section: "chats",
+    key: `${payload.serverId}:${payload.agentId}`,
+    serverId: payload.serverId,
+    agentId: payload.agentId,
+    at: at ?? 0,
+  });
   shellNavigateToAgent(payload);
   void Notifications.dismissNotificationAsync(identifier).catch(() => {});
 }

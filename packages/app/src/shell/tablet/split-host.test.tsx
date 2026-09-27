@@ -15,6 +15,12 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { Text } from "react-native";
 import { SHELL } from "@/shell/routes";
 import { subscribeRailRetap } from "./rail-events";
+import {
+  pendingVisits,
+  recordVisit,
+  registerVisitLedgerDeps,
+  resetVisitLedger,
+} from "@/shell/chats/visit-ledger";
 import ShellTabletSplitHost from "./split-host";
 
 const env = vi.hoisted(() => {
@@ -204,6 +210,39 @@ describe("ShellTabletSplitHost", () => {
     expect(router.navigate).toHaveBeenCalledWith(SHELL.chats);
     expect(retapped).toHaveBeenCalledWith("chats");
     off();
+  });
+
+  // R2-03 (FIX-B): on wide the rail press IS a leave action — the session in the
+  // detail column is popped/covered. The pending visit must settle with the
+  // watermark read at THIS moment, before the section switch runs, so activity
+  // that lands afterwards can never be silently marked seen.
+  it("rail press settles pending visits before navigating (leave-settles)", () => {
+    resetVisitLedger();
+    const calls: string[] = [];
+    registerVisitLedgerDeps({
+      lastEventAtOf: () => {
+        calls.push("watermark");
+        return 4_242;
+      },
+      markRead: (key) => {
+        calls.push(`markRead:${key}`);
+      },
+    });
+    recordVisit({
+      section: "chats",
+      key: "srv-1:agent-9",
+      serverId: "srv-1",
+      agentId: "agent-9",
+      at: 100,
+    });
+    vi.mocked(router.navigate).mockImplementationOnce(() => {
+      calls.push("navigate");
+    });
+    renderHost();
+    fireEvent.click(screen.getByTestId("shell-tablet-rail-workspace"));
+    expect(calls).toEqual(["watermark", "markRead:srv-1:agent-9", "navigate"]);
+    expect(pendingVisits()).toHaveLength(0);
+    resetVisitLedger();
   });
 
   it("keep-alives visited bodies across rail switches (card 裁定 5: body 不重挂)", () => {

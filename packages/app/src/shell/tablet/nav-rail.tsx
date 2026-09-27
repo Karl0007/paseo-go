@@ -5,6 +5,9 @@
 // mounted tab that switches and pops whatever was pushed above it (§4-3), which
 // is exactly the rail semantics. Re-press on the live section also fires the
 // rail-retap event (§4-8; scrollToTop subscribes in C31).
+// R2-03 (FIX-B): a rail press is a LEAVE action — it pops/covers whatever session
+// the detail column showed — so the module visit ledger settles BEFORE navigate
+// runs, with the watermark read at this moment (never a later focus beat's).
 // `import React` (not just the hooks): vitest compiles JSX with the classic
 // runtime (expo tsconfig `jsx: react-native`), so a source file mounted by a
 // component test must keep React in scope — the import-session-sheet pattern.
@@ -16,6 +19,7 @@ import { StyleSheet } from "react-native-unistyles";
 import { useTranslation } from "react-i18next";
 import { SHELL_I18N_NAMESPACE } from "@/shell/i18n";
 import { SHELL } from "@/shell/routes";
+import { settleVisits } from "@/shell/chats/visit-ledger";
 import { useTabletColumns } from "./form-factor";
 import { emitRailRetap } from "./rail-events";
 import type { TabletSection } from "./split-predicates";
@@ -58,6 +62,7 @@ function RailItemButton({
 }) {
   const onPress = useCallback(() => {
     if (selected) emitRailRetap(meta.section);
+    settleVisits("section-switch");
     router.navigate(meta.href);
   }, [selected, meta]);
   const accessibilityState = useMemo(() => ({ selected }), [selected]);

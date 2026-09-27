@@ -19,6 +19,12 @@ vi.mock("@react-native-async-storage/async-storage", () => {
   };
 });
 
+import {
+  pendingVisits,
+  registerVisitLedgerDeps,
+  resetVisitLedger,
+  settleVisits,
+} from "@/shell/chats/visit-ledger";
 import { usePaseoGoCommandsStore, type ShellCommand } from "@/shell/stores/commands";
 import {
   createShellCommandActions,
@@ -96,6 +102,33 @@ describe("run", () => {
       "provider upstream 502",
     );
     expect(deps.navigateToAgent).not.toHaveBeenCalled();
+  });
+
+  // R2-02 regression (指令进入): the successful run navigates into the new session
+  // but never recorded the visit — activity watched during it (a fast completion)
+  // resurfaced as unread on return, and the row could not even settle its own
+  // entry watermark. The run must put the visit on the ledger.
+  it("records the visit on a successful run so leaving settles the watched activity", async () => {
+    resetVisitLedger();
+    const markRead = vi.fn();
+    registerVisitLedgerDeps({ lastEventAtOf: () => 5_000, markRead });
+    const createAgent = vi.fn(async () => ({ id: "agent-new", workspaceId: "ws-1" }));
+    const { deps } = makeDeps({ createAgent } as unknown as ShellCommandClientPort);
+    await createShellCommandActions(deps).run(command, "ws-1");
+    expect(pendingVisits().map((slot) => slot.key)).toEqual(["srv-A:agent-new"]);
+    settleVisits("section-switch"); // leaving the session settles it, floor 0 → fresh
+    expect(markRead).toHaveBeenCalledWith("srv-A:agent-new", 5_000);
+    resetVisitLedger();
+  });
+
+  it("a rejected create records no visit", async () => {
+    resetVisitLedger();
+    const createAgent = vi.fn(async () => {
+      throw new Error("provider upstream 502");
+    });
+    const { deps } = makeDeps({ createAgent } as unknown as ShellCommandClientPort);
+    await createShellCommandActions(deps).run(command, "ws-1");
+    expect(pendingVisits()).toHaveLength(0);
   });
 });
 
