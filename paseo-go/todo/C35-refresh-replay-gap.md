@@ -29,3 +29,19 @@
 
 - 动：`packages/server/src/server/agent/**`（agent-manager reload/hydrate 路径、omp provider streamHistory）、就近测试
 - 不动：壳 UI（C24 动作层已正确）
+
+## 证据与验收状态（2026-09-27 补齐；修复 commit `f7ed26b1`）
+
+证据目录：`paseo-go/evidence/C35/`（4 件）
+
+- `daemon-log-timeline.md` — daemon.log 关键时间线摘录：C24 真机现场（09:17–09:25 三连刷 + 09:20:54.844 设备侧归档 RPC=掉目录真凶）+ 修复后探针运行段（09:53–09:56，devd 重启→import→refresh 成功→清理）
+- `omp-jsonl-765-771-exit-fork.md` — 源会话 journal 行 765–771 session_exit 分叉记录（行号+关键字段摘录，无隐私全文）：`leaves.at(-1)` 被 exit-only 兄弟分支抢走的现场实锤，时间戳与 daemon.log 事件 ±30ms 对咬
+- `probe-ws-roundtrip.md` — 探针 WS 往返摘要：import→真实 omp fork 追加→refresh→timeline 含 probe 轮次（epoch 前进）+ 目录 listed=true/status=idle/archivedAt=null
+- `provider-matrix.md` — 三 provider 定性矩阵：omp 有病已修 / claude 同链无病（e2e 实跑绿）/ codex 结构性免疫［INFERENCE，代码定性］
+
+验收状态：
+
+1. 复现链转回归测试：**在案**（f7ed26b1：history-mapper.test.ts 两单测 + daemon e2e `omp-import-refresh-fork-replay.e2e.test.ts`，均证修复前失败=C24 症状逐字复现）
+2. 三 provider 矩阵实测记录：**在案**（`evidence/C35/provider-matrix.md`；codex 行为 INFERENCE 标注，理由见文内）
+3. 真机 app 刷新→时间线增长实拍：**移交 Main 设备窗口**（v0.2.0 后统一拍）；daemon 侧等价链已由真机探针闭环（`probe-ws-roundtrip.md`）
+4. 恰一次 commit + 报告 JSON：修复轮=f7ed26b1（报告已交）；本证据补齐轮=独立 docs commit
