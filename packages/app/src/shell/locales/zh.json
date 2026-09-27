@@ -208,6 +208,17 @@
   },
   "files": {
     "notFound": "找不到该工作区——项目可能已归档或主机尚未同步。",
+    "tabFiles": "文件",
+    "tabDiff": "diff",
+    "tabGit": "git 记录",
+    "notGitHint": "此目录不是 git 仓库，diff 与提交记录不可用。",
+    "commitsUnsupported": "当前主机版本暂不支持提交记录列表。",
+    "commitShaCopied": "已复制 commit {{sha}}",
+    "commitCopyFailed": "复制失败",
+    "searchPlaceholder": "搜索本工作区已浏览目录",
+    "searchEmptyTitle": "没有匹配的文件",
+    "searchEmptyAction": "清除搜索",
+    "searchEmptyHint": "文件搜索只覆盖本工作区本次运行中浏览过的目录（上游暂无文件名搜索 RPC）。",
     "menu": {
       "favorite": "收藏",
       "unfavorite": "取消收藏",

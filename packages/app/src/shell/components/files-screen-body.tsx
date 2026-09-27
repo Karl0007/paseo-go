@@ -1,4 +1,5 @@
-// 文件浏览屏 shared body (card C16): one browse UI, two root-stack positions.
+// 文件浏览屏 shared body (card C16, restructured by C27): one browse UI, two
+// root-stack positions.
 //   (shell)/files/[serverId]/[workspaceId]   hidden-tab entry (C5 KI-2) — back is an
 //       in-tab jump to the 工作区 tab and the Android hardware back is intercepted
 //       while focused; that wiring lives in the thin route wrapper, not here.
@@ -6,24 +7,38 @@
 //       back is a real pop (the wrapper's header back mirrors it); the session
 //       screen stays on the stack underneath (C14 measured the hidden-tab route's
 //       push to be a navigate-reuse that popped it).
-// Everything else is shared: the host › project › workspace breadcrumb header,
-// the selection 收藏 chip, the official FileExplorerPane (SPIKE A3 — its
-// onOpenFile is fully delegated), the (detail) preview push, and 添加到对话.
-import { useCallback, useMemo } from "react";
-import { Pressable, Text, View } from "react-native";
+// C27 (DESIGN §14.9): the header is a single project-path line (the host › project
+// › workspace breadcrumb was 拍板没有意义), with a 放大镜 morphing into the C9 search
+// bar scoped to THIS workspace's browsed directories; below it a three-segment tab
+// row 文件 | diff | git 记录 embeds the official ChangesSurface (the same component
+// the official changes tab mounts, same queries/panel-store data path) and
+// CommitsSection (checkout commits ahead of base). Tab/search state is in-screen
+// only (裁定: 不入 persist). Panels stay mounted across tab switches (RetainedPanel
+// — display:none + active-context gating), so 段切换往返状态不串: the explorer keeps
+// its expansion/selection (scroll position may reset when Android recycles the
+// list — accepted), the diff keeps its collapsed-file tree state (lifted here),
+// commits keep their query cache. Non-git checkouts gray the two git segments and
+// say why (official unsupported idiom: nothing to embed).
+import { useCallback, useMemo, useState } from "react";
+import { FlatList, Pressable, ScrollView, Text, View } from "react-native";
 import { router, type Href } from "expo-router";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useTranslation } from "react-i18next";
 import { StyleSheet } from "react-native-unistyles";
-import { ChevronLeft, FileQuestion, Star, StarOff, X } from "lucide-react-native";
+import { ChevronLeft, FileQuestion, Search, SearchX, Star, StarOff, X } from "lucide-react-native";
+import * as Clipboard from "expo-clipboard";
+import { ChangesSurface } from "@/git/diff-pane";
+import { CommitsSection } from "@/git/commits-section/commits-section";
+import { useCheckoutStatusQuery } from "@/git/use-status-query";
+import { changesStateSchema, defaultChangesState, type ChangesState } from "@/panels/changes/state";
 import { FileExplorerPane } from "@/components/file-explorer-pane";
 import { LoadingSpinner } from "@/components/ui/loading-spinner";
+import { RetainedPanel } from "@/components/retained-panel";
+import { SegmentedControl } from "@/components/ui/segmented-control";
+import { Button } from "@/components/ui/button";
+import { useToast } from "@/contexts/toast-context";
 import { useHosts } from "@/runtime/host-runtime";
-import {
-  useSessionStore,
-  type ExplorerEntry,
-  type WorkspaceDescriptor,
-} from "@/stores/session-store";
+import { useSessionStore, type ExplorerEntry } from "@/stores/session-store";
 import { useFileExplorerActions } from "@/hooks/use-file-explorer-actions";
 import { buildWorkspaceExplorerStateKey } from "@/file-explorer/state-keys";
 import { parentExplorerPath } from "@/utils/explorer-paths";
@@ -34,6 +49,20 @@ import {
   useShellFileActions,
   type ShellFileTarget,
 } from "@/shell/files/use-shell-file-actions";
+import {
+  buildWorkspaceFileSearchSource,
+  constrainFilesScreenTab,
+  gitTabsDisabled,
+  type FilesScreenTab,
+} from "@/shell/files/files-tabs";
+import { SearchModeBar } from "@/shell/components/search/search-mode-bar";
+import { FileSearchRow } from "@/shell/components/search/file-search-row";
+import {
+  collectBrowsedWorkspaces,
+  searchFileNames,
+  type FileSearchHit,
+} from "@/shell/search/file-search";
+import { normalizeSearchQuery } from "@/shell/search/query";
 
 // The official rows set selectedEntryPath on press AND long-press; the chip turns
 // that selection into the shell's 收藏 affordance for the explorer surface.
@@ -98,51 +127,140 @@ function SelectionFavoriteChip({
   );
 }
 
-// host › project › workspace crumbs over the pane (kept from C5 verbatim, just
-// componentized so the screen body stays about browsing).
+// C27: 头部只留项目路径 — one line (back · workspaceDirectory · 放大镜). Middle
+// ellipsization keeps the tail segment (the part that identifies THIS checkout)
+// visible on long paths. The 放大镜 morphs the row into the C9 search bar.
 function FilesHeader({
-  hostLabel,
-  workspace,
-  fallbackName,
+  pathLabel,
+  searchActive,
   onBack,
+  onSearchOpen,
+  onQueryChange,
+  onSearchCancel,
   topInset,
 }: {
-  hostLabel: string;
-  workspace: WorkspaceDescriptor | undefined;
-  fallbackName: string;
+  pathLabel: string;
+  searchActive: boolean;
   onBack: () => void;
+  onSearchOpen: () => void;
+  onQueryChange: (query: string) => void;
+  onSearchCancel: () => void;
   topInset: number;
 }) {
-  const workspaceName = workspace?.title?.trim() || workspace?.name || fallbackName;
+  const { t } = useTranslation(SHELL_I18N_NAMESPACE);
   return (
     <View style={[styles.header, { paddingTop: topInset }]}>
-      <Pressable
-        onPress={onBack}
-        accessibilityRole="button"
-        hitSlop={8}
-        style={styles.back}
-        testID="shell-files-back"
-      >
-        <ChevronLeft size={22} color={styles.backIcon.color} />
-      </Pressable>
-      <View style={styles.crumbs} testID="shell-files-breadcrumbs">
-        <Text style={styles.crumbMuted} numberOfLines={1}>
-          {hostLabel}
-        </Text>
-        {workspace ? (
-          <>
-            <Text style={styles.crumbSep}>›</Text>
-            <Text style={styles.crumbMuted} numberOfLines={1}>
-              {workspace.projectCustomName?.trim() || workspace.projectDisplayName}
-            </Text>
-            <Text style={styles.crumbSep}>›</Text>
-          </>
-        ) : null}
-        <Text style={styles.crumbCurrent} numberOfLines={1}>
-          {workspaceName}
-        </Text>
-      </View>
+      {searchActive ? (
+        <SearchModeBar
+          onQueryChange={onQueryChange}
+          onCancel={onSearchCancel}
+          placeholder={t("files.searchPlaceholder")}
+          inputTestID="shell-files-search-input"
+          cancelTestID="shell-files-search-cancel"
+        />
+      ) : (
+        <>
+          <Pressable
+            onPress={onBack}
+            accessibilityRole="button"
+            hitSlop={8}
+            style={styles.back}
+            testID="shell-files-back"
+          >
+            <ChevronLeft size={22} color={styles.backIcon.color} />
+          </Pressable>
+          <Text
+            style={styles.path}
+            numberOfLines={1}
+            ellipsizeMode="middle"
+            accessibilityLabel={pathLabel}
+            testID="shell-files-path"
+          >
+            {pathLabel}
+          </Text>
+          <Pressable
+            onPress={onSearchOpen}
+            accessibilityRole="search"
+            hitSlop={8}
+            style={styles.back}
+            testID="shell-files-search"
+          >
+            <Search size={18} color={styles.backIcon.color} />
+          </Pressable>
+        </>
+      )}
     </View>
+  );
+}
+
+// 页内搜索空态 (C27, C9 idiom): miss line + the honest scope note + 清除搜索. The
+// filter only sees directories this app run has browsed IN THIS WORKSPACE (no
+// filename-search RPC upstream — C9 probed it dead). With an empty query the note
+// leads alone.
+function FilesSearchEmptyState({
+  searching,
+  onClear,
+}: {
+  searching: boolean;
+  onClear: () => void;
+}) {
+  const { t } = useTranslation(SHELL_I18N_NAMESPACE);
+  return (
+    <View style={styles.searchEmpty} testID="shell-files-search-empty">
+      {searching ? (
+        <>
+          <SearchX size={28} color={styles.chipIcon.color} />
+          <Text style={styles.searchEmptyTitle}>{t("files.searchEmptyTitle")}</Text>
+          <Button variant="secondary" size="sm" onPress={onClear} testID="shell-files-search-clear">
+            {t("files.searchEmptyAction")}
+          </Button>
+        </>
+      ) : null}
+      <Text style={styles.missing}>{t("files.searchEmptyHint")}</Text>
+    </View>
+  );
+}
+
+// git 记录段: the official CommitsSection (checkout history ahead of base, with
+// its own skeleton/error/noneAhead states). Its rows only expose onPress and the
+// body is off-limits to this card, so the commit-diff panel (which lives in the
+// official workspace-tab layout this screen has no handle on) is NOT wired —
+// pressing a row copies its full sha (C27 ruling's 降级, recorded in the card
+// report). The capability gate reads the SAME serverInfo.features flags
+// useCheckoutCommitsQuery gates on, so the section never renders as a blank pane.
+function GitLogPane({
+  serverId,
+  cwd,
+  onCommitPress,
+}: {
+  serverId: string;
+  cwd: string;
+  onCommitPress: (sha: string) => void;
+}) {
+  const { t } = useTranslation(SHELL_I18N_NAMESPACE);
+  const [collapsed, setCollapsed] = useState(false);
+  const commitsSupported = useSessionStore(
+    (state) =>
+      state.sessions[serverId]?.serverInfo?.features?.commitsList === true &&
+      state.sessions[serverId]?.serverInfo?.features?.commitBaseClassification === true,
+  );
+  if (!commitsSupported) {
+    return (
+      <View style={styles.missingWrap} testID="shell-files-commits-unsupported">
+        <Text style={styles.missing}>{t("files.commitsUnsupported")}</Text>
+      </View>
+    );
+  }
+  return (
+    <ScrollView style={styles.gitScroll} testID="shell-files-git-pane">
+      <CommitsSection
+        serverId={serverId}
+        cwd={cwd}
+        onCommitPress={onCommitPress}
+        collapsed={collapsed}
+        onCollapsedChange={setCollapsed}
+      />
+    </ScrollView>
   );
 }
 
@@ -157,6 +275,7 @@ export function FilesScreenBody({
 }) {
   const { t } = useTranslation(SHELL_I18N_NAMESPACE);
   const insets = useSafeAreaInsets();
+  const toast = useToast();
   const hosts = useHosts();
   const workspace = useSessionStore((state) =>
     serverId && workspaceId ? state.sessions[serverId]?.workspaces.get(workspaceId) : undefined,
@@ -170,7 +289,57 @@ export function FilesScreenBody({
 
   const hostLabel = hosts.find((host) => host.serverId === serverId)?.label ?? serverId;
   const rootPath = workspace?.workspaceDirectory || workspace?.projectRootPath || "";
+  const workspaceName = workspace?.title?.trim() || workspace?.name || workspaceId;
 
+  // ---- C27 三段页签 (in-screen state, 裁定 4: 不入 persist) --------------------
+  const [tab, setTab] = useState<FilesScreenTab>("files");
+  // Panels lazy-mount on first visit and then stay mounted (RetainedPanel), so
+  // tab round-trips never rebuild (and never re-fetch from zero) a pane.
+  const [visited, setVisited] = useState<Record<FilesScreenTab, boolean>>({
+    files: true,
+    diff: false,
+    git: false,
+  });
+  const handleTabChange = useCallback((next: FilesScreenTab) => {
+    setTab(next);
+    setVisited((prev) => (prev[next] ? prev : { ...prev, [next]: true }));
+  }, []);
+  // The SAME checkout status the embedded ChangesSurface reads (one query cache,
+  // push-driven) — no second git-state source.
+  const checkoutStatus = useCheckoutStatusQuery({ serverId, cwd: rootPath });
+  const isGit = checkoutStatus.status ? checkoutStatus.status.isGit : null;
+  const gitDisabled = gitTabsDisabled(isGit);
+  // A non-git status landing while diff/git is open falls back to 文件 (pure fn).
+  const activeTab = constrainFilesScreenTab(tab, isGit);
+  const tabOptions = useMemo(
+    () => [
+      { value: "files" as const, label: t("files.tabFiles"), testID: "shell-files-tab-files" },
+      {
+        value: "diff" as const,
+        label: t("files.tabDiff"),
+        disabled: gitDisabled,
+        testID: "shell-files-tab-diff",
+      },
+      {
+        value: "git" as const,
+        label: t("files.tabGit"),
+        disabled: gitDisabled,
+        testID: "shell-files-tab-git",
+      },
+    ],
+    [t, gitDisabled],
+  );
+
+  // ---- 页内搜索 (本工作区已浏览目录, C9 姿势) ----------------------------------
+  const search = useFilesWorkspaceSearch({
+    serverId,
+    hostLabel,
+    workspaceId,
+    workspaceName,
+    workspaceRoot: rootPath,
+  });
+
+  // ---- shared file wiring ------------------------------------------------------
   const workspaceStateKey = useMemo(
     () => buildWorkspaceExplorerStateKey({ workspaceId, workspaceRoot: rootPath }),
     [workspaceId, rootPath],
@@ -207,6 +376,10 @@ export function FilesScreenBody({
     },
     [serverId, workspaceId, rootPath],
   );
+  const handleOpenHit = useCallback(
+    (hit: FileSearchHit) => handleOpenFile(hit.path),
+    [handleOpenFile],
+  );
   const addToChat = useShellAddToChat();
   const handleAddToChat = useCallback(
     (path: string) => {
@@ -222,36 +395,277 @@ export function FilesScreenBody({
   );
   const handleClearSelection = useCallback(() => selectExplorerEntry(null), [selectExplorerEntry]);
 
+  // diff 段: the ChangesSurface state the official sidebar lifts the same way
+  // (collapsed file/folder paths survive tab round-trips; the pane itself owns
+  // everything else through the official queries).
+  const [changesState, setChangesState] = useState<ChangesState>(() =>
+    changesStateSchema.parse(defaultChangesState),
+  );
+  const handleCommitPress = useCallback(
+    (sha: string) => {
+      void (async () => {
+        try {
+          await Clipboard.setStringAsync(sha);
+          toast.show(t("files.commitShaCopied", { sha: sha.slice(0, 8) }));
+        } catch {
+          toast.error(t("files.commitCopyFailed"));
+        }
+      })();
+    },
+    [toast, t],
+  );
+
+  const hasWorkspace = workspace !== undefined;
+
   return (
     <View style={styles.screen}>
       <FilesHeader
-        hostLabel={hostLabel}
-        workspace={workspace}
-        fallbackName={workspaceId}
+        pathLabel={rootPath || workspaceName}
+        searchActive={search.active}
         onBack={onBack}
+        onSearchOpen={search.open}
+        onQueryChange={search.setQuery}
+        onSearchCancel={search.cancel}
         topInset={insets.top + 8}
       />
-      {selectedEntry ? (
-        <SelectionFavoriteChip
-          serverId={serverId}
-          workspaceId={workspaceId}
-          workspaceRoot={rootPath}
-          entry={selectedEntry}
-          onClear={handleClearSelection}
+      <View style={styles.tabRow}>
+        <SegmentedControl
+          size="sm"
+          options={tabOptions}
+          value={activeTab}
+          onValueChange={handleTabChange}
+          testID="shell-files-tabs"
         />
+      </View>
+      {gitDisabled ? (
+        <Text style={styles.notGitHint} testID="shell-files-not-git-hint">
+          {t("files.notGitHint")}
+        </Text>
       ) : null}
       <View style={styles.body}>
+        {search.active ? (
+          // 结果替换内容区 (C9 ruling): the retained panels go display:none (state
+          // survives), the hit list takes over the body.
+          <FilesSearchBody
+            hits={search.hits}
+            searching={search.searching}
+            onClear={search.cancel}
+            onOpenHit={handleOpenHit}
+          />
+        ) : null}
+        <FilesTabPanels
+          visited={visited}
+          activeTab={activeTab}
+          searchActive={search.active}
+          serverId={serverId}
+          workspaceId={workspaceId}
+          rootPath={rootPath}
+          hasWorkspace={hasWorkspace}
+          workspacesHydrated={workspacesHydrated}
+          notFoundLabel={t("files.notFound")}
+          selectedEntry={selectedEntry}
+          changesState={changesState}
+          onChangesStateChange={setChangesState}
+          onClearSelection={handleClearSelection}
+          onOpenFile={handleOpenFile}
+          onAddToChat={handleAddToChat}
+          onCommitPress={handleCommitPress}
+        />
+      </View>
+    </View>
+  );
+}
+
+// 页内搜索 state + 索引 (C27 裁定 3): in-screen only (不入 persist). The index is
+// rebuilt from the session-store explorer cache while the bar is open (the
+// C9/C13-F1 writer↔reader contract) and filtered to THIS workspace by the pure
+// builder — the honest scope is 「本工作区已浏览目录」, stated in the empty state.
+function useFilesWorkspaceSearch(input: {
+  serverId: string;
+  hostLabel: string;
+  workspaceId: string;
+  workspaceName: string;
+  workspaceRoot: string;
+}) {
+  const { serverId, hostLabel, workspaceId, workspaceName, workspaceRoot } = input;
+  const [active, setActive] = useState(false);
+  const [query, setQuery] = useState("");
+  const fileExplorer = useSessionStore((state) =>
+    serverId ? state.sessions[serverId]?.fileExplorer : undefined,
+  );
+  const source = useMemo(
+    () =>
+      active && fileExplorer
+        ? buildWorkspaceFileSearchSource({
+            serverId,
+            hostLabel,
+            workspaceId,
+            workspaceName,
+            workspaceRoot,
+            browsed: collectBrowsedWorkspaces(fileExplorer),
+          })
+        : null,
+    [active, fileExplorer, serverId, hostLabel, workspaceId, workspaceName, workspaceRoot],
+  );
+  const hits = useMemo(
+    () => (active && source ? searchFileNames([source], query) : []),
+    [active, source, query],
+  );
+  const searching = active && normalizeSearchQuery(query).length > 0;
+  const open = useCallback(() => setActive(true), []);
+  const cancel = useCallback(() => {
+    setActive(false);
+    setQuery("");
+  }, []);
+  return { active, query, setQuery, open, cancel, hits, searching };
+}
+
+// 命中列表 (C9 ruling): takes over the body area while search is open; a hit
+// pushes the C6 preview (same route as an explorer tap).
+function FilesSearchBody({
+  hits,
+  searching,
+  onClear,
+  onOpenHit,
+}: {
+  hits: FileSearchHit[];
+  searching: boolean;
+  onClear: () => void;
+  onOpenHit: (hit: FileSearchHit) => void;
+}) {
+  const renderRow = useCallback(
+    ({ item }: { item: FileSearchHit }) => <FileSearchRow hit={item} onOpen={onOpenHit} />,
+    [onOpenHit],
+  );
+  const keyExtractor = useCallback((hit: FileSearchHit) => hit.key, []);
+  const listEmpty = useMemo(
+    () => <FilesSearchEmptyState searching={searching} onClear={onClear} />,
+    [searching, onClear],
+  );
+  return (
+    <FlatList
+      data={hits}
+      keyExtractor={keyExtractor}
+      renderItem={renderRow}
+      contentContainerStyle={styles.searchListContent}
+      ListEmptyComponent={listEmpty}
+      testID="shell-files-search-results"
+    />
+  );
+}
+
+// 三段内容区: each VISITED panel stays mounted across switches (RetainedPanel —
+// display:none + active-context gating, the official sidebar idiom), so 段切换
+// 往返状态不串: the explorer keeps expansion/selection (scroll position may reset
+// when Android recycles the offscreen list — accepted), the diff keeps its lifted
+// collapsed-tree state, commits keep their query cache; inactive panels also lose
+// the retained-active signal, which pauses their timers/polling upstream.
+// A not-yet-hydrated / missing descriptor reuses the C12 three-state idiom in
+// EVERY segment, so no segment can flash a misleading empty diff.
+function FilesTabPanels({
+  visited,
+  activeTab,
+  searchActive,
+  serverId,
+  workspaceId,
+  rootPath,
+  hasWorkspace,
+  workspacesHydrated,
+  notFoundLabel,
+  selectedEntry,
+  changesState,
+  onChangesStateChange,
+  onClearSelection,
+  onOpenFile,
+  onAddToChat,
+  onCommitPress,
+}: {
+  visited: Record<FilesScreenTab, boolean>;
+  activeTab: FilesScreenTab;
+  searchActive: boolean;
+  serverId: string;
+  workspaceId: string;
+  rootPath: string;
+  hasWorkspace: boolean;
+  workspacesHydrated: boolean;
+  notFoundLabel: string;
+  selectedEntry: ExplorerEntry | null;
+  changesState: ChangesState;
+  onChangesStateChange: (state: ChangesState) => void;
+  onClearSelection: () => void;
+  onOpenFile: (path: string) => void;
+  onAddToChat: (path: string) => void;
+  onCommitPress: (sha: string) => void;
+}) {
+  const diffActive = activeTab === "diff" && !searchActive;
+  return (
+    <View style={[styles.panels, searchActive && styles.panelsHidden]}>
+      <RetainedPanel active={activeTab === "files" && !searchActive}>
+        {selectedEntry ? (
+          <SelectionFavoriteChip
+            serverId={serverId}
+            workspaceId={workspaceId}
+            workspaceRoot={rootPath}
+            entry={selectedEntry}
+            onClear={onClearSelection}
+          />
+        ) : null}
         <FilesPaneState
           serverId={serverId}
           workspaceId={workspaceId}
           rootPath={rootPath}
-          hasWorkspace={workspace !== undefined}
+          hasWorkspace={hasWorkspace}
           workspacesHydrated={workspacesHydrated}
-          notFoundLabel={t("files.notFound")}
-          onOpenFile={handleOpenFile}
-          onAddToChat={handleAddToChat}
+          notFoundLabel={notFoundLabel}
+          onOpenFile={onOpenFile}
+          onAddToChat={onAddToChat}
         />
-      </View>
+      </RetainedPanel>
+      {visited.diff ? (
+        <RetainedPanel active={diffActive}>
+          {hasWorkspace && serverId ? (
+            <ChangesSurface
+              serverId={serverId}
+              workspaceId={workspaceId}
+              cwd={rootPath}
+              enabled={diffActive}
+              onOpenFile={onOpenFile}
+              onAddToChat={onAddToChat}
+              state={changesState}
+              onStateChange={onChangesStateChange}
+            />
+          ) : (
+            <FilesPaneState
+              serverId={serverId}
+              workspaceId={workspaceId}
+              rootPath={rootPath}
+              hasWorkspace={false}
+              workspacesHydrated={workspacesHydrated}
+              notFoundLabel={notFoundLabel}
+              onOpenFile={onOpenFile}
+              onAddToChat={onAddToChat}
+            />
+          )}
+        </RetainedPanel>
+      ) : null}
+      {visited.git ? (
+        <RetainedPanel active={activeTab === "git" && !searchActive}>
+          {hasWorkspace && serverId ? (
+            <GitLogPane serverId={serverId} cwd={rootPath} onCommitPress={onCommitPress} />
+          ) : (
+            <FilesPaneState
+              serverId={serverId}
+              workspaceId={workspaceId}
+              rootPath={rootPath}
+              hasWorkspace={false}
+              workspacesHydrated={workspacesHydrated}
+              notFoundLabel={notFoundLabel}
+              onOpenFile={onOpenFile}
+              onAddToChat={onAddToChat}
+            />
+          )}
+        </RetainedPanel>
+      ) : null}
     </View>
   );
 }
@@ -322,26 +736,22 @@ const styles = StyleSheet.create((theme) => ({
   backIcon: {
     color: theme.colors.foreground,
   },
-  crumbs: {
+  path: {
     flex: 1,
-    flexDirection: "row",
-    alignItems: "center",
-    gap: theme.spacing[1],
-  },
-  crumbMuted: {
-    fontSize: theme.fontSize.sm,
-    color: theme.colors.foregroundMuted,
-    maxWidth: "34%",
-  },
-  crumbSep: {
-    fontSize: theme.fontSize.sm,
-    color: theme.colors.foregroundExtraMuted,
-  },
-  crumbCurrent: {
-    flexShrink: 1,
     fontSize: theme.fontSize.sm,
     fontWeight: theme.fontWeight.semibold,
     color: theme.colors.foreground,
+  },
+  tabRow: {
+    flexDirection: "row",
+    paddingHorizontal: theme.spacing[3],
+    paddingVertical: theme.spacing[2],
+  },
+  notGitHint: {
+    paddingHorizontal: theme.spacing[3],
+    paddingBottom: theme.spacing[2],
+    fontSize: theme.fontSize.sm,
+    color: theme.colors.foregroundMuted,
   },
   chipRow: {
     flexDirection: "row",
@@ -377,6 +787,29 @@ const styles = StyleSheet.create((theme) => ({
   },
   body: {
     flex: 1,
+  },
+  panels: {
+    flex: 1,
+  },
+  panelsHidden: {
+    display: "none",
+  },
+  gitScroll: {
+    flex: 1,
+  },
+  searchListContent: {
+    paddingBottom: theme.spacing[6],
+  },
+  searchEmpty: {
+    alignItems: "center",
+    gap: theme.spacing[2],
+    paddingTop: theme.spacing[4] * 4,
+    paddingHorizontal: theme.spacing[6],
+  },
+  searchEmptyTitle: {
+    fontSize: theme.fontSize.lg,
+    fontWeight: theme.fontWeight.semibold,
+    color: theme.colors.foreground,
   },
   loading: {
     flex: 1,

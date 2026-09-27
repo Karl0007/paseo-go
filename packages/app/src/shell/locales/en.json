@@ -208,6 +208,17 @@
   },
   "files": {
     "notFound": "Workspace not found — it may be archived or the host has not synced.",
+    "tabFiles": "Files",
+    "tabDiff": "diff",
+    "tabGit": "Git log",
+    "notGitHint": "This directory is not a git repository — diff and commit history are unavailable.",
+    "commitsUnsupported": "This host version does not support the commit list yet.",
+    "commitShaCopied": "Copied commit {{sha}}",
+    "commitCopyFailed": "Copy failed",
+    "searchPlaceholder": "Search folders browsed in this workspace",
+    "searchEmptyTitle": "No matching files",
+    "searchEmptyAction": "Clear search",
+    "searchEmptyHint": "File search only covers directories you have browsed in this workspace during this run (no filename-search RPC upstream).",
     "menu": {
       "favorite": "Favorite",
       "unfavorite": "Remove favorite",
