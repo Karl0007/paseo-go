@@ -63,3 +63,14 @@ C19 真机轮观察（known_issues#2 移交）：4:02 收藏的 AGENTS.md 与 4:
   4. 脚本日志经 `{ }>file` 块重定向在进程被杀时**整块丢失**（stdio 缓冲）→ 改逐行 `>>` 追加。
 - 判读口径、探针文件（`C:/tmp/c5-proj/C34-fav-{A1..A3,B1..B3}-1790486644.md`）、cmd 探针命名（`C34cmd<tag>X`）不变；A/B 全过=c1 转「竞态未证实」。
 - 另：本窗口 `adb logcat -c`（不带 `-b`）在华为机上会挂死 ≥90s，用 `timeout 8 adb logcat -c -b main -b crash`。
+
+## CLOSE-DEV2 设备窗口（2026-09-28 凌晨）：矩阵被裁决让位（0/18），c1 维持「未裁决」；基建再修两坑 + tight-window 附加样本脚本落位
+
+- **中止裁决（Main）**：FIX-B 两批在途持续改 `packages/app/src/shell/**`（工作树 15 个 M 文件），debug 包每次冷启拉活 bundle → 工作区 tab 红屏 `Property 'SHELL_I18N_NAMESPACE' doesn't exist`（Render Error，Call Stack 15 frames）。**归因=兄弟在途态被打包，非 persist 链**：`i18n.ts` 源文件干净未改；兄弟 `validated-persist-storage.ts` diff 只动读侧与拒绝路径（getItem 解析失败保留原文不再 removeItem、setItem schema 拒绝改为跳写保旧值），正常写链 `backingStorage.setItem(JSON.stringify(...))` 逐字未动 → 矩阵测量对象仍有效，shell 冻结后可直接跑。矩阵排设备窗口三。
+- **lib.sh 再修两枚基建雷（全部实锤，症状=冷启全 dumpfail 循环 / ABORT wt row 空转）**：
+  1. **GNU `timeout` 不能 exec shell 函数**：`dump()/dump1()` 里 `timeout 12 adb_ ...` 在 Git Bash 子进程 127（`adb_` 是函数；本会话工具 shell 的混合 timeout 能执行函数，彩排绿不可迁移）→ 改直调 `timeout 12 "$ADB" -s "$SER" exec-out ...`。
+  2. **`pick_bounds` 的 `local bx` 未初始化**在 `set -u` 下无匹配分支炸 `bx: unbound variable` → `local best=0 bx="" tmpf`。
+- **环境对齐（新坑，窗口三必读）**：本会话 shell `/tmp`=`C:\tmp`；Git Bash `/tmp`=`%TEMP%`；PATH 上的 `bash`=WSL 启动器。已建 junction `%TEMP%\c34` → `C:\tmp\c34`（丢失重建：`powershell New-Item -ItemType Junction -Path $env:TEMP\c34 -Target C:\tmp\c34`），使 Git Bash 重定向与 node 的 `/tmp/...` 参数解析同目录。`matrix2.sh` 内建 PATH/LOCALAPPDATA/TMP 消毒（hub 子进程继承会话 mangled PATH，coreutils 全缺）。
+- **新 harness（窗口三直接用）**：矩阵 18=12 核心（fav A/B×3 + cmd A/B×3）+ 6 附加（=卡面「附加样本」A×3+B×3）。附加样本脚本 `hyb_sample.sh`=**tight ≤1s 窗**：收藏 tap→立即 kill（中间无 dump/stat——既有 fav/cmd Round A 实际在变异后 2-4s 才杀，测不到 c1 的毫秒窗，此脚本补上；Round B=同流程+10s 对照；mem=-1，disk_ui+disk_sql 裁决）。`matrix2.sh`=18 样本编排（tag 前缀 fav-/cmd-/hyb- 防 ev/ 与 RKStorage 导出互覆）；`reset2.sh`=12 收藏+6 指令清场包装。附加探针 `C:/tmp/c5-proj/C34-fav-T{A1..A3,B1..B3}-1790530078.md` 已备。
+- **冷启复核**：54-65s 进首页（metro 温热、URL 行 tap 后 bundle 30s）——基建就绪，只欠 shell 冻结窗。
+- **设备复位**：三次中止均止于变异前，磁盘真相=基线（favorites=[AGENTS.md]、commands=[C19-probe]、pins 未动，零 C34 探针）；IME 已切回百度；app 留 home。c1 终笔判读移交窗口三。
