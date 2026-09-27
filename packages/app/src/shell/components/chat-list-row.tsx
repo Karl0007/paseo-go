@@ -137,6 +137,10 @@ interface ChatListRowProps {
   onGestureLockChange?: (locked: boolean) => void;
   /** DraggableFlatList reports the lifted cell; drives the raised style. */
   isActive?: boolean;
+  /** C31 平板选中态 (DESIGN-tablet §3.2): the detail column renders THIS row's
+   * session — route-derived by the split list column, never a local selection.
+   * Compact callers pass nothing (no selection concept there, §4-1). */
+  selected?: boolean;
 }
 
 export const ChatListRow = memo(function ChatListRow({
@@ -148,6 +152,7 @@ export const ChatListRow = memo(function ChatListRow({
   onDragStart,
   onGestureLockChange,
   isActive = false,
+  selected = false,
 }: ChatListRowProps) {
   return (
     <Animated.View entering={FadeIn.duration(140)} exiting={FadeOut.duration(120)}>
@@ -161,6 +166,7 @@ export const ChatListRow = memo(function ChatListRow({
           onDragStart={onDragStart}
           onGestureLockChange={onGestureLockChange}
           isActive={isActive}
+          selected={selected}
         />
       </ContextMenu>
     </Animated.View>
@@ -179,6 +185,7 @@ function ChatRowInner({
   onDragStart,
   onGestureLockChange,
   isActive,
+  selected,
 }: {
   row: ChatRow<ShellChatAgent>;
   actions: ShellAgentActions;
@@ -188,6 +195,7 @@ function ChatRowInner({
   onDragStart?: (key: string) => void;
   onGestureLockChange?: (locked: boolean) => void;
   isActive: boolean;
+  selected: boolean;
 }) {
   const { t } = useTranslation(SHELL_I18N_NAMESPACE);
   const menu = useContextMenu();
@@ -258,7 +266,12 @@ function ChatRowInner({
   return (
     <>
       <View
-        style={[styles.rowShell, isActive && styles.rowDragging, dimmed && styles.rowDimmed]}
+        style={[
+          styles.rowShell,
+          selected && styles.rowSelected,
+          isActive && styles.rowDragging,
+          dimmed && styles.rowDimmed,
+        ]}
         testID={`shell-chat-row-shell-${agent.key}`}
       >
         <ContextMenuTrigger
@@ -323,6 +336,11 @@ const styles = StyleSheet.create((theme) => ({
     flexDirection: "row",
     alignItems: "center",
     backgroundColor: theme.colors.surface0,
+  },
+  // C31: the wide list's route-derived selection — the official sidebar's own
+  // selection surface, distinct from hover/press (surface1).
+  rowSelected: {
+    backgroundColor: theme.colors.surfaceSidebarSelected,
   },
   // Raised look for the lifted cell: DraggableFlatList moves the row, the shell
   // gives it the surface1 fill and the shadow that reads as elevation.

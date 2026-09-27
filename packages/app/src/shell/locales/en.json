@@ -218,7 +218,7 @@
     "searchPlaceholder": "Search folders browsed in this workspace",
     "searchEmptyTitle": "No matching files",
     "searchEmptyAction": "Clear search",
-    "searchEmptyHint": "File search only covers directories you have browsed in this workspace during this run (no filename-search RPC upstream).",
+    "searchEmptyHint": "File search only covers directories you have browsed in this workspace during this run (no filename-search RPC upstream yet).",
     "menu": {
       "favorite": "Favorite",
       "unfavorite": "Remove favorite",
@@ -311,6 +311,10 @@
     "scriptsNoClient": "Not connected to the host"
   },
   "tablet": {
-    "listPlaceholder": "Lists appear here"
+    "detailPlaceholder": {
+      "chats": "Select a chat to view it here",
+      "workspace": "Select a project or session to view it here",
+      "me": "Select a settings entry to view it here"
+    }
   }
 }

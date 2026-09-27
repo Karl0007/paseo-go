@@ -33,6 +33,7 @@ export function WorkspaceSessionRow({
   dimmed,
   actions,
   onOpen,
+  selected = false,
 }: {
   session: WorkspaceTreeSession<AggregatedAgent>;
   /** Offline-host sections grey their cached rows. */
@@ -40,6 +41,9 @@ export function WorkspaceSessionRow({
   actions: ShellAgentActions;
   /** Screen-side C4 opener: read stamp + official navigateToAgent (open intent). */
   onOpen: (session: WorkspaceTreeSession<AggregatedAgent>) => void;
+  /** C31 平板选中态 (DESIGN-tablet §3.2): the detail column renders THIS session —
+   * route-derived by the split list column. Compact passes nothing (§4-1). */
+  selected?: boolean;
 }) {
   const { t } = useTranslation(SHELL_I18N_NAMESPACE);
   const { agent } = session;
@@ -84,7 +88,7 @@ export function WorkspaceSessionRow({
   return (
     <ContextMenu compactMode="popover">
       <View
-        style={[styles.shell, dimmed && styles.shellDimmed]}
+        style={[styles.shell, selected && styles.shellSelected, dimmed && styles.shellDimmed]}
         testID={`shell-workspace-session-shell-${session.key}`}
       >
         <ContextMenuTrigger
@@ -122,6 +126,10 @@ const styles = StyleSheet.create((theme) => ({
     flexDirection: "row",
     alignItems: "center",
     backgroundColor: theme.colors.surface0,
+  },
+  // C31: route-derived selection — the official sidebar selection surface.
+  shellSelected: {
+    backgroundColor: theme.colors.surfaceSidebarSelected,
   },
   shellDimmed: {
     opacity: 0.55,

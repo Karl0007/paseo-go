@@ -1,7 +1,7 @@
 // C30 root-level split host (DESIGN-tablet.md §3.2 T-A). Mounted once at the
 // AppShell seam (`app/_layout.tsx`, +3 lines, single wrapper, zero logic):
 // inactive = `children` verbatim, so the compact / shell-off / full-bleed tree
-// is byte-identical to pre-C30 (§6); active = [ nav rail | list placeholder |
+// is byte-identical to pre-C30 (§6); active = [ nav rail | list bodies |
 // children ], with children = the official AppContainer — the root Stack's only
 // render area, so pushed session routes land in the detail column as real
 // routes (§3.2, no embedding, no route changes).

@@ -311,6 +311,10 @@
     "scriptsNoClient": "未连接主机"
   },
   "tablet": {
-    "listPlaceholder": "列表内容将在此显示"
+    "detailPlaceholder": {
+      "chats": "选择会话在此查看",
+      "workspace": "选择项目或会话在此查看",
+      "me": "选择设置项在此查看"
+    }
   }
 }

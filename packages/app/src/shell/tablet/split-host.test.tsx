@@ -1,8 +1,11 @@
 // @vitest-environment jsdom
-// C30 acceptance 2 (passthrough half): the host is the §6 "byte-identical tree"
-// claim — inactive returns `children` with no wrapper element at all; active
-// renders [rail | list placeholder | children] and the rail drives navigation
-// (§4-3) plus the §4-8 retap stub.
+// C30 acceptance 2 (passthrough half, C31-wired): the host is the §6 "byte-identical
+// tree" claim — inactive returns `children` with no wrapper element at all; active
+// renders [rail | list bodies | children] and the rail drives navigation (§4-3) plus
+// the §4-8 retap. C31 additions pinned here: the list column keep-alives visited
+// bodies (切 tab 不重挂, card 裁定 5) and feeds them the route-derived selection
+// (§3.2 选中态单一真相). The real bodies are stubbed — their own behaviour is the
+// screen tests' business; the column's is mounting/hiding/feeding.
 import React from "react";
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { router, usePathname } from "expo-router";
@@ -18,8 +21,10 @@ const env = vi.hoisted(() => {
       accent: "#2563eb",
       foreground: "#111111",
       foregroundMuted: "#666666",
+      foregroundExtraMuted: "#999999",
       surface0: "#ffffff",
       surface1: "#fafafa",
+      surfaceSidebarSelected: "#eeeeee",
       border: "#e4e4e7",
     },
     spacing: [0, 4, 8, 12, 16, 20, 24, 28, 32],
@@ -32,6 +37,7 @@ const env = vi.hoisted(() => {
     breakpoint: "lg" as string | undefined,
     pending: false,
     active: true,
+    selectedAgentKey: null as string | null,
   };
   return {
     state,
@@ -56,6 +62,24 @@ vi.mock("@/shell/i18n", () => ({ SHELL_I18N_NAMESPACE: "paseoGo", ensureShellI18
 vi.mock("react-i18next", () => ({
   useTranslation: () => ({ t: (key: string) => key }),
 }));
+// The real bodies pull the whole data graph (stores, react-query, host runtime);
+// the column only mounts/hides/feeds them, so stubs carry the observable contract.
+vi.mock("@/shell/components/chats-screen-body", () => ({
+  ChatsScreenBody: ({ selectedAgentKey }: { selectedAgentKey?: string | null }) => (
+    <Text testID="body-chats">{selectedAgentKey ?? "none"}</Text>
+  ),
+}));
+vi.mock("@/shell/components/workspace-screen-body", () => ({
+  WorkspaceScreenBody: ({ selectedAgentKey }: { selectedAgentKey?: string | null }) => (
+    <Text testID="body-workspace">{selectedAgentKey ?? "none"}</Text>
+  ),
+}));
+vi.mock("@/shell/components/me-screen-body", () => ({
+  MeScreenBody: () => <Text testID="body-me">me</Text>,
+}));
+vi.mock("./use-tablet-selection", () => ({
+  useTabletSelectedAgentKey: () => env.state.selectedAgentKey,
+}));
 
 const pathname = vi.mocked(usePathname);
 
@@ -71,6 +95,7 @@ beforeEach(() => {
   env.state.breakpoint = "lg";
   env.state.pending = false;
   env.state.active = true;
+  env.state.selectedAgentKey = null;
   pathname.mockReturnValue("/chats");
   vi.mocked(router.navigate).mockClear();
 });
@@ -84,6 +109,8 @@ describe("ShellTabletSplitHost", () => {
     expect(screen.queryByTestId("shell-tablet-rail")).toBeNull();
     // The child IS the container's root — the seam adds no element.
     expect(container.firstElementChild).toBe(screen.getByTestId("split-child"));
+    // Compact never mounts a list body (the tab screens own them there).
+    expect(screen.queryByTestId("body-chats")).toBeNull();
   });
 
   it("passes children through with the shell off and on full-bleed routes", () => {
@@ -98,17 +125,19 @@ describe("ShellTabletSplitHost", () => {
     expect(screen.queryByTestId("shell-tablet-split")).toBeNull();
   });
 
-  it("renders rail + list placeholder + children when active", () => {
+  it("renders rail + the active section body + children when active", () => {
     renderHost();
     expect(screen.getByTestId("shell-tablet-split")).not.toBeNull();
     // Rail: the three destinations, `tabs.*` copy (t is identity under the mock).
     expect(screen.getByTestId("shell-tablet-rail-chats")).not.toBeNull();
     expect(screen.getByTestId("shell-tablet-rail-workspace")).not.toBeNull();
     expect(screen.getByTestId("shell-tablet-rail-me")).not.toBeNull();
-    // List column placeholder: active section title + empty state (§ card scope).
+    // List column: the chats body is mounted (first visit), the others never were.
     const column = screen.getByTestId("shell-tablet-list-column");
-    expect(column.textContent).toContain("tabs.chats");
-    expect(screen.getByTestId("shell-tablet-list-placeholder")).not.toBeNull();
+    expect(column).not.toBeNull();
+    expect(screen.getByTestId("body-chats")).not.toBeNull();
+    expect(screen.queryByTestId("body-workspace")).toBeNull();
+    expect(screen.queryByTestId("body-me")).toBeNull();
     // Detail column keeps the children (the official AppContainer subtree).
     expect(screen.getByTestId("split-child")).not.toBeNull();
   });
@@ -126,5 +155,30 @@ describe("ShellTabletSplitHost", () => {
     expect(router.navigate).toHaveBeenCalledWith(SHELL.chats);
     expect(retapped).toHaveBeenCalledWith("chats");
     off();
+  });
+
+  it("keep-alives visited bodies across rail switches (card 裁定 5: body 不重挂)", () => {
+    const { rerender } = renderHost();
+    expect(screen.getByTestId("body-chats")).not.toBeNull();
+
+    pathname.mockReturnValue("/workspace");
+    rerender(
+      <ShellTabletSplitHost>
+        <Text testID="split-child">DETAIL-COLUMN</Text>
+      </ShellTabletSplitHost>,
+    );
+    // The workspace body mounts AND the chats body stays mounted (hidden pane) —
+    // its scroll position and in-body state survive the switch.
+    expect(screen.getByTestId("body-workspace")).not.toBeNull();
+    expect(screen.getByTestId("body-chats")).not.toBeNull();
+    expect(screen.queryByTestId("body-me")).toBeNull();
+  });
+
+  it("feeds the route-derived selection into the bodies (§3.2)", () => {
+    env.state.selectedAgentKey = "host:1:a1";
+    pathname.mockReturnValue("/h/host%3A1/workspace/w2");
+    renderHost();
+    // Section memory keeps 对话 live under the session push; the row key flows down.
+    expect(screen.getByTestId("body-chats").textContent).toBe("host:1:a1");
   });
 });
