@@ -209,3 +209,9 @@ intake 原话与取证=`todo/NEXT-requirements.md`（Q1-Q10）；执行细节=�
    常量 `SHELL_ROOT_ROUTE`、`DETAIL_ROOT_ROUTE`、`HOST_ROOT_ROUTE`、
    `HOST_WORKSPACE_SEGMENT`、`FILES_ROUTE_SEGMENT`；`routes.test.ts` 有
    常量↔src/app 目录对拍闸（R2-12）守漂移。
+
+§15 追加勘误（2026-09-28，review 轮拍板包落地）：
+
+- **§14.8 修订（R2-09）**：worktree 物理合并的 cwd 规范化在"保守比较"基础上增 **Windows 形折叠**——仅盘符/UNC/`\\?\` 前缀 casefold（真值=服务端 `utils/path.ts` looksLikeDefiniteWindowsPath+normalizePathForComparison；`workspace-identity.ts` 镜像并注明折法差异：壳身份值兼作显示，只折 locator 段）。POSIX 路径逐字节不动，原"大小写敏感主机不误合并"裁定保持。
+- **R2-04 裁定（2a）**：官方 `useIsCompactFormFactor` 改 `useWindowDimensions()<720`（触点#8；COMPAT(shellFormFactorRotation) 注释在册）；rt.breakpoint 其余消费者不动。壳侧 form-factor 与官方 hook 自此同一订阅面，转屏半更新态消除。
+- **R2-08 裁定（3a 全修）**：壳归档扩面（通知静音+L3 隐藏+概览不计）；L2 归档先过官方同款风险闸；壳内官方 tab 行经胶囊盖高扩展不可达（零新触点）。"关 root agent tab=归档"语义自此在壳内不可触发。
