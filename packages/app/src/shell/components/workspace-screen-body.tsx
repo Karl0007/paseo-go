@@ -402,7 +402,7 @@ export function WorkspaceScreenBody({ selectedAgentKey = null }: ShellScreenBody
           });
           if (!worktreeExpanded) continue;
           if (worktree.sessions.length === 0) {
-            // worktree 无会话 → 「暂无会话」行 (裁定 4).
+            // worktree 无对话 → 「暂无对话」行 (裁定 4).
             out.push({ type: "worktree-empty", key: `worktree-empty:${worktree.key}` });
             continue;
           }

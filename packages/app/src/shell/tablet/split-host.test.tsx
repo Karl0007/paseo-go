@@ -129,11 +129,14 @@ describe("ShellTabletSplitHost", () => {
     const { container } = renderHost();
     expect(screen.queryByTestId("shell-tablet-split")).toBeNull();
     expect(screen.queryByTestId("shell-tablet-rail")).toBeNull();
-    // The seam adds a full-size transparent wrapper CHAIN (row → detail slot);
-    // the child is still the only content, filling the same box.
-    const wrapper = container.firstElementChild;
-    expect(wrapper).not.toBeNull();
-    expect(wrapper?.firstElementChild?.firstElementChild).toBe(screen.getByTestId("split-child"));
+    // The seam adds a full-size transparent wrapper CHAIN (row → detail slot).
+    // Asserted SEMANTICALLY (R2-23): the child is the only content in the
+    // passthrough tree. The old depth-chain (`firstElementChild.firstElementChild`)
+    // went red for a harmless extra flex wrapper yet stayed green when the slot
+    // grew real extra content — counting testID'd nodes catches the latter and
+    // ignores the former (the no-remount contract below owns the chain shape).
+    expect(container.contains(screen.getByTestId("split-child"))).toBe(true);
+    expect(container.querySelectorAll("[data-testid]")).toHaveLength(1);
     // Compact never mounts a list body (the tab screens own them there).
     expect(screen.queryByTestId("body-chats")).toBeNull();
   });

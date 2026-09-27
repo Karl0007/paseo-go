@@ -27,6 +27,7 @@
     "searchEmpty": "No matching sessions.",
     "searchEmptyLocal": "No matching sessions (older hosts only filter loaded entries).",
     "subsession": "↳ Sub-session · {{parent}}",
+    "subsessionRaw": "↳ Sub-session · source: {{parent}}",
     "activeBadge": "possibly active",
     "providerError": "{{provider}}: {{message}}",
     "submit": "Import ({{count}})",
@@ -58,7 +59,7 @@
     "retryingAll": "Reconnecting to {{count}} hosts…",
     "retryAll": "Reconnect",
     "offlineTitle": "All hosts offline",
-    "offlineHint": "Reconnect to see each host's conversations here.",
+    "offlineHint": "Reconnect to see each host's chats here.",
     "section": {
       "pinned": "Pinned",
       "needsAttention": "Needs attention",
@@ -78,7 +79,7 @@
     "searchPlaceholder": "Search chats (title, alias, project, activity)",
     "searchEmpty": "No matching chats",
     "searchEmptyAction": "Clear search",
-    "emptyTitle": "No conversations yet",
+    "emptyTitle": "No chats yet",
     "emptyAgentsHint": "Tap New chat and let an agent get to work.",
     "emptyHostsHint": "No host to connect to yet — pair or add a daemon first.",
     "connectHost": "Connect a host",
@@ -87,7 +88,7 @@
       "archived": "Archived",
       "archivedCount": "Archived {{count}}"
     },
-    "emptyArchived": "No archived conversations.",
+    "emptyArchived": "No archived chats.",
     "emptyArchivedAction": "Back to active",
     "menu": {
       "pin": "Pin",
@@ -131,7 +132,7 @@
       "title": "Continue this imported chat?",
       "message": "This chat was imported from your computer. If the source session is still running there, continuing from the app will fork it.",
       "confirm": "Continue",
-      "cancel": "Stay in list"
+      "cancel": "Cancel"
     }
   },
   "workspace": {
@@ -153,7 +154,7 @@
     "newCommand": "New quick command",
     "emptyTitle": "No hosts yet",
     "emptyHint": "Connect a Paseo daemon and your projects and files show up here.",
-    "worktreeEmpty": "No sessions",
+    "worktreeEmpty": "No chats",
     "a11yExpanded": "Expanded",
     "a11yCollapsed": "Collapsed",
     "menu": {
@@ -187,7 +188,7 @@
       "run": "Run now",
       "edit": "Edit",
       "delete": "Delete",
-      "deleteConfirmTitle": "Delete quick command",
+      "deleteConfirmTitle": "Delete quick command?",
       "deleteConfirmMessage": "Delete “{{name}}”? This cannot be undone.",
       "deleteConfirm": "Delete",
       "deleteCancel": "Cancel"
@@ -209,7 +210,7 @@
   "files": {
     "notFound": "Workspace not found — it may be archived or the host has not synced.",
     "tabFiles": "Files",
-    "tabDiff": "diff",
+    "tabDiff": "Diff",
     "tabGit": "Git log",
     "notGitHint": "This directory is not a git repository — diff and commit history are unavailable.",
     "commitsUnsupported": "This host version does not support the commit list yet.",
@@ -299,10 +300,10 @@
   },
   "header": {
     "back": "Back",
-    "menu": "Session actions",
+    "menu": "Chat actions",
     "menuFiles": "View project files",
     "menuDiff": "View diff",
-    "menuExplorer": "View files",
+    "menuExplorer": "Open file explorer",
     "menuScripts": "Run scripts",
     "scriptRunning": "Running",
     "scriptStopped": "Stopped",
@@ -313,7 +314,7 @@
   "tablet": {
     "detailPlaceholder": {
       "chats": "Select a chat to view it here",
-      "workspace": "Select a project or session to view it here",
+      "workspace": "Select a project or chat to view it here",
       "me": "Select a settings entry to view it here"
     }
   }

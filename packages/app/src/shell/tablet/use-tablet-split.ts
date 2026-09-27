@@ -23,7 +23,8 @@ import {
 
 export interface TabletSplitState {
   active: boolean;
-  /** Live rail section; held across `/h/…`, `/import`, `/commands/edit` (§3.2-2). */
+  /** Live rail section; held across `/h/…`, `/import`, `/commands/edit`,
+   * `/rename`, `/preview` (§3.2-2). */
   section: TabletSection;
 }
 

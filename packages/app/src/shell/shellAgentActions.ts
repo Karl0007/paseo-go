@@ -54,7 +54,6 @@ export interface ShellAgentActions {
   unpin: (target: ShellChatTarget) => void;
   /** Shell-local alias; blank input clears it back to the daemon title. */
   rename: (target: ShellChatTarget, alias: string) => void;
-  clearAlias: (target: ShellChatTarget) => void;
   archive: (target: ShellChatTarget) => void;
   unarchive: (target: ShellChatTarget) => void;
   stop: (target: ShellChatTarget) => Promise<void>;
@@ -114,11 +113,6 @@ export function createShellAgentActions(deps: ShellAgentActionDeps): ShellAgentA
       }
       usePaseoGoPinsStore.getState().setAlias(target.key, trimmed);
       notify(t("chats.toast.renamed"));
-    },
-    clearAlias: (target) => {
-      haptic();
-      usePaseoGoPinsStore.getState().setAlias(target.key, null);
-      notify(t("chats.toast.aliasCleared"));
     },
     archive: (target) => {
       haptic();

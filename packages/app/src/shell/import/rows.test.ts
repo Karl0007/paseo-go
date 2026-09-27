@@ -67,10 +67,14 @@ describe("mapEntriesToImportRows", () => {
 
   it("falls back through the official title chain and maps the folder label", () => {
     const [row] = mapEntriesToImportRows(
-      [entry({ title: "   ", firstPromptPreview: null, lastPromptPreview: "tail only" })],
+      [entry({ title: "   ", firstPromptPreview: "head only", lastPromptPreview: "tail only" })],
       (cwd) => (cwd === "C:/work/repo" ? "repo" : null),
     );
-    expect(row.title.length).toBeGreaterThan(0); // 官方回退链：空标题 → 预览/占位
+    // 官方 getSessionTitle 回退链=空标题 → firstPromptPreview（注意不是 last）；
+    // 钉具体值——`length > 0` 对任何非空垃圾都成立（R2-23 假绿修复）。
+    expect(row.title).toBe("head only");
+    // 官方 getPromptPreview: lastPromptPreview 优先于 first。
+    expect(row.preview).toBe("tail only");
     expect(row.folder).toBe("repo");
   });
 });
@@ -287,13 +291,31 @@ describe("import row parent chain + looksActive", () => {
   it("prefers parentTitle, else falls back to the parentHandleId tail", () => {
     expect(
       deriveImportParentLabel({ parentTitle: "C13 发布闸", parentHandleId: "x/y.jsonl" }),
-    ).toBe("C13 发布闸");
-    expect(deriveImportParentLabel({ parentHandleId: "C:\\paseo\\s\\C13-release.jsonl" })).toBe(
-      "C13-release",
-    );
-    expect(deriveImportParentLabel({ parentHandleId: "sess/inner/agent-7.jsonl" })).toBe("agent-7");
-    // 父未进扫描窗=daemon 只给原始父 id（无路径无扩展名）→ 原样尾段。
-    expect(deriveImportParentLabel({ parentHandleId: " 0198ab " })).toBe("0198ab");
+    ).toEqual({ text: "C13 发布闸", raw: false });
+    expect(deriveImportParentLabel({ parentHandleId: "C:\\paseo\\s\\C13-release.jsonl" })).toEqual({
+      text: "C13-release",
+      raw: false,
+    });
+    expect(deriveImportParentLabel({ parentHandleId: "sess/inner/agent-7.jsonl" })).toEqual({
+      text: "agent-7",
+      raw: false,
+    });
+    // 文件名形态（无目录但有 .jsonl）仍走尾段规则，不算裸 id。
+    expect(deriveImportParentLabel({ parentHandleId: "solo-run.jsonl" })).toEqual({
+      text: "solo-run",
+      raw: false,
+    });
+  });
+
+  // R2-18: 父未进扫描窗时 daemon 只给原始父 id（无分隔符无扩展名）——它不是
+  // 名字，不冒充父名：raw 标记 + 超长截断，屏改走「源:」措辞。
+  it("flags bare parent ids instead of presenting them as names", () => {
+    expect(deriveImportParentLabel({ parentHandleId: " 0198ab " })).toEqual({
+      text: "0198ab",
+      raw: true,
+    });
+    const long = deriveImportParentLabel({ parentHandleId: `0198${"ab".repeat(20)}` });
+    expect(long).toEqual({ text: `0198${"ab".repeat(6)}…`, raw: true });
   });
 
   it("yields null when both fields are absent or blank (旧 daemon / claude codex)", () => {
@@ -301,7 +323,10 @@ describe("import row parent chain + looksActive", () => {
     expect(deriveImportParentLabel({ parentTitle: "   ", parentHandleId: "" })).toBeNull();
     expect(deriveImportParentLabel({ parentHandleId: "///" })).toBeNull();
     // 标题只有空白时仍回退 handleId，不渲染空徽标。
-    expect(deriveImportParentLabel({ parentTitle: " ", parentHandleId: "a/b.jsonl" })).toBe("b");
+    expect(deriveImportParentLabel({ parentTitle: " ", parentHandleId: "a/b.jsonl" })).toEqual({
+      text: "b",
+      raw: false,
+    });
   });
 
   it("maps onto rows: parentLabel + looksActive only when the daemon sent them", () => {
@@ -315,12 +340,21 @@ describe("import row parent chain + looksActive", () => {
           looksActive: true,
         }),
         entry({ providerId: "omp", providerHandleId: "plain" }),
-        entry({ providerId: "omp", providerHandleId: "idle", looksActive: false }),
+        entry({
+          providerId: "omp",
+          providerHandleId: "idle",
+          parentHandleId: "0198cd",
+          looksActive: false,
+        }),
       ],
       () => null,
     );
-    expect(child).toMatchObject({ parentLabel: "C13 发布闸", looksActive: true });
-    expect(plain).toMatchObject({ parentLabel: null, looksActive: false });
-    expect(idle).toMatchObject({ parentLabel: null, looksActive: false });
+    expect(child).toMatchObject({
+      parentLabel: "C13 发布闸",
+      parentIsRawId: false,
+      looksActive: true,
+    });
+    expect(plain).toMatchObject({ parentLabel: null, parentIsRawId: false, looksActive: false });
+    expect(idle).toMatchObject({ parentLabel: "0198cd", parentIsRawId: true, looksActive: false });
   });
 });

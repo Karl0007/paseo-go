@@ -58,6 +58,7 @@ function Field({ label, error, children }: { label: string; error?: string; chil
 /** Press-to-open sheet picker rendered as a form row; `pages` feeds MenuSubTriggers. */
 function PickerField({
   label,
+  sheetTitle,
   valueLabel,
   placeholder,
   error,
@@ -66,6 +67,9 @@ function PickerField({
   children,
 }: {
   label: string;
+  /** Sheet header override; defaults to the field label. 项目选择器用它对齐
+   * 运行选择器的祈使标题（R2-16 F-07：同一概念一个题面）。 */
+  sheetTitle?: string;
   valueLabel: string | null;
   placeholder: string;
   error?: string;
@@ -90,7 +94,7 @@ function PickerField({
           <ChevronDown size={15} color={styles.pickerChevron.color} />
         </DropdownMenuTrigger>
         <DropdownMenuContent
-          sheetTitle={label}
+          sheetTitle={sheetTitle ?? label}
           width={300}
           testID={`${testID}-sheet`}
           pages={pages}
@@ -206,6 +210,7 @@ function WorkspacePicker({
   return (
     <PickerField
       label={t("commands.project")}
+      sheetTitle={t("commands.pickWorkspace")}
       valueLabel={valueLabel}
       placeholder={t("commands.askEveryTime")}
       testID="shell-command-workspace-picker"

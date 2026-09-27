@@ -9,7 +9,7 @@
 // (hamburger drawer, official ⋯, scripts button, explorer toggle) are
 // unreachable BY DESIGN. The official ⋯'s useful half is aggregated into the
 // capsule menu (see session-header/visibility for the matrix): 查看项目文件 /
-// 查看 diff / 查看文件 / 运行脚本 / 停止 / 重命名 — the view rows ride the
+// 查看 diff / 打开文件浏览器 / 运行脚本 / 停止 / 重命名 — the view rows ride the
 // official openExplorerSidebarView path, the scripts page the official
 // startWorkspaceScript/killTerminal RPCs.
 //
@@ -316,7 +316,7 @@ function CapsuleInner({
   // for SHELL.files, that resolves into the mounted (shell) entry
   // (navigate-reuse), so the capsule's rename chain lands on the rename screen
   // and returns to the 对话 list — the card's 回列表 semantics, not a
-  // session-preserving push. 查看 diff / 查看文件 go through the ONE official
+  // session-preserving push. 查看 diff / 打开文件浏览器 go through the ONE official
   // opener the keyboard action `workspace.tab.open` itself routes through
   // (workspace-screen handleWorkspacePanelOpenAction): on compact it sets the
   // explorer tab for the checkout and slides the overlay in; on wide it opens

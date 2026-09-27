@@ -17,7 +17,12 @@ function file(name: string, path = name): FileSearchEntry {
 
 describe("resolveFilesScreenTab", () => {
   it("accepts exactly the three tab values", () => {
-    for (const tab of FILES_SCREEN_TABS) expect(resolveFilesScreenTab(tab)).toBe(tab);
+    // 钉死集合本身（R2-23）：回环遍历 FILES_SCREEN_TABS 再喂回 resolve 对
+    // 「集合多了/少了哪个值」零敏感——标题里的 three 之前没有任何断言守着。
+    expect([...FILES_SCREEN_TABS]).toEqual(["files", "diff", "git"]);
+    expect(resolveFilesScreenTab("files")).toBe("files");
+    expect(resolveFilesScreenTab("diff")).toBe("diff");
+    expect(resolveFilesScreenTab("git")).toBe("git");
   });
 
   it("falls back to 文件 for unknown/absent values", () => {

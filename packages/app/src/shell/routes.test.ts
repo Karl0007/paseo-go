@@ -2,6 +2,9 @@
 // hostile ids (spaces, slashes, drive paths, CJK, %-#-& in payloads). This is the
 // guard for the "no hand-assembled strings" rule — the builders must stay the thin
 // wrappers over host-routes they are, or these round-trips break.
+import { existsSync, readdirSync } from "node:fs";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 import {
   parseHostWorkspaceOpenIntentFromPathname,
@@ -9,8 +12,13 @@ import {
 } from "@/utils/host-routes";
 import {
   DETAIL,
+  DETAIL_ROOT_ROUTE,
+  HOST_ROOT_ROUTE,
+  HOST_WORKSPACE_SEGMENT,
   OFFICIAL,
   SHELL,
+  SHELL_ROOT_ROUTE,
+  SHELL_TAB,
   shellFilesDetailHref,
   shellPreviewHref,
   shellRenameHref,
@@ -134,5 +142,82 @@ describe("shellRenameHref", () => {
       pathname: SHELL.rename,
       params: { serverId, agentId },
     });
+  });
+});
+
+// R2-12 constants↔tree gate: expo-router resolves EVERY pathname from the file
+// tree under src/app, so a renamed/deleted route file silently breaks navigation
+// (capsule never shows, tab jumps miss, 新建对话 white-screens) with nothing red.
+// This pairs each registered route with its real module/dir — and every
+// shell-owned route module back to a registration. The route-name constants the
+// other predicates consume (session-header, tablet-selection, split-predicates,
+// focused-tab) are pinned here too, which is what lets visibility.test.ts feed
+// the predicate REAL literal names instead of the constants under test (R2-23).
+const APP_DIR = fileURLToPath(new URL("../app", import.meta.url));
+
+function existsAsRoute(pathname: string): boolean {
+  // Exact-case walk: a plain existsSync would pass `(shelL)` on case-insensitive
+  // Windows filesystems, and expo-router matches route names case-sensitively.
+  const segs = pathname.split("/").filter(Boolean);
+  let cur = APP_DIR;
+  for (let i = 0; i < segs.length; i++) {
+    const seg = segs[i];
+    const last = i === segs.length - 1;
+    const entries = existsSync(cur) ? readdirSync(cur) : [];
+    if (entries.includes(seg)) {
+      cur = path.join(cur, seg); // dir segment (group / param dir / folder)
+      continue;
+    }
+    // The leaf may be a route module file rather than a dir.
+    return last && (entries.includes(`${seg}.tsx`) || entries.includes(`${seg}.ts`));
+  }
+  return true;
+}
+
+/** Route modules inside a group dir, as `/…`-pathnames without extensions. */
+function listRouteModules(groupDir: string, prefix: string): string[] {
+  const out: string[] = [];
+  for (const entry of readdirSync(path.join(APP_DIR, groupDir), { withFileTypes: true })) {
+    const rel = `${prefix}/${entry.name}`;
+    if (entry.isDirectory()) out.push(...listRouteModules(path.join(groupDir, entry.name), rel));
+    else if (/\.tsx?$/.test(entry.name)) out.push(rel.replace(/\.[^.]+$/, ""));
+  }
+  return out;
+}
+
+describe("route-name single source ↔ src/app tree (R2-12)", () => {
+  it("registers only routes that exist as real files/dirs", () => {
+    for (const [name, pathname] of Object.entries({ ...SHELL, ...DETAIL })) {
+      expect(existsAsRoute(pathname), `${name} → ${pathname}`).toBe(true);
+    }
+    for (const tab of Object.values(SHELL_TAB)) {
+      expect(existsAsRoute(`/${SHELL_ROOT_ROUTE}/${tab}`), tab).toBe(true);
+    }
+    // The names the OTHER predicates compare against (visibility/tablet-selection).
+    expect(existsAsRoute(`/${HOST_ROOT_ROUTE}`), HOST_ROOT_ROUTE).toBe(true);
+    expect(existsAsRoute(`/${HOST_ROOT_ROUTE}/${HOST_WORKSPACE_SEGMENT}`)).toBe(true);
+    for (const official of [OFFICIAL.settings, OFFICIAL.welcome, OFFICIAL.pairScan, "/new"]) {
+      expect(existsAsRoute(official), official).toBe(true);
+    }
+  });
+
+  it("every route module in the shell groups is registered", () => {
+    const registered = new Set<string>([...Object.values(SHELL), ...Object.values(DETAIL)]);
+    const unregistered: string[] = [];
+    for (const group of [SHELL_ROOT_ROUTE, DETAIL_ROOT_ROUTE]) {
+      for (const mod of listRouteModules(group, group)) {
+        // _layout = navigator config; index = the group's own entry (redirect /
+        // tabs) — neither is a push target carried by SHELL/DETAIL. *.test =
+        // vitest module (the F14-tracked rename.test.ts), never a route screen.
+        if (/(^|\/)(_layout|index)$/.test(mod) || mod.endsWith(".test")) continue;
+        if (!registered.has(`/${mod}`)) unregistered.push(`/${mod}`);
+      }
+    }
+    expect(unregistered).toEqual([]);
+  });
+
+  it("keeps the group constants embedded in the built paths", () => {
+    expect(SHELL.root).toBe(`/${SHELL_ROOT_ROUTE}`);
+    expect(DETAIL.preview).toBe(`/${DETAIL_ROOT_ROUTE}/preview`);
   });
 });

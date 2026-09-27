@@ -27,6 +27,7 @@
     "searchEmpty": "没有匹配的会话。",
     "searchEmptyLocal": "没有匹配的会话（旧版主机只在已加载的条目里筛选）。",
     "subsession": "↳ 子会话 · {{parent}}",
+    "subsessionRaw": "↳ 子会话 · 源:{{parent}}",
     "activeBadge": "可能活跃",
     "providerError": "{{provider}}：{{message}}",
     "submit": "导入（{{count}}）",
@@ -58,7 +59,7 @@
     "retryingAll": "正在重连 {{count}} 台主机…",
     "retryAll": "重试连接",
     "offlineTitle": "所有主机已离线",
-    "offlineHint": "重新连接后即可在此查看各主机的会话。",
+    "offlineHint": "重新连接后即可在此查看各主机的对话。",
     "section": {
       "pinned": "置顶",
       "needsAttention": "需要处理",
@@ -70,7 +71,7 @@
       "finished": "已完成",
       "failed": "出错"
     },
-    "untitled": "未命名会话",
+    "untitled": "未命名对话",
     "a11yUnread": "未读",
     "newMenu": "新建",
     "newChat": "新建对话",
@@ -98,7 +99,7 @@
       "stop": "停止",
       "refresh": "刷新",
       "delete": "删除",
-      "deleteConfirmTitle": "删除会话？",
+      "deleteConfirmTitle": "删除对话？",
       "deleteConfirmMessage": "「{{title}}」将从主机上删除，此操作无法撤销。",
       "deleteConfirm": "删除",
       "deleteCancel": "取消",
@@ -120,7 +121,7 @@
       "archived": "已归档",
       "unarchived": "已移出归档",
       "stopped": "已停止运行",
-      "deleted": "已删除会话",
+      "deleted": "已删除对话",
       "refreshed": "已从源会话刷新"
     },
     "errors": {
@@ -128,10 +129,10 @@
       "hostOffline": "主机当前离线，无法完成该操作。"
     },
     "fork": {
-      "title": "继续该导入会话？",
-      "message": "该会话由电脑端导入。若源会话仍在电脑上运行，从 app 继续会产生分叉。",
+      "title": "继续该导入对话？",
+      "message": "该对话由电脑端导入。若源会话仍在电脑上运行，从 app 继续会产生分叉。",
       "confirm": "继续",
-      "cancel": "留在列表"
+      "cancel": "取消"
     }
   },
   "workspace": {
@@ -153,7 +154,7 @@
     "newCommand": "新建快捷指令",
     "emptyTitle": "还没有主机",
     "emptyHint": "连接一台 Paseo daemon，项目与文件会出现在这里。",
-    "worktreeEmpty": "暂无会话",
+    "worktreeEmpty": "暂无对话",
     "a11yExpanded": "已展开",
     "a11yCollapsed": "已收起",
     "menu": {
@@ -187,7 +188,7 @@
       "run": "立即运行",
       "edit": "编辑",
       "delete": "删除",
-      "deleteConfirmTitle": "删除快捷指令",
+      "deleteConfirmTitle": "删除快捷指令？",
       "deleteConfirmMessage": "确定删除「{{name}}」？此操作不可撤销。",
       "deleteConfirm": "删除",
       "deleteCancel": "取消"
@@ -258,7 +259,7 @@
     }
   },
   "notify": {
-    "channelName": "会话提醒",
+    "channelName": "对话提醒",
     "needsInputBody": "正在等待你的批准，点击处理。",
     "failedBody": "运行出错，点击查看。"
   },
@@ -283,8 +284,8 @@
     "themeFailed": "主题保存失败",
     "defaultTab": "默认启动 tab",
     "defaultTabHint": "重启后壳首先打开的 tab，重启生效。",
-    "notifications": "会话通知",
-    "notificationsHint": "agent 等待批准或出错时发系统通知，点击直达会话。锁屏后台推送依赖官方推送通道。",
+    "notifications": "对话通知",
+    "notificationsHint": "agent 等待批准或出错时发系统通知，点击直达对话。锁屏后台推送依赖官方推送通道。",
     "clearData": "清除本地数据",
     "clearDataHint": "只删壳自己的数据（置顶、归档、已读、收藏、快捷指令、设置），官方数据不受影响。",
     "clearConfirmTitle": "清除本地数据？",
@@ -299,10 +300,10 @@
   },
   "header": {
     "back": "返回",
-    "menu": "会话操作",
+    "menu": "对话操作",
     "menuFiles": "查看项目文件",
     "menuDiff": "查看 diff",
-    "menuExplorer": "查看文件",
+    "menuExplorer": "打开文件浏览器",
     "menuScripts": "运行脚本",
     "scriptRunning": "运行中",
     "scriptStopped": "未运行",
@@ -312,8 +313,8 @@
   },
   "tablet": {
     "detailPlaceholder": {
-      "chats": "选择会话在此查看",
-      "workspace": "选择项目或会话在此查看",
+      "chats": "选择对话在此查看",
+      "workspace": "选择项目或对话在此查看",
       "me": "选择设置项在此查看"
     }
   }

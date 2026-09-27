@@ -3,6 +3,13 @@
 // to reuse upstream routes unchanged (D2). `commandsEdit` lands with C7 (the run
 // flow is a sheet on the 工作区 tab, not a route); DETAIL.* is the C6 preview stack
 // plus the C16 files instance (real root-Stack push for the session capsule).
+//
+// R2-12: the group/segment NAMES below are what EVERY route-name comparison in the
+// shell consumes (session-header capsule predicate, tablet selection, split
+// predicates, focused-tab drill-down), and the SHELL.*/DETAIL.* paths are built
+// FROM them — a rename can only ever happen here. routes.test.ts pairs the whole
+// set against the real src/app file tree, so a drifted name fails the suite
+// instead of silently killing navigation (capsule never shows, tab jumps miss).
 import type { Href } from "expo-router";
 import {
   buildHostWorkspaceOpenRoute,
@@ -10,26 +17,41 @@ import {
   buildSettingsAddHostRoute,
 } from "@/utils/host-routes";
 
+/** Root-stack group names (expo-router directory names, no leading slash). */
+export const SHELL_ROOT_ROUTE = "(shell)";
+export const DETAIL_ROOT_ROUTE = "(detail)";
+/** Official host navigator route (directory `src/app/h/[serverId]`). */
+export const HOST_ROOT_ROUTE = "h/[serverId]";
+/** Segment of the official workspace-session route under the host navigator. */
+export const HOST_WORKSPACE_SEGMENT = "workspace";
+/** Files browse screen's segment inside both groups (group-stripped: `/files/…`). */
+export const FILES_ROUTE_SEGMENT = "files";
+
+// Tab screen names for in-navigator jumps (navigation.navigate never pops the root
+// stack, unlike a path navigate — the files placeholder's back must stay in-tabs).
+// Also the source for the tab pathnames below and the rail's section keys.
+export const SHELL_TAB = { chats: "chats", workspace: "workspace", me: "me" } as const;
+
 export const SHELL = {
-  root: "/(shell)",
-  chats: "/(shell)/chats",
-  workspace: "/(shell)/workspace",
-  me: "/(shell)/me",
-  files: "/(shell)/files/[serverId]/[workspaceId]",
-  commandsEdit: "/(shell)/commands/edit",
+  root: `/${SHELL_ROOT_ROUTE}`,
+  chats: `/${SHELL_ROOT_ROUTE}/${SHELL_TAB.chats}`,
+  workspace: `/${SHELL_ROOT_ROUTE}/${SHELL_TAB.workspace}`,
+  me: `/${SHELL_ROOT_ROUTE}/${SHELL_TAB.me}`,
+  files: `/${SHELL_ROOT_ROUTE}/${FILES_ROUTE_SEGMENT}/[serverId]/[workspaceId]`,
+  commandsEdit: `/${SHELL_ROOT_ROUTE}/commands/edit`,
   // C10 导入屏: 隐藏 tab（同 files/commands 的 C5 KI-2 模式），＋菜单 push 进入。
-  import: "/(shell)/import",
+  import: `/${SHELL_ROOT_ROUTE}/import`,
   // C33 重命名屏: 隐藏 tab（同 files/commands/import 模式），行长按菜单与胶囊 ⋯ 的
   // rename 项 push 进入；菜单本体因此去掉了输入子页、转回 popover（DESIGN §14.3/§14.4）。
-  rename: "/(shell)/rename",
+  rename: `/${SHELL_ROOT_ROUTE}/rename`,
 } as const;
 
 // 预览屏 lives in its own top-level group so opening a file is a real root-Stack
 // push (C6 ruling): hardware/gesture back pops it naturally onto the files tab,
 // unlike a hidden-tab screen whose back must be intercepted in-tab.
 export const DETAIL = {
-  preview: "/(detail)/preview",
-  files: "/(detail)/files/[serverId]/[workspaceId]",
+  preview: `/${DETAIL_ROOT_ROUTE}/preview`,
+  files: `/${DETAIL_ROOT_ROUTE}/${FILES_ROUTE_SEGMENT}/[serverId]/[workspaceId]`,
 } as const;
 
 // Preview params ride the query string: paths carry CJK, spaces, '?' and '%', so
@@ -47,10 +69,6 @@ export interface ShellPreviewParams {
 export function shellPreviewHref(params: ShellPreviewParams): Href {
   return { pathname: DETAIL.preview, params: { ...params } } as Href;
 }
-
-// Tab screen names for in-navigator jumps (navigation.navigate never pops the root
-// stack, unlike a path navigate — the files placeholder's back must stay in-tabs).
-export const SHELL_TAB = { chats: "chats", workspace: "workspace", me: "me" } as const;
 
 // The files route is dynamic; push it through this param object so the segment
 // names stay in one place and expo-router handles encoding (C5 rows → C6 browse).
@@ -97,6 +115,8 @@ export const OFFICIAL = {
   // 全局设置: the official root-stack settings screen (settings/index route).
   settings: "/settings",
   welcome: "/welcome",
+  // 配对扫码 (split-predicates 的 full-bleed 面之一；R2-12 收进单源).
+  pairScan: "/pair-scan",
   // C17 新建对话: the official New Workspace screen (app/new.tsx → NewWorkspaceScreen,
   // 项目/主机/Chat 三选择器 + composer). Object form by ruling — real host ids carry
   // `/` and `:` (`.dev/paseo-home@192.168.31.190:6767`), so expo-router owns the query

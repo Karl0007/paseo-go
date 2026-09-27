@@ -48,3 +48,7 @@ C19 真机轮观察（known_issues#2 移交）：4:02 收藏的 AGENTS.md 与 4:
   3. **模态（确认删除 sheet）会顶掉整棵 dump 树**——断言「行消失」会被弹窗窗口伪装成 TRUE；删除必须点完菜单项后再点「删除」确认。另：tablet keep-alive 可能复制节点，tap 一律取最大面积 bounds。
 - 判读口径不变：A挂B过=c1 成立；A/B 均过=c1 也降级「未复现」（在 c4 已定案基础上把 known_issue 转「观察误差，竞态未证实」）；A/B 均挂=查 RKStorage items 区分「从未写入」vs「hydration 覆盖」。
 - 附加样本（启动期 hydration 前写守卫）：维持分析轮口径——A/B 全过则仅记纪律不修（`commands/edit.tsx:442-444` 的 seed-waits-hydration 姿势已是现成守卫参照）。
+
+## 脚本唯一出处（FIX-C R2-26 证据卫生，2026-09-27）
+
+本卡旧复现草案 `todo/C34-repro-draft.sh` 已删除：它的 `dump()` 不带 `--compressed`（=上面坑①，RN 忙帧挂死 ≥55s），`tap_id` 也不取最大面积 bounds（=坑③，tablet keep-alive 复制节点）——按它跑必重踩三个已实锤坑。**唯一可用出处 = `evidence/C34/`**（`lib.sh` T1-T5 全内建 + `fav_sample.sh`/`cmd_sample.sh`/`sqlq.js`/`cleanup.sh`，见「矩阵状态」节）。

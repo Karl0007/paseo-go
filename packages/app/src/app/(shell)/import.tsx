@@ -122,7 +122,9 @@ function ImportRowCell({
             numberOfLines={1}
             testID={`shell-import-row-${index}-parent`}
           >
-            {t("import.subsession", { parent: row.parentLabel })}
+            {t(row.parentIsRawId ? "import.subsessionRaw" : "import.subsession", {
+              parent: row.parentLabel,
+            })}
           </Text>
         ) : null}
         <Text style={styles.rowMeta} numberOfLines={1}>

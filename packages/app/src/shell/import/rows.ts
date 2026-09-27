@@ -24,28 +24,47 @@ export interface ImportRow {
    * daemon 字段缺席）= null=不渲染。
    */
   parentLabel: string | null;
+  /** R2-18: true = parentLabel 是无分隔符的原始父 id（非名），副标题走「源:」措辞。 */
+  parentIsRawId: boolean;
   /** C25「可能活跃」= descriptor looksActive===true；缺席/false 都不渲染。 */
   looksActive: boolean;
+}
+
+/** 裸 id（非路径形态）的展示截断长度（R2-18：整串不是名字，截断即可辨认来源）。 */
+const RAW_PARENT_ID_MAX = 16;
+
+export interface ImportParentLabel {
+  /** 展示文本：parentTitle 原样；路径形态=尾段去 .jsonl；裸 id=截断串。 */
+  text: string;
+  /** true = daemon 只给了无分隔符的原始父 id（非名），屏改用「源:」措辞渲染。 */
+  raw: boolean;
 }
 
 /**
  * C25 父链副标题的父名段（纯函数，屏只负责 t() 包裹措辞）。
  * parentTitle（含纯空白判定）优先；否则取 parentHandleId 尾段——omp 的
  * handleId 是父 transcript 路径（`\` 或 `/` 分隔），尾段再去掉 `.jsonl`
- * 扩展名；父未进扫描窗时 daemon 只给原始父 id=同样走尾段规则。
+ * 扩展名。**R2-18**：无分隔符又无扩展名的裸 id 不冒充父名——标 raw=true，
+ * 由屏加「源:」前缀并截断展示，避免原始 id 被当成会话标题。
  */
 export function deriveImportParentLabel(
   entry: Pick<FetchRecentProviderSessionEntry, "parentHandleId" | "parentTitle">,
-): string | null {
+): ImportParentLabel | null {
   const title = entry.parentTitle?.trim();
-  if (title) return title;
+  if (title) return { text: title, raw: false };
   const handle = entry.parentHandleId?.trim();
   if (!handle) return null;
   const segments = handle.split(/[/\\]+/).filter(Boolean);
   const tail = segments[segments.length - 1];
   if (!tail) return null;
-  const stem = tail.toLowerCase().endsWith(".jsonl") ? tail.slice(0, -".jsonl".length) : tail;
-  return stem.length > 0 ? stem : null;
+  const hasJsonl = tail.toLowerCase().endsWith(".jsonl");
+  const stem = hasJsonl ? tail.slice(0, -".jsonl".length) : tail;
+  if (stem.length === 0) return null;
+  // 路径形态（有分隔符）或文件名形态（带 .jsonl）= 尾段当父名。
+  if (segments.length > 1 || hasJsonl) return { text: stem, raw: false };
+  // 非路径形态（无分隔符的裸 id）：截断 + raw 标记，屏加「源:」。
+  const text = stem.length > RAW_PARENT_ID_MAX ? `${stem.slice(0, RAW_PARENT_ID_MAX)}…` : stem;
+  return { text, raw: true };
 }
 
 export function importRowKey(
@@ -68,6 +87,7 @@ export function mapEntriesToImportRows(
     const key = importRowKey(entry);
     if (seen.has(key)) continue;
     seen.add(key);
+    const parent = deriveImportParentLabel(entry);
     rows.push({
       key,
       providerId: entry.providerId,
@@ -78,7 +98,8 @@ export function mapEntriesToImportRows(
       preview: getPromptPreview(entry),
       folder: folderFor(entry.cwd),
       lastActivityAt: new Date(entry.lastActivityAt).getTime(),
-      parentLabel: deriveImportParentLabel(entry),
+      parentLabel: parent?.text ?? null,
+      parentIsRawId: parent?.raw ?? false,
       looksActive: entry.looksActive === true,
     });
   }

@@ -23,7 +23,6 @@ function makeActions(): ShellAgentActions {
     pin: vi.fn(),
     unpin: vi.fn(),
     rename: vi.fn(),
-    clearAlias: vi.fn(),
     archive: vi.fn(),
     unarchive: vi.fn(),
     stop: vi.fn(async () => {}),
@@ -40,7 +39,6 @@ describe("createChatMenuRunner", () => {
     createChatMenuRunner({ actions, target, displayTitle: "T", openRename })("rename");
     expect(openRename).toHaveBeenCalledWith(target);
     expect(actions.rename).not.toHaveBeenCalled();
-    expect(actions.clearAlias).not.toHaveBeenCalled();
   });
 
   it("the acting rows keep their C3 wiring", () => {

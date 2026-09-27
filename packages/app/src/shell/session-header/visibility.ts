@@ -26,10 +26,10 @@
 // screen on tab focus, cleared on blur) is the single live source.
 
 import { parseHostWorkspaceRouteFromPathname } from "@/utils/host-routes";
+import { HOST_ROOT_ROUTE, SHELL_ROOT_ROUTE } from "@/shell/routes";
 
-/** Root-stack route names the predicate keys off (expo-router group/file names). */
-export const SHELL_ROOT_ROUTE = "(shell)";
-export const HOST_ROOT_ROUTE = "h/[serverId]";
+// The root-stack route names the predicate keys off live in shell/routes.ts
+// (R2-12 single source; routes.test.ts pairs them against the src/app tree).
 
 export interface ShellSessionVisibilityInput {
   shellMode: boolean;
@@ -84,9 +84,8 @@ export function shouldEnableShellEdgeBack(input: ShellSessionVisibilityInput): b
 // Gating rules (all present-but-disabled when unmet, the 停止 precedent):
 //   查看项目文件 always (the C16 stack push resolves ids only);
 //   查看 diff needs a git checkout with a known directory (no changes tab else);
-//   查看文件 needs the checkout directory (openExplorerSidebarView no-ops without);
-//   运行脚本 needs workspace descriptor scripts;
-//   停止 needs an abortable turn; 重命名 always;
+//   打开文件浏览器 (explorer overlay, R2-16 wording) needs the checkout directory
+//   (openExplorerSidebarView no-ops without);
 //   刷新 (C24) is imported-ONLY — a hidden row, not present-but-disabled.
 // ---------------------------------------------------------------------------
 
@@ -134,7 +133,7 @@ export function sessionHeaderMenuPlan(state: SessionHeaderMenuState): SessionHea
 // every actionable capsule row funnels its id through this table. 重命名 is the
 // row the menu never acts on itself (C33): it hands off to the injected screen
 // opener that pushes the (shell)/rename screen, so this module stays React- and
-// router-free and the routing is unit-testable. The 查看 diff / 查看文件 rows
+// router-free and the routing is unit-testable. The 查看 diff / 打开文件浏览器 rows
 // hand off to the injected `openExplorerSidebarView` wrappers (C21) for the same
 // reason: the official opener is a store action, but the guard order and the
 // no-op-on-missing-checkout behaviour stay observable from here.

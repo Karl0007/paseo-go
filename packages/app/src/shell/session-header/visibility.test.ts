@@ -1,19 +1,25 @@
 // C14 acceptance: the session-header visibility predicate and its menu matrix.
 // The predicate is the ONLY gate for floating the capsule over the official session
 // screen — a false positive is a shell bar on official IA, a false negative is the
-// missing P1 feature. Route strings go through the real builders (routes.test.ts
-// already guards their round-trips), so this pins the composition.
+// missing P1 feature. R2-23: the rootRoutes fixtures are the REAL router names as
+// literals, never the constants the predicate compares against — fixtures built
+// from the constant under test kept the whole matrix green when the constant
+// drifted off the actual file tree (tautology). The constants↔src/app gate lives
+// in routes.test.ts (R2-12); pathnames go through the real builders (routes.test
+// guards their round-trips), so this pins the composition, not the vocabulary.
 import { describe, expect, it, vi } from "vitest";
 import { OFFICIAL } from "@/shell/routes";
 import {
   createSessionHeaderRunner,
-  HOST_ROOT_ROUTE,
   resolveShellSessionWorkspace,
   sessionHeaderMenuPlan,
-  SHELL_ROOT_ROUTE,
   shouldEnableShellEdgeBack,
   type ShellSessionVisibilityInput,
 } from "./visibility";
+
+/** What expo-router actually reports for the two root-stack entries (tree-pinned). */
+const SHELL_ROUTE = "(shell)";
+const HOST_ROUTE = "h/[serverId]";
 
 const SESSION_PATH = OFFICIAL.workspace("srv_1", "wks_86ef0");
 
@@ -21,7 +27,7 @@ function input(over: Partial<ShellSessionVisibilityInput> = {}): ShellSessionVis
   return {
     shellMode: true,
     pathname: SESSION_PATH,
-    rootRoutes: [SHELL_ROOT_ROUTE, HOST_ROOT_ROUTE],
+    rootRoutes: [SHELL_ROUTE, HOST_ROUTE],
     rootIndex: 1,
     isCompact: true,
     ...over,
@@ -62,13 +68,13 @@ describe("resolveShellSessionWorkspace", () => {
 
   it("hides when the stack carries no shell provenance (deep link / official sessions)", () => {
     expect(
-      resolveShellSessionWorkspace(input({ rootRoutes: [HOST_ROOT_ROUTE], rootIndex: 0 })),
+      resolveShellSessionWorkspace(input({ rootRoutes: [HOST_ROUTE], rootIndex: 0 })),
     ).toBeNull();
     // Shell entry ABOVE the host navigator (a second (shell) pushed over the session)
     // means a shell screen is on top, not the session.
     expect(
       resolveShellSessionWorkspace(
-        input({ rootRoutes: [SHELL_ROOT_ROUTE, HOST_ROOT_ROUTE, SHELL_ROOT_ROUTE], rootIndex: 2 }),
+        input({ rootRoutes: [SHELL_ROUTE, HOST_ROUTE, SHELL_ROUTE], rootIndex: 2 }),
       ),
     ).toBeNull();
   });
@@ -116,10 +122,10 @@ const VISIBILITY_BUCKETS: ReadonlyArray<readonly [string, ShellSessionVisibility
   ],
   ["shell off", input({ shellMode: false })],
   ["explorer overlay open", input({ explorerOverlayOpen: true })],
-  ["no shell provenance", input({ rootRoutes: [HOST_ROOT_ROUTE], rootIndex: 0 })],
+  ["no shell provenance", input({ rootRoutes: [HOST_ROUTE], rootIndex: 0 })],
   [
     "(shell) entry on top",
-    input({ rootRoutes: [SHELL_ROOT_ROUTE, HOST_ROOT_ROUTE, SHELL_ROOT_ROUTE], rootIndex: 2 }),
+    input({ rootRoutes: [SHELL_ROUTE, HOST_ROUTE, SHELL_ROUTE], rootIndex: 2 }),
   ],
   ["tab route /chats", input({ pathname: "/chats" })],
   ["official sessions route", input({ pathname: "/h/srv_1/sessions" })],
@@ -149,7 +155,7 @@ describe("C32 isCompact extension (capsule breakpoint-free, edge band compact-on
     expect(resolveShellSessionWorkspace(input({ shellMode: false }))).toBeNull();
     expect(resolveShellSessionWorkspace(input({ explorerOverlayOpen: true }))).toBeNull();
     expect(
-      resolveShellSessionWorkspace(input({ rootRoutes: [HOST_ROOT_ROUTE], rootIndex: 0 })),
+      resolveShellSessionWorkspace(input({ rootRoutes: [HOST_ROUTE], rootIndex: 0 })),
     ).toBeNull();
   });
 });
@@ -159,7 +165,7 @@ describe("sessionHeaderMenuPlan", () => {
   // Order is the card's; every gate is present-but-disabled (the 停止 precedent),
   // never a hidden row, so the menu's shape is stable across states. C24's 刷新
   // is the one exception: imported-ONLY, appended last, never shown on native.
-  it("carries 查看项目文件/查看 diff/查看文件/运行脚本/停止/重命名 in card order", () => {
+  it("carries 查看项目文件/查看 diff/打开文件浏览器/运行脚本/停止/重命名 in card order", () => {
     expect(
       sessionHeaderMenuPlan({
         stoppable: false,
@@ -324,7 +330,7 @@ describe("createSessionHeaderRunner (C33 dispatch, C21/C24 extension)", () => {
     expect(deps.openRename).not.toHaveBeenCalled();
   });
 
-  it("routes 查看 diff/查看文件 to the injected official-opener wrappers, each once", () => {
+  it("routes 查看 diff/打开文件浏览器 to the injected official-opener wrappers, each once", () => {
     const deps = makeDeps();
     const run = createSessionHeaderRunner(deps);
     run("diff");

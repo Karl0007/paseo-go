@@ -13,7 +13,15 @@
 // key is assembled from the DECODED id.
 //
 // React-free, unit-tested per §6 R-1.
-const SESSION_ROUTE = /^\/h\/([^/]+)\/workspace\/[^/?#]+/;
+import { HOST_ROOT_ROUTE, HOST_WORKSPACE_SEGMENT } from "@/shell/routes";
+
+// `/h/<serverId>/workspace/<workspaceId>` assembled from the single-source route
+// names (R2-12) — the same official route the capsule predicate parses via
+// host-routes; `[serverId]` becomes the capture, the workspace id stays
+// non-capturing and stops at `?`/`#`.
+const SESSION_ROUTE = new RegExp(
+  `^/${HOST_ROOT_ROUTE.replace("[serverId]", "([^/]+)")}/${HOST_WORKSPACE_SEGMENT}/[^/?#]+`,
+);
 
 export function sessionServerIdForPathname(pathname: string): string | null {
   const match = SESSION_ROUTE.exec(pathname);

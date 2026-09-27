@@ -187,3 +187,25 @@ intake 原话与取证=`todo/NEXT-requirements.md`（Q1-Q10）；执行细节=�
     `orientation: isPaseoGo ? "default" : "portrait"`（官方锁竖屏不变，壳跟随系统旋转）；
     缝隙②行数预算扩至 ≤16 行；生效需 `prebuild --clean`+重打 debug APK（native manifest）。
     release v0.2.0 构建链同步受益。
+
+## 15. 文档勘误（FIX-C 卫生批，2026-09-27；只增不改历史正文）
+
+> 冻结纪律：§2/§13/§14 正文按「只增不改上文」保留原样，与实现不符处以本节为准。
+
+1. **§14.10「发送前源活跃启发式」措辞作废（R2-20）**。C24 定稿口径 = 首次打开带
+   `paseo.imported` 标记、且尚未确认的会话时**无条件**弹分叉警示（确认=一次性持久
+   ack；取消=留在列表、不标已读）；**明确不设「源是否真的在跑」启发式**——无可靠
+   存活信号（见 `src/shell/chats/open-agent.ts` 头注「No 'is the source really active'
+   heuristic — there is no reliable signal (card ruling)」+ `open-agent.test.ts`）。
+   「可能活跃」徽标只是导入列表的 mtime 启发式展示，不参与警示门；§14.10 勘误段已记
+   其假阴性边界。原句「发送前源活跃启发式」是把徽标展示误写进警示门，非实现。
+2. **§2.3 路由片段为初稿示意，已随批次演进（R2-20）**。片段里的 `preview`
+   实际落 `DETAIL.preview`（值 `/(detail)/preview`；C6 裁定：预览屏独立顶层 group，
+   开文件=真栈 push，返回自然落文件 tab）；`commandRun` 从未成为路由（运行流程是
+   工作区 tab 内 sheet，C7），其位置由 `commandsEdit` 取代；`OFFICIAL.agent` 的
+   `/h/<sid>/agent/<aid>` parse-stub 已退役（C4 open-intent=workspace 路由 +
+   `?open=agent:<id>`，见 `OFFICIAL.agentOpen`）。**现行唯一出处 =
+   `src/shell/routes.ts`**：`SHELL`、`DETAIL`、`OFFICIAL`、`SHELL_TAB` 与 group/段名
+   常量 `SHELL_ROOT_ROUTE`、`DETAIL_ROOT_ROUTE`、`HOST_ROOT_ROUTE`、
+   `HOST_WORKSPACE_SEGMENT`、`FILES_ROUTE_SEGMENT`；`routes.test.ts` 有
+   常量↔src/app 目录对拍闸（R2-12）守漂移。

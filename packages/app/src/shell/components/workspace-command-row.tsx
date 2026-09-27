@@ -146,7 +146,7 @@ export function WorkspaceCommandRow({
           </View>
         </View>
       </ContextMenuTrigger>
-      <ContextMenuContent sheetTitle={command.name} width={280}>
+      <ContextMenuContent width={280}>
         <CommandMenuRow
           id="run"
           label={t("commands.menu.run")}

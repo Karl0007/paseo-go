@@ -50,9 +50,21 @@ PGPATCH
   else
     echo "patch already present"
   fi
-  # entry stub for gradle @InputFile (ENTRY_FILE resolution side effect)
+  # entry stub for gradle @InputFile (ENTRY_FILE resolution side effect).
+  # Content is the lint-clean version (oxlint-disable on the side-effect import)
+  # so a clean build's `npm run lint` stays green — the generator is the single
+  # source; the on-disk stub is untracked and matches it byte-for-byte (R2-26).
   mkdir -p "$APP/packages/app"
-  [[ -f "$APP/packages/app/index.ts" ]] || printf '// Gradle input stub (BUILD.md 3.5). Metro never loads this.\nimport "../../index";\n' > "$APP/packages/app/index.ts"
+  cat > "$APP/packages/app/index.ts" <<'STUB'
+// Gradle input stub for release builds (paseo-go/BUILD.md §3.5, C13).
+// With ENTRY_FILE=packages/app/index.ts set in the build environment,
+// @react-native/gradle-plugin resolves react.entryFile to THIS path for its
+// input validation, while `expo export:embed` receives the workspace-relative
+// path and bundles the REAL entry (packages/app/index.ts) from the metro
+// server root. Metro never loads this file; the re-export keeps it honest.
+// oxlint-disable-next-line import/no-unassigned-import
+import "../../index";
+STUB
 fi
 
 if run 1; then

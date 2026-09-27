@@ -2,9 +2,11 @@
 // pinned as data. This is the C31-F1 contract: activation and the column set key
 // off `useWindowDimensions()` alone, so these two boundaries — and ONLY these —
 // decide when a rotating window splits and when it swaps the md→lg column pair.
-// The floors must stay identical to the Unistyles breakpoint table
-// (styles/unistyles.ts:6-12), otherwise the split and every breakpoint-keyed
-// official style disagree mid-rotation.
+// The floors must stay identical to the Unistyles breakpoint table, otherwise
+// the split and every breakpoint-keyed official style disagree mid-rotation —
+// enforced by the source-pair gate at the bottom (R2-11), not by the literals.
+import { readFileSync } from "node:fs";
+import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 import { MAX_CONTENT_WIDTH } from "@/constants/layout";
 import { TABLET_DETAIL_CONTENT_MAX_WIDTH } from "./metrics";
@@ -15,8 +17,46 @@ import {
   tabletColumnsForWidth,
 } from "./form-factor";
 
+// R2-11 对拍闸: the Unistyles breakpoint table (styles/unistyles.ts) is the REAL
+// source every breakpoint-keyed official style resolves against, but it is NOT
+// exported (StyleSheet.configure takes it inline) and importing that module would
+// boot the unistyles runtime in the node test env — so a normal import-based pair
+// test is unwritable. The gate therefore parses the SOURCE TEXT and pins the two
+// mirror floors to md/lg. Upstream moving md or lg now reddens this suite instead
+// of silently desyncing the split from the styles (the old `toBe(720)/toBe(992)`
+// only re-pinned this module's own literals — self-referential, R2-23 family).
+// known_issue (R2-11, ledger): the shell reads `useWindowDimensions()` (window
+// width) while Unistyles resolves `rt.breakpoint` from its own subscription; the
+// two faces only diverge under Android ≤10 free-form multi-window (window ≠
+// screen), where the Unistyles face is ALSO stale mid-rotation (C31-F1). The
+// window-width face is the deliberately chosen, rotation-correct one — accepted.
+function unistylesBreakpoint(name: "md" | "lg"): number {
+  const src = readFileSync(
+    fileURLToPath(new URL("../../styles/unistyles.ts", import.meta.url)),
+    "utf8",
+  );
+  const table = src.match(/breakpoints:\s*\{([^}]*)\}/)?.[1] ?? "";
+  const value = Number(table.match(new RegExp(`\\b${name}:\\s*(\\d+)`))?.[1]);
+  if (!Number.isFinite(value)) {
+    throw new Error(`breakpoints.${name} not found in styles/unistyles.ts — table shape changed`);
+  }
+  return value;
+}
+
+describe("Unistyles breakpoint mirror (R2-11 source-pair gate)", () => {
+  it("keeps the split floor on the table's md breakpoint", () => {
+    expect(unistylesBreakpoint("md")).toBe(720); // guard the regex itself
+    expect(TABLET_SPLIT_MIN_WIDTH_DP).toBe(unistylesBreakpoint("md"));
+  });
+
+  it("keeps the large floor on the table's lg breakpoint", () => {
+    expect(unistylesBreakpoint("lg")).toBe(992); // guard the regex itself
+    expect(TABLET_LARGE_MIN_WIDTH_DP).toBe(unistylesBreakpoint("lg"));
+  });
+});
+
 describe("isCompactWindowWidth (window → compact/split threshold)", () => {
-  it("keeps the §2 matrix boundaries at the Unistyles md/lg floors", () => {
+  it("keeps the §2 matrix boundaries at the current md/lg floors", () => {
     expect(TABLET_SPLIT_MIN_WIDTH_DP).toBe(720);
     expect(TABLET_LARGE_MIN_WIDTH_DP).toBe(992);
   });

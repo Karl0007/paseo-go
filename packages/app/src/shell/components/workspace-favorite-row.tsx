@@ -100,7 +100,6 @@ export function WorkspaceFavoriteRow({
     : `${favorite.name} · ${subtitle}`;
   return (
     <ShellFavoriteRowMenu
-      title={favorite.name}
       testID={`shell-favorite-row-${favorite.hostId}-${favorite.path}`}
       onPress={handleOpen}
       actions={menuActions}

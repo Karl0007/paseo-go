@@ -45,3 +45,17 @@
 - 复核 A：R2-01/02/03/04/05/06/07/08（P1 全量，独立核实因果链+severity+是否已修）。
 - 复核 B：R2-09/11/12/13/14/17/19/21（P2 高影响抽样）。
 - 其余 P2 卫生类信任 reviewer 证据闸（文件:行在册），复核 A/B 撞见的顺手核。
+
+## FIX-C 落地记录（卫生批，2026-09-27）
+
+- **R2-11**：对拍闸已落——`form-factor.test.ts` 解析 `styles/unistyles.ts` 源文本提取
+  breakpoints 表并与 `TABLET_SPLIT_MIN_WIDTH_DP`/`TABLET_LARGE_MIN_WIDTH_DP` 对拍
+  （真值表未导出、import 会起 unistyles 运行时，故走源解析；不改官方文件）。
+  **known_issue**：壳读 window 宽（`useWindowDimensions`）vs Unistyles 自有订阅面，
+  仅 Android ≤10 自由窗口多窗口下分叉；该面上 Unistyles 还叠加 C31-F1 旋转滞后，
+  裁定保持窗宽面（注释在 `form-factor.ts` / `form-factor.test.ts`）。
+- **R2-23**：5 条假绿/自指断言已逐条改真断言（改坏必红证据在 FIX-C 报告）；
+  looksActive 时钟耦合项在 `packages/server`＝本批禁碰面，**deferred**。
+- **R2-26**：C35 evidence 半已由 `evidence/C35/` 补齐（前批）；本批删
+  `todo/C34-repro-draft.sh` 废稿（卡尾已注明唯一出处=evidence/C34/）；release 桩
+  与 phase0 生成器对账结论见 BUILD.md §3.5 坑①（生成器改为无条件重生成 lint-clean 版）。

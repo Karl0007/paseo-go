@@ -8,11 +8,14 @@
 // change event), which rotates in both directions; these hooks are the ONLY
 // form-factor source inside the tablet split (DESIGN-tablet §2 matrix).
 //
-// Thresholds mirror the Unistyles breakpoint table (styles/unistyles.ts:6-12) as
+// Thresholds mirror the Unistyles breakpoint table (styles/unistyles.ts) as
 // data: compact = xs|sm = width < md's 720 floor; the lg column set starts at
-// lg's 992 floor (xl inherits lg, metrics.ts). Keeping them here as pure
-// functions is what lets the unit tests pin the rotation thresholds
-// (form-factor.test.ts) — the hook bodies are three lines of glue.
+// lg's 992 floor (xl inherits lg, metrics.ts). The mirror is MACHINE-GATED —
+// form-factor.test.ts parses the table out of the unistyles source (R2-11,
+// the table is not exported) and reddens on drift. known_issue (R2-11): these
+// hooks key off the WINDOW width while Unistyles resolves its own subscription;
+// the faces only diverge under Android ≤10 free-form multi-window — there the
+// window face is still the rotation-correct one (C31-F1), so the split wins.
 import { useMemo } from "react";
 import { useWindowDimensions } from "react-native";
 import { TABLET_LIST_WIDTH, TABLET_RAIL_WIDTH } from "./metrics";

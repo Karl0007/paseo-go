@@ -2,8 +2,9 @@
 // single-host retry) | 进行中/已归档 filter segment (C3: archived rows hide from the
 // live list; the filter reveals them and their 取消归档/删除 menu) | 搜索 (C9: the
 // icon opens the header's search mode — the whole bar morphs into input + 取消,
-// filtering the list below instantly) | ＋菜单 (新建对话 = official add-project flow,
-// 导入会话 = C10 push of the shell import screen). Menus ride the official menu engine
+// filtering the list below instantly) | ＋菜单 (新建对话 = C17 direct push of the
+// official /new screen (DESIGN §14.7), 导入会话 = C10 push of the shell import screen).
+// Menus ride the official menu engine
 // in its anchored-popover presentation (C19, DESIGN §14.3): the engine default compact
 // mode, anchoring under the trigger and clamping at the right edge.
 import { useCallback, useMemo } from "react";
@@ -188,7 +189,7 @@ export function ChatsHeader({
               </Text>
             </View>
           </DropdownMenuTrigger>
-          <DropdownMenuContent sheetTitle={t("chats.hostsMenu")} width={300}>
+          <DropdownMenuContent width={300}>
             {total === 0 ? (
               <>
                 <DropdownMenuHint>{t("chats.noHosts")}</DropdownMenuHint>
@@ -249,7 +250,7 @@ export function ChatsHeader({
           >
             <Plus size={18} color={styles.iconColor.color} />
           </DropdownMenuTrigger>
-          <DropdownMenuContent sheetTitle={t("chats.newMenu")} width={300}>
+          <DropdownMenuContent width={300}>
             <DropdownMenuItem testID="shell-new-chat" leading={newChatLeading} onSelect={onNewChat}>
               {t("chats.newChat")}
             </DropdownMenuItem>

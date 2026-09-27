@@ -199,7 +199,7 @@ export function ShellFileOverflowMenu({
       >
         {trigger}
       </DropdownMenuTrigger>
-      <DropdownMenuContent sheetTitle={title} width={280}>
+      <DropdownMenuContent width={280}>
         {fileMenuRows(actions, labels, testID, "full")}
       </DropdownMenuContent>
     </DropdownMenu>
@@ -209,14 +209,12 @@ export function ShellFileOverflowMenu({
 /** Long-press menu for a favorites row: 取消收藏/分享/复制路径. */
 export function ShellFavoriteRowMenu({
   actions,
-  title,
   onPress,
   testID,
   accessibilityLabel,
   children,
 }: {
   actions: ShellFileMenuActions;
-  title: string;
   onPress: () => void;
   testID: string;
   /** C12: row-level label (标题+状态) — the trigger IS the row. */
@@ -242,7 +240,7 @@ export function ShellFavoriteRowMenu({
       >
         {children}
       </ContextMenuTrigger>
-      <ContextMenuContent sheetTitle={title} width={280}>
+      <ContextMenuContent width={280}>
         {fileMenuRows(actions, labels, testID, "favoriteRow")}
       </ContextMenuContent>
     </ContextMenu>

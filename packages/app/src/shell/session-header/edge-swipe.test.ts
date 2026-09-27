@@ -13,7 +13,9 @@ import {
 describe("resolveShellEdgeSwipeIntent", () => {
   it("keeps the card's geometry: ≈32dp band, horizontal commit threshold inside it", () => {
     expect(SHELL_EDGE_BAND_WIDTH_DP).toBe(32);
-    expect(SHELL_EDGE_BACK_ACTIVATE_DP).toBeGreaterThan(0);
+    // 卡面定稿=24dp 右移行程；`toBeGreaterThan(0)` 对任何正值恒真（R2-23 假绿
+    // 修复）——阈值漂到 20 或 30 时这条必须红，而不是只靠下面的行为矩阵兜底。
+    expect(SHELL_EDGE_BACK_ACTIVATE_DP).toBe(24);
     expect(SHELL_EDGE_BACK_ACTIVATE_DP).toBeLessThanOrEqual(SHELL_EDGE_BAND_WIDTH_DP);
   });
 

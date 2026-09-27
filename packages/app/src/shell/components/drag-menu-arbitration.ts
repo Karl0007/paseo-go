@@ -14,10 +14,10 @@
 //   pressing → armed      at DRAG_ARM_DELAY_MS (180ms) if within
 //                          DRAG_ARM_STATIONARY_SLOP_PX (4px) of the anchor;
 //   pressing|armed → menu_open
-//                        at CONTEXT_MENU_DELAY_MS (500ms — the engine's own
-//                        Pressable long-press delay, so both row kinds tickle
-//                        identically) if within CONTEXT_MENU_STATIONARY_SLOP_PX
-//                        (6px);
+//                        at CONTEXT_MENU_DELAY_MS (500ms — the shell's OWN
+//                        decision constant, see the note at its definition:
+//                        no shared source with the engine/RN defaults) if
+//                        within CONTEXT_MENU_STATIONARY_SLOP_PX (6px);
 //   menu_open → dragging   once the finger is more than
 //                          MENU_TO_DRAG_RELAY_SLOP_PX (8px) from the anchor —
 //                          the C20 relay edge.
@@ -47,6 +47,14 @@ import { decideLongPressMove } from "@/utils/sidebar-gesture-arbitration";
 
 export const DRAG_ARM_DELAY_MS = 180;
 export const DRAG_ARM_STATIONARY_SLOP_PX = 4;
+// The shell's OWN menu-open decision window (C3 on-device validated). This is
+// NOT sourced from the engine or RN: the shell never passes a delayLongPress into
+// the engine's native-Pressable path, so archived/search rows tickle at React
+// Native's internal default — which merely HAPPENS to be 500 too (coincidence,
+// no shared source; the official sidebar arm uses 450 in
+// use-long-press-drag-interaction.ts). Treat this constant as the single truth
+// for the arbitration rows; move it only with new on-device data, never to
+// "align" it with an upstream default (R2-24).
 export const CONTEXT_MENU_DELAY_MS = 500;
 export const CONTEXT_MENU_STATIONARY_SLOP_PX = 6;
 // Card value was 10; lowered to the armed path's 8 after the on-device steal

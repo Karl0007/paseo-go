@@ -80,16 +80,14 @@ describe("local actions", () => {
     expect(deps.haptic).toHaveBeenCalledTimes(3);
   });
 
-  it("rename trims into an alias; blank or clearAlias restores the daemon title", () => {
+  it("rename trims into an alias; blank clears it back to the daemon title", () => {
+    // R2-22: clearAlias 死导出已删——「空提交=清除」是唯一的清除路径。
     const { deps } = makeDeps(null);
     const actions = createShellAgentActions(deps);
     actions.rename(target, "  重构对话  ");
     expect(usePaseoGoPinsStore.getState().aliases["s1:a1"]).toBe("重构对话");
     actions.rename(target, "   ");
     expect(usePaseoGoPinsStore.getState().aliases["s1:a1"]).toBeUndefined();
-    actions.rename(target, "别名");
-    actions.clearAlias(target);
-    expect(usePaseoGoPinsStore.getState().aliases).toEqual({});
     expect(deps.notify).toHaveBeenLastCalledWith("chats.toast.aliasCleared");
   });
 

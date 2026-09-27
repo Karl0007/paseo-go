@@ -226,6 +226,19 @@ whisper.cpp 自带 `server` 只暴露 `POST /inference`（multipart `file`+`lang
 `providers.openai.stt.*`（config）压过 env**（解析顺序 stt 专属 → env 专属 → 通用 config → 通用 env）。
 若 config 里已写 dummy/占位 baseUrl，改 env 不生效，必须改 config。
 
+⚠⚠ **`baseUrl` 缺失 = 语音出公网（隐私 + 计费），务必自检**（代码实况：
+`server/speech/providers/openai/config.ts` 的 `firstDefined` 兜底链）。STT baseUrl
+解析顺序 = `providers.openai.stt.baseUrl` → env `OPENAI_STT_BASE_URL` →
+`providers.openai.baseUrl` → env `OPENAI_BASE_URL`；**四级全空时 SDK 回落官方公网端点
+`https://api.openai.com/v1`**——你的口述音频将离开本机上传公网。apiKey 兜底链同构
+（`providers.openai.stt.apiKey` → `OPENAI_STT_API_KEY` → `providers.openai.apiKey` →
+**env `OPENAI_API_KEY`**）：若你为 agent 在 env 里配了真实 OpenAI key，这次公网上传
+会**用你的真 key 计费**，失败也只报「Connection error/401」，不像配置错。对照：TTS 面
+按 §6.1 要点**保持 `local`**（kokoro 本地归档，不经 openai provider），语音输入不会
+经 TTS 泄露音频。**配置自检（§7 验收前必做）**：确认解析后的
+`providers.openai.stt.baseUrl` 非空且指向你的部署机——只写 env 时注意 §6.2 的
+config 占位符遮蔽坑（config 里已写 baseUrl=占位值时改 env 不生效）。
+
 ## 7. 验收 curl（部署完成的判据）
 
 ```bash

@@ -1,8 +1,10 @@
 // L2 worktree 行 (DESIGN §14.8, card C26): worktree 名 (代表记录 title‖name) +
 // 路径尾段/分支副行 + 展开 chevron + 合并活跃角标. 行体 = 该 worktree 的文件页
 // (代表记录 id); chevron 钮 = 展开/收起 L3; 长按 = 菜单「复制 worktree 路径 +
-// 归档工作区」——归档走官方 archiveWorkspace RPC (经 workspace-archive 的乐观隐藏)，
-// 对合并前全部记录一次执行. 菜单复用官方 ContextMenu popover 引擎 (C33 形态).
+// 归档工作区」——可见项/禁用条件来自纯矩阵 `worktreeMenuPlan`（R2-22，对齐
+// chatMenuPlan 姿势）;归档走官方 archiveWorkspace RPC (经 workspace-archive
+// 的乐观隐藏)，对合并前全部记录一次执行. 菜单复用官方 ContextMenu popover
+// 引擎 (C33 形态).
 import { useCallback, type ReactElement } from "react";
 import { Pressable, Text, View } from "react-native";
 import { StyleSheet, withUnistyles } from "react-native-unistyles";
@@ -18,6 +20,7 @@ import {
 } from "@/components/ui/context-menu";
 import { useToast } from "@/contexts/toast-context";
 import { SHELL_I18N_NAMESPACE } from "@/shell/i18n";
+import { worktreeMenuPlan } from "@/shell/workspace/worktree-menu";
 import { WorkspaceTreeBadge } from "@/shell/components/workspace-project-row";
 import { pathTail, type ShellWorktreeRow, type WorkspaceTreeAgent } from "@/shell/workspace/derive";
 
@@ -136,21 +139,28 @@ export function WorkspaceWorktreeRow<A extends WorkspaceTreeAgent>({
         </ContextMenuTrigger>
       </View>
       <ContextMenuContent width={280} testID={`shell-workspace-worktree-menu-${row.key}`}>
-        <ContextMenuItem
-          leading={copyLeading()}
-          disabled={row.cwd.length === 0}
-          onSelect={handleCopyPath}
-          testID={`shell-worktree-copy-${row.key}`}
-        >
-          {t("workspace.menu.copyPath")}
-        </ContextMenuItem>
-        <ContextMenuItem
-          leading={archiveLeading()}
-          onSelect={handleArchive}
-          testID={`shell-worktree-archive-${row.key}`}
-        >
-          {t("workspace.menu.archiveWorkspace")}
-        </ContextMenuItem>
+        {worktreeMenuPlan({ cwd: row.cwd }).map((item) =>
+          item.id === "copyPath" ? (
+            <ContextMenuItem
+              key={item.id}
+              leading={copyLeading()}
+              disabled={!item.enabled}
+              onSelect={handleCopyPath}
+              testID={`shell-worktree-copy-${row.key}`}
+            >
+              {t("workspace.menu.copyPath")}
+            </ContextMenuItem>
+          ) : (
+            <ContextMenuItem
+              key={item.id}
+              leading={archiveLeading()}
+              onSelect={handleArchive}
+              testID={`shell-worktree-archive-${row.key}`}
+            >
+              {t("workspace.menu.archiveWorkspace")}
+            </ContextMenuItem>
+          ),
+        )}
       </ContextMenuContent>
     </ContextMenu>
   );
