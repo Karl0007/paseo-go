@@ -79,3 +79,17 @@ C19 真机轮观察（known_issues#2 移交）：4:02 收藏的 AGENTS.md 与 4:
 
 - 窗口预算被两件事消耗：① metro 僵尸化（私有 12.6GB，KI#7 形态；按批准 spec 重启+设备侧首包 46-83s 重建，冷启 54s 基线复现）；② FIX-B 复验 item 7（L2 风险闸）设备面 FAIL 引发误归档主 worktree 事故与恢复（详见 REVIEW2-INDEX CLOSE-DEV3 记录节）。矩阵未开跑即触达预算上限。
 - 基建复核：junction %TEMP%\c34→C:\tmp\c34 在位、matrix2.sh/reset2.sh/探针文件未动、`env -u PASEO_AGENT_ID -u PASEO_AGENT_CWD` 前缀对 devd 全 CLI 操作必需（否则 CLI 以本会话 agent 身份打 devd 报 Caller not found——即卡面 ⚠ 的解）。判读口径不变；移交下一窗口。
+
+## CLOSE-DEV4 设备窗口（2026-09-28 凌晨，HEAD=18174591 代码冻结）：矩阵 18/18 跑完 → **c1 终笔=竞态未证实**
+
+- **18/18 rc=0**（12 核心 = `matrix2.sh` 一遍过；6 tight 附加 = 修好基建坑后 `hyb_run.sh` 重跑）。产物：`evidence/C34/matrix-run3/`（`ledger.jsonl` 18 行 + `log-matrix2-run3.txt` + `log-hyb-run3.txt` + 39 件断言帧）。
+- 核心 12（fav A1-A3/B1-B3、cmd A1-A3/B1-B3）：`mem=1 disk_ui=1 disk_sql=1` 11/12；dt_kill A 轮 fav 3.35-3.59s / cmd 6.03-6.54s，B 轮 14.0-16.3s。唯一例外 **cmd-B1 = mem=1 disk_ui=0 disk_sql=1**。
+- 附加 6（tight ≤1s 窗，`hyb_sample.sh`）：**dt_kill = 384 / 387 / 422ms（A 轮）与 10468 / 10475 / 10544ms（B 轮），`disk_sql=1` 6/6**；`mem=-1` 是该脚本设计（内存断言前就杀，只测磁盘）。唯一例外 **hyb-A1 disk_ui=0 / disk_sql=1**。
+- **判读（沿用卡面口径）**：A 轮=变异后 ≤1s 即 force-stop，6/6 全部落盘 → 不存在「persist 未 flush 进程已死」；A/B 均过 → **c1 降级「竞态未证实」**。叠加 c4（C19 观察误差）定案、c3 排除、c2 无实证 → **C34 终笔结论=观察误差，不是数据丢失缺陷**；known_issue 文案转「观察误差，竞态未证实」。附加样本（启动期 hydration 前写守卫）按卡面裁定**仅记纪律不修**（现成守卫参照 `commands/edit.tsx:442-444` 的 seed-waits-hydration 姿势）。
+- 两处 `disk_ui=0`（cmd-B1、hyb-A1）定性：磁盘真相在盘（`disk_sql=1`）而重启后 UI 断言未命中该行；断言跑在冷启后首轮列表 hydration 窗内、且列表当时已累积 6 fav + 6 cmd 探针行 → 判为**观测面**（渲染时序/行位置），不属 persist 链。若日后要追「已落盘但列表不显示」，那是另一条链（与 R2-19「已归档再隐藏」语义相邻），不在本卡。
+- **本轮就地修掉三枚矩阵基建坑（`evidence/C34/` 唯一出处纪律不变；脚本在 `C:/tmp/c34/`，与 evidence 目录同源）**：
+  1. `fav_sample.sh`/`hyb_sample.sh` 的 `WT` 行 id 写成 `…:wt:c:C:/tmp/c5-proj`（大写盘符），而壳的 worktree 行 identity 经 `normalizeWorkspacePath` **把盘符小写** → 永不匹配，矩阵首跑 12 核心全 `ABORT wt row`(rc=3)。改 `c:` 后 fav-A1 立即 rc=0。
+  2. **L1/L2 行是虚拟化的**：跑满 12 核心样本后（6 收藏行 + 6 指令行）c5-proj 项目行被顶出渲染窗，hyb-A1..B1 连 `ABORT wt row`。`lib.sh` 新增 `reveal_wt <PROJ> <WT>`：项目行不在树里就 `swipe 800,1900→800,800` 下滚重试、在就点开 → hyb 6 样本「REVEAL wt row after 3 try(ies)」全绿。
+  3. `reset2.sh`→`cleanup.sh` 用 **650ms** 长按删指令：行菜单不 materialize（6/6 `DEL MENU FAIL`，fav 侧同坑 1/6）；popover 时代实测要 **1000ms**（与 C20/C33 注入速度纪律同源）→ 另落 `cleanup_cmds.sh`（1000ms 长按 + 再点「删除」确认，模态顶树纪律不变）。
+- 设备复位：12 fav 核心探针 + 6 hyb fav 探针 + 6 cmd 探针全部经 UI 删除，磁盘真相回基线（`paseoGo.favorites=[AGENTS.md]`、`paseoGo.commands=[C19-probe]`，run-as 导出 RKStorage + node:sqlite 复核）；IME 切回百度、rotation 0、壳 ON、app 留 home（`mResumedActivity=app.paseo.shell.debug/.MainActivity`）。
+- **编排失误如实记录**：清场脚本 `cleanup_fav_t.sh` 被我在 `hyb-B2/B3` 仍在跑时启动（设备争用），它因此对 TB1-3 报 `no-fav`（当时尚未创建），并出现 `FAIL tap_desc: 工作区`；两枚受影响样本仍 rc=0 且 `disk_sql=1`（判读依赖磁盘真相 + dt_kill 384-10544ms，结论不受影响），TB1-3 由后续单独一遍（1000ms 长按）删除并复验 favrows=1。纪律补一条：**矩阵在跑时不得并行任何设备侧脚本**。
