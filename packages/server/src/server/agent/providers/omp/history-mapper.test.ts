@@ -474,6 +474,136 @@ describe("OMP history mapper", () => {
     ]);
   });
 
+  test("replays the forked conversation branch when lifecycle-only exits were appended last", async () => {
+    // C24 repro: an external `omp -r` appends a probe turn onto the last head
+    // (a session_exit record), then its own session_exit; the daemon-side
+    // process later disposes against the same parent, so the file's last leaf
+    // is a lifecycle-only sibling whose chain predates the probe turn.
+    const dir = mkdtempSync(join(tmpdir(), "omp-history-fork-"));
+    const sessionFile = join(dir, "session.jsonl");
+    writeFileSync(
+      sessionFile,
+      [
+        { type: "session", id: "root", parentId: null },
+        {
+          type: "message",
+          id: "user-1",
+          parentId: "root",
+          message: { role: "user", content: "first hello" },
+        },
+        {
+          type: "message",
+          id: "assistant-1",
+          parentId: "user-1",
+          message: { role: "assistant", content: [{ type: "text", text: "first reply" }] },
+        },
+        {
+          type: "custom",
+          customType: "session_exit",
+          id: "exit-1",
+          parentId: "assistant-1",
+        },
+        {
+          type: "message",
+          id: "user-2",
+          parentId: "exit-1",
+          message: { role: "user", content: "C24 refresh probe OK" },
+        },
+        {
+          type: "message",
+          id: "assistant-2",
+          parentId: "user-2",
+          message: { role: "assistant", content: [{ type: "text", text: "probe reply" }] },
+        },
+        {
+          type: "custom",
+          customType: "session_exit",
+          id: "exit-2",
+          parentId: "assistant-2",
+        },
+        {
+          type: "custom",
+          customType: "session_exit",
+          id: "exit-3-sibling",
+          parentId: "exit-1",
+        },
+      ]
+        .map((entry) => JSON.stringify(entry))
+        .join("\n"),
+    );
+
+    const items: { type: string; text?: string }[] = [];
+    for await (const event of streamOmpHistory({ sessionFile, provider: "omp" })) {
+      if (event.type === "timeline") items.push(event.item);
+    }
+    expect(items.map((item) => [item.type, item.text])).toEqual([
+      ["user_message", "first hello"],
+      ["assistant_message", "first reply"],
+      ["user_message", "C24 refresh probe OK"],
+      ["assistant_message", "probe reply"],
+    ]);
+  });
+
+  test("follows the branch with the newest appended conversation when both forks carry content", async () => {
+    // After the probe fork, the daemon-owned process continues on the exit
+    // sibling; its newer turn must win over the older probe branch.
+    const dir = mkdtempSync(join(tmpdir(), "omp-history-fork-newest-"));
+    const sessionFile = join(dir, "session.jsonl");
+    writeFileSync(
+      sessionFile,
+      [
+        { type: "session", id: "root", parentId: null },
+        {
+          type: "message",
+          id: "user-1",
+          parentId: "root",
+          message: { role: "user", content: "first hello" },
+        },
+        {
+          type: "custom",
+          customType: "session_exit",
+          id: "exit-1",
+          parentId: "user-1",
+        },
+        {
+          type: "message",
+          id: "user-probe",
+          parentId: "exit-1",
+          message: { role: "user", content: "probe turn" },
+        },
+        {
+          type: "custom",
+          customType: "session_exit",
+          id: "exit-probe",
+          parentId: "user-probe",
+        },
+        {
+          type: "custom",
+          customType: "session_exit",
+          id: "exit-daemon",
+          parentId: "exit-1",
+        },
+        {
+          type: "message",
+          id: "user-live",
+          parentId: "exit-daemon",
+          message: { role: "user", content: "live continuation" },
+        },
+      ]
+        .map((entry) => JSON.stringify(entry))
+        .join("\n"),
+    );
+
+    const items: { type: string; text?: string }[] = [];
+    for await (const event of streamOmpHistory({ sessionFile, provider: "omp" })) {
+      if (event.type === "timeline") items.push(event.item);
+    }
+    expect(items.map((item) => [item.type, item.text])).toEqual([
+      ["user_message", "first hello"],
+      ["user_message", "live continuation"],
+    ]);
+  });
+
   test("rehydrates structured batch and nested task transcripts with stable status and time", async () => {
     const dir = mkdtempSync(join(tmpdir(), "omp-subagent-history-"));
     const parentFile = join(dir, "parent.jsonl");

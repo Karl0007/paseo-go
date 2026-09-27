@@ -307,9 +307,10 @@ export async function readActiveOmpEntryChain(
   if (entries.length === 0) return [];
   const byId = new Map(entries.map((entry) => [entry.id!, entry]));
   const parentIds = new Set(entries.flatMap((entry) => (entry.parentId ? [entry.parentId] : [])));
-  const leaves = entries.filter((entry) => !parentIds.has(entry.id!));
   let current: OmpSessionEntry | undefined =
-    (activeEntryId ? byId.get(activeEntryId) : undefined) ?? leaves.at(-1) ?? entries.at(-1);
+    (activeEntryId ? byId.get(activeEntryId) : undefined) ??
+    selectActiveOmpLeaf(entries, parentIds) ??
+    entries.at(-1);
   const chain: OmpSessionEntry[] = [];
   const seen = new Set<string>();
   while (current?.id && !seen.has(current.id)) {
@@ -318,6 +319,45 @@ export async function readActiveOmpEntryChain(
     current = current.parentId ? byId.get(current.parentId) : undefined;
   }
   return chain.toReversed();
+}
+
+/**
+ * An omp session file is an append-only journal of a parent-linked DAG: every
+ * process that resumes the session appends from the head it last read, and each
+ * one writes a `session_exit` lifecycle record onto its own head at dispose time.
+ * When an external `omp -r` run appends a fresh turn while a daemon-side process
+ * disposes against the same parent, the lifecycle-only sibling becomes the last
+ * leaf in file order, and replaying it silently drops the newly appended
+ * conversation ("refresh looks successful but the timeline stays old").
+ * Select the leaf whose chain contains the most recently appended visible entry
+ * (one that survives `mapEntryMessage`); when no chain carries visible content,
+ * fall back to the previous last-leaf behavior.
+ */
+function selectActiveOmpLeaf(
+  entries: readonly OmpSessionEntry[],
+  parentIds: ReadonlySet<string>,
+): OmpSessionEntry | undefined {
+  const indexById = new Map<string, number>();
+  entries.forEach((entry, index) => indexById.set(entry.id!, index));
+  // chainVisibleIndex[i] = file index of the newest visible entry on the chain
+  // ending at entry i (inclusive). Parents are appended before children, so a
+  // single forward pass suffices.
+  const chainVisibleIndex: number[] = Array.from({ length: entries.length }, () => -1);
+  let bestLeaf: OmpSessionEntry | undefined;
+  let bestVisibleIndex = -1;
+  for (let index = 0; index < entries.length; index += 1) {
+    const entry = entries[index]!;
+    const parentIndex = entry.parentId ? indexById.get(entry.parentId) : undefined;
+    const inherited =
+      parentIndex !== undefined && parentIndex < index ? chainVisibleIndex[parentIndex]! : -1;
+    chainVisibleIndex[index] = mapEntryMessage(entry) ? index : inherited;
+    if (parentIds.has(entry.id!)) continue;
+    if (chainVisibleIndex[index]! >= bestVisibleIndex) {
+      bestVisibleIndex = chainVisibleIndex[index]!;
+      bestLeaf = entry;
+    }
+  }
+  return bestLeaf;
 }
 
 function mapEntryMessage(entry: OmpSessionEntry): OmpAgentMessage | null {
