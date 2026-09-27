@@ -25,6 +25,13 @@
 // confirm = acknowledge once (persisted store) and enter, cancel = stay on the list
 // with nothing marked read. No "is the source really active" heuristic — there is no
 // reliable signal (card ruling); the warning is the honest, one-time gate.
+//
+// R2-10 (FIX-A): the dialog SUSPENDS the open. Once the user confirms, the
+// entry stamp re-reads the watermark via `lastEventAtOf` — activity that
+// landed while the warning was up must not be marked seen by a press-time
+// snapshot nobody watched. The snapshot stays the fallback for a row the
+// directory lost mid-dialog; the synchronous (non-imported / already-acked)
+// path never touches the directory.
 
 export interface ChatOpenTarget {
   /** `${serverId}:${agentId}` — the readState/pins row key. */
@@ -76,6 +83,10 @@ export function createChatOpener(deps: ChatOpenerDeps): ChatOpener {
   let pending: PendingVisit | null = null;
   return {
     async open(target) {
+      // R2-10: the stamp target starts at the press snapshot and is re-taken
+      // below only when the fork gate actually suspends the open.
+      let at = target.lastEventAt;
+
       // C24: the gate runs BEFORE the read stamp — a cancelled open never entered
       // the session, so the row must stay unread. Non-imported rows short-circuit
       // synchronously (the pre-C24 open path is unchanged for them).
@@ -83,13 +94,16 @@ export function createChatOpener(deps: ChatOpenerDeps): ChatOpener {
         const proceed = await deps.confirmFork();
         if (!proceed) return;
         deps.acknowledgeFork(target.key);
+        // The only await on the open path — re-take the watermark after it;
+        // undefined (row gone) falls back to the press snapshot.
+        at = deps.lastEventAtOf(target.serverId, target.agentId) ?? target.lastEventAt;
       }
-      deps.markRead(target.key, target.lastEventAt);
+      deps.markRead(target.key, at);
       pending = {
         key: target.key,
         serverId: target.serverId,
         agentId: target.agentId,
-        at: target.lastEventAt,
+        at,
       };
       deps.navigateToAgent({
         serverId: target.serverId,

@@ -1,12 +1,16 @@
 // Import-list loading for the shell import screen (card C10; F1 review fix). The
 // screen owns selection/progress; this hook owns the fetch lifecycle: the request
-// sequence guard (a superseded response never commits) AND the stale-host guard —
-// a `load` closure bound to host A must not run after the screen moved to host B.
-// Without the latter, the tail of a mid-import host switch calls A's closure, its
-// `++requestSeq` grabs the newest slot, and A's response overwrites B's list.
-// C23: `query` joins the fetch input and the `load` identity, so a query edit also
-// advances the seq — a response for an old query can never overwrite a newer one.
-// React-free of the screen's chrome so the race is unit-testable with renderHook.
+// sequence guard (a superseded response never commits) AND the stale-request
+// guard — a `load` closure is only allowed to run while its FULL request identity
+// (serverId + client + query + limit) is still the current one. Without the
+// latter, the tail of a mid-import host switch calls A's closure, or — R2-05 —
+// the tail of a mid-import query edit calls the press-time closure on the SAME
+// host: its `++requestSeq` grabs the newest slot and the stale response
+// overwrites the list the search box just produced (host-only guard passed it).
+// C23: `query` joins the fetch input and the `load` identity, so a query edit
+// also advances the seq — a response for an old query can never overwrite a
+// newer one. React-free of the screen's chrome so the race is unit-testable
+// with renderHook.
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { FetchRecentProviderSessionEntry } from "@getpaseo/client/internal/daemon-client";
 
@@ -43,14 +47,23 @@ export function useImportList(
 ): { listState: ImportListState; load: () => Promise<void> } {
   const [listState, setListState] = useState<ImportListState>(INITIAL_STATE);
   const requestSeq = useRef(0);
-  // Latest host, kept fresh on every render so closures created earlier (the
-  // import tail, a memoized retry button) can detect they went stale.
-  const currentServerId = useRef(serverId);
-  currentServerId.current = serverId;
+  // Latest request identity, kept fresh on every render so closures created
+  // earlier (the import tail, a memoized retry button) can detect they went
+  // stale — on ANY axis, not just the host (R2-05).
+  const currentRequest = useRef({ serverId, client, query, limit });
+  currentRequest.current = { serverId, client, query, limit };
 
   const load = useCallback(async () => {
     if (!client) return;
-    if (serverId !== currentServerId.current) return;
+    const fresh = currentRequest.current;
+    if (
+      serverId !== fresh.serverId ||
+      client !== fresh.client ||
+      query !== fresh.query ||
+      limit !== fresh.limit
+    ) {
+      return;
+    }
     const seq = ++requestSeq.current;
     setListState((prev) => ({ ...prev, status: "loading" }));
     try {

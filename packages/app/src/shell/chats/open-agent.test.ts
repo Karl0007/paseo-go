@@ -219,4 +219,55 @@ describe("C24 fork guard (imported chats)", () => {
     expect(confirmFork).not.toHaveBeenCalled();
     expect(navigateToAgent).toHaveBeenCalledTimes(1);
   });
+
+  // R2-10 (FIX-A): the confirm dialog suspends the open — the directory can
+  // advance while the user reads the fork warning. Stamping with the press-time
+  // snapshot then marks activity that happened DURING the dialog as read
+  // without anyone watching it. After the gate passes, the watermark must be
+  // re-read via lastEventAtOf; the snapshot is only the fallback for a row the
+  // directory lost mid-dialog.
+  it("re-reads the watermark after the confirm: dialog-window activity is not silently seen", async () => {
+    let directoryEvent: number | undefined = HOST_EVENT;
+    const markRead = vi.fn();
+    const opener = createChatOpener({
+      markRead,
+      navigateToAgent: vi.fn(),
+      lastEventAtOf: () => directoryEvent,
+      confirmFork: async () => {
+        directoryEvent = HOST_EVENT + 5_000; // activity during the dialog
+        return true;
+      },
+      forkAcknowledged: () => false,
+      acknowledgeFork: () => {},
+    });
+    await opener.open(importedTarget); // target.lastEventAt = HOST_EVENT (press snapshot)
+    expect(markRead).toHaveBeenCalledWith(importedTarget.key, HOST_EVENT + 5_000);
+  });
+
+  it("falls back to the press snapshot when the directory lost the row mid-confirm", async () => {
+    let directoryEvent: number | undefined = HOST_EVENT;
+    const markRead = vi.fn();
+    const navigateToAgent = vi.fn();
+    const opener = createChatOpener({
+      markRead,
+      navigateToAgent,
+      lastEventAtOf: () => directoryEvent,
+      confirmFork: async () => {
+        directoryEvent = undefined;
+        return true;
+      },
+      forkAcknowledged: () => false,
+      acknowledgeFork: () => {},
+    });
+    await opener.open(importedTarget);
+    expect(markRead).toHaveBeenCalledWith(importedTarget.key, HOST_EVENT);
+    expect(navigateToAgent).toHaveBeenCalledTimes(1);
+  });
+
+  it("the synchronous non-imported path never re-reads the directory (unchanged F4 open)", async () => {
+    const { opener, markRead, lastEventAtOf } = harness();
+    await opener.open(target);
+    expect(markRead).toHaveBeenCalledWith(target.key, HOST_EVENT);
+    expect(lastEventAtOf).not.toHaveBeenCalled();
+  });
 });

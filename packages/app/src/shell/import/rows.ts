@@ -87,9 +87,21 @@ export function mapEntriesToImportRows(
 }
 
 /**
+ * 服务端真值（server/agent/agent-manager.ts matchesImportableSessionQuery）：
+ * cwd 进 haystack 的是 basename(cwd.replaceAll("\\","/"))，不是整条路径。
+ * node basename 语义：先剥尾分隔符，再取最后一个 "/" 段。
+ */
+function cwdBasenameOf(cwd: string): string {
+  const normalized = cwd.replaceAll("\\", "/").replace(/\/+$/, "");
+  const slash = normalized.lastIndexOf("/");
+  return slash === -1 ? normalized : normalized.slice(slash + 1);
+}
+
+/**
  * C23 旧 daemon 降级：capability `importSessionSearch`=false 时 query 不进 RPC，
- * 改在已载条目上做小写子串过滤。haystack 对齐服务端检索面：title /
- * firstPromptPreview / lastPromptPreview / cwd（null 字段跳过）。
+ * 改在已载条目上做小写子串过滤。haystack 与服务端检索面同源（R2-17 修正——此前
+ * 整条 cwd 入串，父目录关键词会命中服务端永不返回的行）：title /
+ * firstPromptPreview / lastPromptPreview / basename(cwd)（null 字段跳过）。
  * `normalizedQuery` 来自 normalizeSearchQuery；空 query 恒真（restore-on-clear）。
  */
 export function importEntryMatchesQuery(
@@ -97,9 +109,12 @@ export function importEntryMatchesQuery(
   normalizedQuery: string,
 ): boolean {
   if (normalizedQuery.length === 0) return true;
-  return [entry.title, entry.firstPromptPreview, entry.lastPromptPreview, entry.cwd].some(
-    (field) => typeof field === "string" && field.toLowerCase().includes(normalizedQuery),
-  );
+  return [
+    entry.title,
+    entry.firstPromptPreview,
+    entry.lastPromptPreview,
+    cwdBasenameOf(entry.cwd),
+  ].some((field) => typeof field === "string" && field.toLowerCase().includes(normalizedQuery));
 }
 
 /** 已载条目的本地过滤（保序）；空 query 原样返回同一数组语义的新数组。 */

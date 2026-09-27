@@ -222,6 +222,35 @@ describe("filterImportEntriesByQuery (旧 daemon 本地降级)", () => {
       "h3",
     ]);
   });
+
+  // R2-17 (FIX-A): the server truth (server/agent/agent-manager.ts
+  // matchesImportableSessionQuery) puts basename(cwd.replaceAll("\\","/")) in
+  // the haystack, not the full path. The degraded local filter must agree —
+  // otherwise a parent-directory keyword silently finds rows the daemon-side
+  // search would never return (and the comment claimed parity).
+  it("cwd enters as basename: parent dirs never match (server parity)", () => {
+    // 整条路径含 "packages"，basename "app" 不含 → 不命中（服务端口径）。
+    expect(
+      importEntryMatchesQuery(
+        entry({ cwd: "C:/work/paseo-go/packages/app", title: null }),
+        "packages",
+      ),
+    ).toBe(false);
+    expect(
+      importEntryMatchesQuery(entry({ cwd: "C:/work/paseo-go/packages/app", title: null }), "app"),
+    ).toBe(true);
+    // 反斜杠先归一再取尾段。
+    expect(
+      importEntryMatchesQuery(entry({ cwd: "C:\\work\\Deploy-Repo", title: null }), "deploy"),
+    ).toBe(true);
+    expect(
+      importEntryMatchesQuery(entry({ cwd: "C:\\work\\Deploy-Repo", title: null }), "work"),
+    ).toBe(false);
+    // 尾分隔符不产生空尾段（node basename 语义）。
+    expect(importEntryMatchesQuery(entry({ cwd: "C:/work/repo/", title: null }), "repo")).toBe(
+      true,
+    );
+  });
 });
 
 describe("deriveImportStatus search branches", () => {

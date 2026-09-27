@@ -16,16 +16,19 @@
 // would merge two genuinely different directories on a case-sensitive host). Records
 // without a usable cwd never merge — each is its own L2 keyed by workspace id.
 //
-// Badges mirror the 对话 tab's live lights: 活跃 = isWorkspaceAgentActive (running /
-// initializing / permission-waiting); finished/error attention is history. L2 counts
-// its merged records' agents; L1 aggregates its L2s. needs_input outranks running for
-// the badge colour (badgeTone).
+// Badges are the SAME SOURCE as the 对话 tab's live lights (R2-06): 活跃 = the
+// official bucket (deriveAgentStateBucket via deriveSidebarStateBucket) landing
+// on running/needs_input — initializing is bucket-done and never counted, a
+// count-only permission request always is; finished/error attention is history.
+// L2 counts its merged records' agents; L1 aggregates its L2s. needs_input
+// outranks running for the badge colour (badgeTone).
 //
 // No React, no stores — the screen feeds it hook output; the unit tests feed fixtures.
 import type { AgentLifecycleStatus } from "@getpaseo/protocol/agent-lifecycle";
 import type { HostRuntimeConnectionStatus } from "@/runtime/host-runtime";
 import type { ProjectSummary, WorkspaceSummary } from "@/utils/projects";
 import { normalizeWorkspacePath } from "@/utils/workspace-identity";
+import { deriveSidebarStateBucket } from "@/utils/sidebar-agent-state";
 
 export interface WorkspaceTreeHost {
   serverId: string;
@@ -44,6 +47,9 @@ export interface WorkspaceTreeAgent {
   attentionReason?: "finished" | "error" | "permission" | null;
   lastActivityAt: Date;
   attentionTimestamp?: Date | null;
+  /** AggregatedAgent carries it; the official needs_input edge is count>0 ∨
+   * attentionReason==="permission" — the count-only shape must flow through. */
+  pendingPermissionCount?: number;
 }
 
 /** L3: one session hanging under a worktree row. */
@@ -122,18 +128,31 @@ export interface BuildWorkspaceTreeInput<A extends WorkspaceTreeAgent = Workspac
   workspacePaths: ReadonlyMap<string, string>;
 }
 
-// 活跃 = the agent is doing something right now: running, still initializing, or
-// parked on a permission request. finished/error attention and idle/closed agents
-// are history, not activity — the badge mirrors the 对话 tab's live lights, not the
+// 活跃 = the official bucket's live set: running or needs_input. The bucket is
+// the exact function the 对话 tab's row light consumes (R2-06 — same source,
+// no hand-rolled enumeration): `initializing` files under done (the row light
+// is grey — nothing runs yet), permission requests count on
+// `pendingPermissionCount > 0` alone, and finished/error attention stays
+// history, not activity — the badge mirrors the live lights, never the
 // workspace's total session count.
-export function isWorkspaceAgentActive(agent: WorkspaceTreeAgent): boolean {
-  if (agent.status === "running" || agent.status === "initializing") return true;
-  return agent.requiresAttention === true && agent.attentionReason === "permission";
+function workspaceAgentBucket(agent: WorkspaceTreeAgent) {
+  return deriveSidebarStateBucket({
+    status: agent.status,
+    requiresAttention: agent.requiresAttention === true,
+    attentionReason: agent.attentionReason ?? null,
+    pendingPermissionCount: agent.pendingPermissionCount ?? 0,
+  });
 }
 
-/** Permission-waiting (needs_input): the orange-badge condition, 对话-tab semantics. */
+export function isWorkspaceAgentActive(agent: WorkspaceTreeAgent): boolean {
+  const bucket = workspaceAgentBucket(agent);
+  return bucket === "running" || bucket === "needs_input";
+}
+
+/** Permission-waiting (needs_input): the orange-badge condition — the official
+ * bucket edge itself (count-only requests included). */
 export function isWorkspaceAgentNeedsInput(agent: WorkspaceTreeAgent): boolean {
-  return agent.requiresAttention === true && agent.attentionReason === "permission";
+  return workspaceAgentBucket(agent) === "needs_input";
 }
 
 /** Host-domain last event (chatLastEventAtFromAgent twin over the derive input). */

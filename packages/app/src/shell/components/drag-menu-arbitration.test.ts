@@ -197,3 +197,45 @@ describe("drag-menu-arbitration: menu→tap selection", () => {
 function menuOpenState(): RowGestureState {
   return run([{ type: "press_in" }, armTick(), menuTick()]);
 }
+
+// R2-01 (FIX-A): once drag() has lifted the row, RNGH owns the stream natively —
+// the JS press_out never arrives (the hook's own header documents the takeover).
+// The list's drop handler therefore feeds a band-out `drag_end` release into the
+// machine; without it the phase stays `dragging` and the screen's scroll lock is
+// stranded forever. dragging is the ONLY phase that consumes it — a stray drop
+// must never kill a live press/arm/menu gesture.
+describe("drag-menu-arbitration: R2-01 out-of-band drag_end", () => {
+  it("drag_end releases the dragging touch to idle, keeping the press swallow", () => {
+    const dragging = run([{ type: "press_in" }, armTick(), move(9)]);
+    expect(dragging.phase).toBe("dragging");
+    const step = stepRowGesture(dragging, { type: "drag_end" });
+    expect(step.state).toEqual({ phase: "idle", didLongPress: true });
+    expect(step.effects).toEqual([]);
+  });
+
+  it("drag_end is inert outside dragging (pressing/armed/menu/list_owns/idle)", () => {
+    const states = [
+      IDLE_ROW_GESTURE_STATE,
+      run([{ type: "press_in" }]),
+      run([{ type: "press_in" }, armTick()]),
+      menuOpenState(),
+      run([{ type: "press_in" }, move(1, 12)]), // list_owns
+    ];
+    for (const state of states) {
+      const step = stepRowGesture(state, { type: "drag_end" });
+      expect(step.state).toBe(state);
+      expect(step.effects).toEqual([]);
+    }
+  });
+
+  it("after the drag_end→idle cycle the next touch is a fresh press", () => {
+    const state = run([
+      { type: "press_in" },
+      armTick(),
+      move(9),
+      { type: "drag_end" },
+      { type: "press_in" },
+    ]);
+    expect(state).toEqual({ phase: "pressing", didLongPress: false });
+  });
+});

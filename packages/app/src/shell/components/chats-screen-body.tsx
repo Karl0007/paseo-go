@@ -69,6 +69,7 @@ import {
   type ShellChatAgent,
 } from "@/shell/components/chat-list-row";
 import { ChatSectionHeader } from "@/shell/components/chat-section-header";
+import { createDragLockHandoff } from "@/shell/components/use-shell-row-drag-menu";
 import { ChatsHeader, type ChatListFilter } from "@/shell/components/chats-header";
 import { SHELL_I18N_NAMESPACE } from "@/shell/i18n";
 import {
@@ -408,22 +409,38 @@ export function ChatsScreenBody({ selectedAgentKey = null }: ShellScreenBodyProp
 
   // C20: the row the arbitration hook lifted this gesture — recorded in the same
   // frame as drag(), consumed when the drop lands.
+  //
+  // R2-01: that same frame hands back the row's scroll-lock release. Once the
+  // native drag layer takes the touch over, the JS press_out never arrives, so
+  // the drop handler is the ONLY guaranteed end of the gesture — without this
+  // the list stays frozen (scrollEnabled=false) for the rest of the session.
+  const dragLockHandoff = useRef(createDragLockHandoff()).current;
   const draggedKeyRef = useRef<string | null>(null);
-  const handleRowDragStart = useCallback((key: string) => {
-    draggedKeyRef.current = key;
-  }, []);
+  const handleRowDragStart = useCallback(
+    (key: string, releaseGestureLock: () => void) => {
+      draggedKeyRef.current = key;
+      dragLockHandoff.record(releaseGestureLock);
+    },
+    [dragLockHandoff],
+  );
 
   // C20 device finding #2: the native ScrollView steals a vertical drag at
   // ~12-20px, before the movement-based drag() can lift the row (the pre-C20
   // C3 recipe loses the same race on the current build). While a row gesture
   // is armed (180ms stationary — a real scroll never pauses first), the screen
-  // freezes list scrolling; the hook releases the lock with the touch stream.
+  // freezes list scrolling. The hook releases the lock with the JS touch
+  // stream — and R2-01: handleDragEnd below releases it out-of-band when the
+  // native drag layer took the stream (no press_out will ever arrive).
   const [gestureLock, setGestureLock] = useState(false);
 
   // The library hands back the whole list reordered; only the pinned rows' relative
   // order is its opinion we keep — headers and unpinned rows are re-derived anyway.
   const handleDragEnd = useCallback(
     (nextItems: ChatListItem<ShellChatAgent>[]) => {
+      // R2-01: release the scroll lock FIRST — above the search-mode early
+      // return, so no branch can strand the list unlocked-but-scroll-off. The
+      // handoff is consume-once, so a re-fired drop or a drag-inert end is inert.
+      dragLockHandoff.release();
       // C9: while a query narrows the list, handleDragEnd only sees the visible
       // subset — persisting it would drop the hidden pins. Drag is also disabled
       // in renderItem, so this is the belt to that braces.
@@ -448,7 +465,7 @@ export function ChatsScreenBody({ selectedAgentKey = null }: ShellScreenBodyProp
       // new relative order.
       actions.reorderPinned(visibleRowKeys.filter((key) => pinnedSet.has(key)));
     },
-    [actions, pinnedSet, pinnedIds, normalizedQuery, toast, t],
+    [actions, dragLockHandoff, pinnedSet, pinnedIds, normalizedQuery, toast, t],
   );
 
   const handleRetryHost = useCallback(

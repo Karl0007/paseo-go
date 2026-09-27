@@ -130,8 +130,10 @@ interface ChatListRowProps {
   /** DraggableFlatList's activator for this cell; only used when draggable. */
   drag?: () => void;
   /** C20: fires in the same frame as drag() with the row's key; the screen
-   * records it there so its drop handler knows what moved. */
-  onDragStart?: (key: string) => void;
+   * records it there so its drop handler knows what moved. R2-01: the second
+   * argument is this touch's out-of-band scroll-lock release — the drop
+   * handler must run it, because after the native takeover no press_out will. */
+  onDragStart?: (key: string, releaseGestureLock: () => void) => void;
   /** C20: row gesture armed/released — the screen freezes list scrolling
    * while a drag-vs-menu decision is live (native ScrollView steal guard). */
   onGestureLockChange?: (locked: boolean) => void;
@@ -192,7 +194,7 @@ function ChatRowInner({
   onOpen: (agent: ShellChatAgent) => void;
   draggable: boolean;
   drag: () => void;
-  onDragStart?: (key: string) => void;
+  onDragStart?: (key: string, releaseGestureLock: () => void) => void;
   onGestureLockChange?: (locked: boolean) => void;
   isActive: boolean;
   selected: boolean;
@@ -207,9 +209,12 @@ function ChatRowInner({
 
   // Stable per row: the screen's recorder stays referentially stable while the
   // key is captured here (DraggableFlatList keeps cell props identity-tight).
-  const handleDragStart = useCallback(() => {
-    onDragStart?.(agent.key);
-  }, [agent.key, onDragStart]);
+  const handleDragStart = useCallback(
+    (releaseGestureLock: () => void) => {
+      onDragStart?.(agent.key, releaseGestureLock);
+    },
+    [agent.key, onDragStart],
+  );
   const interaction = useShellRowDragMenu({
     drag,
     menuController: menu,

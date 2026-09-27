@@ -123,6 +123,71 @@ describe("useImportList query pass-through", () => {
     ]);
   });
 
+  // R2-05 (FIX-A): the import tail (`runImport` → `void load()`) calls the
+  // closure captured at press time. Same host, query edited mid-import: the
+  // serverId-only guard passes, the closure's `++requestSeq` grabs the newest
+  // slot, and the old-query response silently replaces the new-query list.
+  // The guard must compare the FULL request identity (serverId+client+query+
+  // limit) and reject before even fetching.
+  it("a stale-query tail closure cannot overwrite the newest query's list", async () => {
+    const calls: Array<{ limit: number; query?: string }> = [];
+    const fetchA = vi.fn((input: { limit: number; query?: string }) => {
+      calls.push(input);
+      return Promise.resolve({ entries: input.query === "new" ? [ENTRY_B] : [ENTRY_A] });
+    });
+    const clientA = { fetchRecentProviderSessions: fetchA } as unknown as ImportListClient;
+    const { result, rerender } = renderHook(({ query }) => useImportList(60, "A", clientA, query), {
+      initialProps: { query: "old" },
+    });
+    // The closure the import tail will call when the import finishes.
+    const staleLoad = result.current.load;
+    await act(async () => {
+      await Promise.resolve();
+    });
+    // User edits the search while the import runs: the fresh "new" list commits.
+    rerender({ query: "new" });
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    expect(result.current.listState.entries).toEqual([ENTRY_B]);
+    // Import finishes; the tail runs the press-time closure.
+    await act(async () => {
+      await staleLoad();
+    });
+    expect(result.current.listState.entries).toEqual([ENTRY_B]);
+    expect(result.current.listState.status).toBe("ready");
+    // Rejected at the identity guard: the stale closure never re-fetched.
+    expect(calls).toEqual([
+      { limit: 60, query: "old" },
+      { limit: 60, query: "new" },
+    ]);
+  });
+
+  it("a stale-limit tail closure cannot re-fetch either (identity covers limit)", async () => {
+    const fetchA = vi.fn(async () => ({ entries: [ENTRY_A] }));
+    const clientA = { fetchRecentProviderSessions: fetchA } as unknown as ImportListClient;
+    const { result, rerender } = renderHook(
+      ({ limit }: { limit: number }) => useImportList(limit, "A", clientA, ""),
+      { initialProps: { limit: 60 } },
+    );
+    const staleLoad = result.current.load;
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    rerender({ limit: 30 });
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    await act(async () => {
+      await staleLoad();
+    });
+    // Mount load + the limit-change reload only; the stale-60 tail never fetched.
+    expect(fetchA).toHaveBeenCalledTimes(2);
+  });
+
   it("query change on a stale host still cannot fetch (host guard kept)", async () => {
     const fetchA = vi.fn(async () => ({ entries: [ENTRY_A] }));
     const clientA = { fetchRecentProviderSessions: fetchA } as unknown as ImportListClient;

@@ -28,6 +28,14 @@
 // Movement-based drag start is also what react-native-draggable-flatlist
 // documents for custom activators ("call drag() from your own long-press/move
 // handler"), so deferring costs nothing.
+//
+// R2-01 (FIX-A): that same native takeover means the JS press_out never arrives
+// after drag(), so the scroll lock (onGestureLockChange) would stay true for
+// the rest of the session. The drag lifecycle gets its own band-out release:
+// `drag()` hands the screen a release function (the onDragStart seam, same
+// frame), the screen runs it from its onDragEnd handler, and the release drives
+// the machine's `drag_end` edge — the phase machine stays the single source of
+// truth; the screen never setState's the lock itself.
 import { useCallback, useEffect, useRef } from "react";
 import { Platform, StatusBar, type GestureResponderEvent } from "react-native";
 import * as Haptics from "expo-haptics";
@@ -55,8 +63,10 @@ export function useShellRowDragMenu(input: {
    * C20: fires exactly once per touch, in the same synchronous frame as
    * `drag()`. The list screen records the dragged row here so its drop handler
    * can tell 置顶组内换位 from 非置顶拖入置顶.
+   * R2-01: the argument is this touch's out-of-band lock release — the drop
+   * handler must run it (once) when the drag ends, because no press_out will.
    */
-  onDragStart?: () => void;
+  onDragStart?: (releaseGestureLock: () => void) => void;
   /**
    * C20 device finding #2 (MatePad): the native ScrollView steals a vertical
    * drag at ~12-20px (RNGH pan CANCELLED before the hook's movement-based
@@ -80,6 +90,7 @@ export function useShellRowDragMenu(input: {
   const touchCurrentRef = useRef<{ x: number; y: number } | null>(null);
   const armTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const menuTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const releaseRef = useRef<() => void>(() => {});
 
   const clearTimers = useCallback(() => {
     if (armTimerRef.current) {
@@ -131,7 +142,8 @@ export function useShellRowDragMenu(input: {
         clearTimers();
       }
       // Scroll lock: armed → locked (drag or window, the decision is pending),
-      // released the moment the touch stream ends (idle) or the list took it.
+      // released when the touch stream ends (idle/list_owns) or — R2-01 — when
+      // the list's drop handler runs the machine's drag_end edge.
       const locked = phase === "armed" || phase === "menu_open" || phase === "dragging";
       if (locked !== gestureLockedRef.current) {
         gestureLockedRef.current = locked;
@@ -155,7 +167,7 @@ export function useShellRowDragMenu(input: {
             break;
           case "start_drag":
             drag();
-            onDragStart?.();
+            onDragStart?.(releaseRef.current);
             break;
         }
       }
@@ -233,5 +245,41 @@ export function useShellRowDragMenu(input: {
     }
   }, [commit, menuController]);
 
+  // R2-01: the out-of-band release handed to the screen at drag() time. It
+  // only ever does what press_out would have done — run the machine (drag_end
+  // is inert outside `dragging`, so double calls and stray drops are no-ops)
+  // and forget the touch points.
+  const releaseGestureLock = useCallback(() => {
+    commit(stepRowGesture(gestureRef.current, { type: "drag_end" }));
+    touchStartRef.current = null;
+    touchCurrentRef.current = null;
+  }, [commit]);
+  releaseRef.current = releaseGestureLock;
+
   return { didLongPressRef, handlePressIn, handleTouchMove, handlePressOut };
+}
+
+/**
+ * R2-01: the screen-side half of the out-of-band release. `handleRowDragStart`
+ * records the dragged row's release (handed up in the same frame as drag()),
+ * `handleDragEnd` runs it FIRST — before the search-mode early return — and
+ * forgets it, so a re-fired drop or a drop without a recorded drag is inert.
+ * The screen owns no lock state of its own beyond this handoff: the machine +
+ * the hook's lock mirror stay the single truth.
+ */
+export function createDragLockHandoff(): {
+  record(release: () => void): void;
+  release(): void;
+} {
+  let current: (() => void) | null = null;
+  return {
+    record(release) {
+      current = release;
+    },
+    release() {
+      const fn = current;
+      current = null;
+      fn?.();
+    },
+  };
 }

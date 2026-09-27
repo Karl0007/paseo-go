@@ -103,10 +103,14 @@ function section(sections: ShellHostSection[], serverId: string): ShellHostSecti
 }
 
 describe("isWorkspaceAgentActive", () => {
-  it("counts running/initializing as active", () => {
+  it("active is the official bucket's live set: running/needs_input — initializing is done", () => {
+    // R2-06 (FIX-A): the badge must be the same source as the 对话-tab light
+    // (deriveAgentStateBucket). The official bucket files `initializing` under
+    // done (nothing is running yet); counting it here made the workspace badge
+    // light up rows whose own status dot is grey.
     expect(isWorkspaceAgentActive(agent({ serverId: "h", id: "a", status: "running" }))).toBe(true);
     expect(isWorkspaceAgentActive(agent({ serverId: "h", id: "a", status: "initializing" }))).toBe(
-      true,
+      false,
     );
     expect(isWorkspaceAgentActive(agent({ serverId: "h", id: "a", status: "idle" }))).toBe(false);
     expect(isWorkspaceAgentActive(agent({ serverId: "h", id: "a", status: "closed" }))).toBe(false);
@@ -137,6 +141,25 @@ describe("isWorkspaceAgentActive", () => {
         ),
       ).toBe(false);
     }
+  });
+
+  // R2-06: the official needs_input edge is `pendingPermissionCount > 0 ∨
+  // attentionReason === "permission"` — the count-only shape (permission
+  // pends, no attention flag yet) was missed by the hand-rolled enumeration.
+  it("count-only permission requests are active AND needs_input", () => {
+    const counted = agent({ serverId: "h", id: "a", status: "idle", pendingPermissionCount: 2 });
+    expect(isWorkspaceAgentNeedsInput(counted)).toBe(true);
+    expect(isWorkspaceAgentActive(counted)).toBe(true);
+    // Belt: the attention-flag shape keeps working (both edges, one bucket).
+    const flagged = agent({
+      serverId: "h",
+      id: "b",
+      status: "idle",
+      requiresAttention: true,
+      attentionReason: "permission",
+    });
+    expect(isWorkspaceAgentNeedsInput(flagged)).toBe(true);
+    expect(isWorkspaceAgentActive(flagged)).toBe(true);
   });
 });
 
@@ -499,6 +522,21 @@ describe("buildWorkspaceTree — 角标聚合", () => {
     expect(l1.worktrees[0].sessions).toHaveLength(2);
     expect(l1.activeCount).toBe(0);
     expect(badgeTone(l1.activeCount, l1.needsInputCount)).toBeNull();
+  });
+
+  it("R2-06 buckets: initializing sinks out of the badge, count-only permission enters as needs", () => {
+    const sections = build({
+      projects: [project("v1", [hostEntry("host-a", "paseo", [workspace("ws-1", "a")])])],
+      agents: [
+        agent({ serverId: "host-a", id: "init1", workspaceId: "ws-1", status: "initializing" }),
+        agent({ serverId: "host-a", id: "cnt1", workspaceId: "ws-1", pendingPermissionCount: 1 }),
+      ],
+      workspacePaths: new Map([["host-a:ws-1", "/repo/x"]]),
+    });
+    const l1 = section(sections, "host-a").projects[0];
+    expect(l1.activeCount).toBe(1); // only the count-only needs_input row
+    expect(l1.needsInputCount).toBe(1);
+    expect(badgeTone(l1.activeCount, l1.needsInputCount)).toBe("needs");
   });
 });
 

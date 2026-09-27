@@ -10,7 +10,10 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { GestureResponderEvent } from "react-native";
 import * as Haptics from "expo-haptics";
 import type { MenuContextValue } from "@/components/ui/menu";
-import { useShellRowDragMenu } from "@/shell/components/use-shell-row-drag-menu";
+import {
+  createDragLockHandoff,
+  useShellRowDragMenu,
+} from "@/shell/components/use-shell-row-drag-menu";
 
 vi.mock("expo-haptics", () => ({
   selectionAsync: vi.fn(() => Promise.resolve()),
@@ -259,5 +262,100 @@ describe("useShellRowDragMenu scroll-lock guard (C20 device finding #2)", () => 
     expect(onGestureLockChange).toHaveBeenCalledWith(true);
     unmount();
     expect(onGestureLockChange).toHaveBeenLastCalledWith(false);
+  });
+});
+
+// R2-01 (FIX-A): after drag() the native RNGH stream owns the touch — no JS
+// press_out ever arrives, so the scroll lock must be releasable out-of-band by
+// the list's drop handler. The hook hands the screen a release in the SAME
+// frame as drag() (the onDragStart seam), the release runs the machine's
+// drag_end edge (single source of truth — the screen never setState's the lock
+// itself), and the screen-side handoff consumes it exactly once per drop.
+describe("useShellRowDragMenu R2-01 out-of-band drag release", () => {
+  function releaseSetup() {
+    const onGestureLockChange = vi.fn();
+    const menuController = {
+      setOpen: vi.fn(),
+      setAnchorRect: vi.fn(),
+    } as unknown as MenuContextValue;
+    let release: (() => void) | null = null;
+    const { result } = renderHook(() =>
+      useShellRowDragMenu({
+        drag: vi.fn(),
+        menuController,
+        onDragStart: (fn) => {
+          release = fn;
+        },
+        onGestureLockChange,
+      }),
+    );
+    return { result, onGestureLockChange, getRelease: () => release };
+  }
+
+  it("drag() hands the screen a release that unlocks from dragging WITHOUT press_out", () => {
+    const { result, onGestureLockChange, getRelease } = releaseSetup();
+    pressInAt(result);
+    advance(180); // armed → lock
+    moveBy(result, 10); // relay/armed move → dragging; the JS stream ends here
+    expect(onGestureLockChange).toHaveBeenLastCalledWith(true);
+    const release = getRelease();
+    expect(release).toBeTypeOf("function");
+    act(() => release!()); // the list's onDragEnd
+    expect(onGestureLockChange).toHaveBeenLastCalledWith(false);
+    expect(onGestureLockChange).toHaveBeenCalledTimes(2);
+    // Idempotent: a library that ever calls onDragEnd twice must not double-fire.
+    act(() => release!());
+    expect(onGestureLockChange).toHaveBeenCalledTimes(2);
+  });
+
+  it("after the release the hook keeps one truth: a later press_out is inert and the next touch re-locks", () => {
+    const { result, onGestureLockChange, getRelease } = releaseSetup();
+    pressInAt(result);
+    advance(180);
+    moveBy(result, 10); // dragging, locked
+    act(() => getRelease()!());
+    expect(onGestureLockChange).toHaveBeenCalledTimes(2); // true, false
+    pressOut(result); // a late/forced press_out must not re-toggle
+    expect(onGestureLockChange).toHaveBeenCalledTimes(2);
+    // The stale-lock mirror bug: a fresh touch must reach `armed` and lock again.
+    pressInAt(result);
+    advance(180);
+    expect(onGestureLockChange).toHaveBeenCalledTimes(3);
+    expect(onGestureLockChange).toHaveBeenLastCalledWith(true);
+  });
+
+  it("a release from a non-dragging touch is inert (no stray drop kills a live lock)", () => {
+    const { result, onGestureLockChange, getRelease } = releaseSetup();
+    pressInAt(result);
+    advance(180); // armed → locked, but no drag() → no release handed out
+    expect(getRelease()).toBeNull();
+    expect(onGestureLockChange).toHaveBeenCalledTimes(1);
+  });
+});
+
+// The screen-side seam of the same fix: handleRowDragStart records the row's
+// release, handleDragEnd runs it FIRST (before the search-mode early return)
+// and forgets it. The handoff owns that record/consume-once/exactly-once pair.
+describe("createDragLockHandoff (screen-side drop seam)", () => {
+  it("releases the recorded lock exactly once and forgets it", () => {
+    const handoff = createDragLockHandoff();
+    handoff.release(); // drop without a recorded drag (drag-inert belt): inert
+    const release = vi.fn();
+    handoff.record(release);
+    handoff.release();
+    expect(release).toHaveBeenCalledTimes(1);
+    handoff.release();
+    expect(release).toHaveBeenCalledTimes(1);
+  });
+
+  it("a newer drag replaces the release before the old one ever runs", () => {
+    const handoff = createDragLockHandoff();
+    const first = vi.fn();
+    const second = vi.fn();
+    handoff.record(first);
+    handoff.record(second);
+    handoff.release();
+    expect(first).not.toHaveBeenCalled();
+    expect(second).toHaveBeenCalledTimes(1);
   });
 });
