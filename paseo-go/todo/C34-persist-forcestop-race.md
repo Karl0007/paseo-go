@@ -52,3 +52,14 @@ C19 真机轮观察（known_issues#2 移交）：4:02 收藏的 AGENTS.md 与 4:
 ## 脚本唯一出处（FIX-C R2-26 证据卫生，2026-09-27）
 
 本卡旧复现草案 `todo/C34-repro-draft.sh` 已删除：它的 `dump()` 不带 `--compressed`（=上面坑①，RN 忙帧挂死 ≥55s），`tap_id` 也不取最大面积 bounds（=坑③，tablet keep-alive 复制节点）——按它跑必重踩三个已实锤坑。**唯一可用出处 = `evidence/C34/`**（`lib.sh` T1-T5 全内建 + `fav_sample.sh`/`cmd_sample.sh`/`sqlq.js`/`cleanup.sh`，见「矩阵状态」节）。
+
+## CLOSE-DEV1 设备窗口（2026-09-27 深夜）：矩阵仍未跑（0/18），c1 维持「未裁决」
+
+- 窗口被两件事消耗：① **metro 僵尸化**——旧 metro 进程 WS 12.4GB（8GB 堆帽下 GC 死亡螺旋，KI#7 形态），`/status` 200 但 `/` 与 bundle 请求全挂、设备端三次「Error loading app timeout」；按 launch spec 重启（大写盘符 cwd + `NODE_OPTIONS=--max-old-space-size=8192`，不带 `--clear`），curl 预热 bundle（52.9MB/166s）后设备 12s 进首页。② 复验优先级（R2-01/05/10 + C35）先行，剩余预算不足以开 75 分钟矩阵。
+- **lib.sh 本轮修掉四个基建坑（下一窗口直接受益，全部实锤）**：
+  1. `pick_bounds` 的 `< <(...)` 进程替换在**后台任务里挂死**（dump 成功、pick 永不返回；前台正常）→ 改临时文件喂 while。
+  2. `disk_truth` 被 fav/cmd_sample 调用但**从未定义**（矩阵样本会丢磁盘真相导出）→ 补 `run-as cat databases/RKStorage` 导出到 `/tmp/c34/RKStorage-$tag.db`（node:sqlite 可读，实测 802KB 导出+查询全绿）。
+  3. `cold_start` 点 launcher URL 行点的是**文本节点中心**（被行吞掉，app 静默留 launcher=坑②的加重形态）→ 改点行中心 x=800；修后冷启 53s 进首页实录。
+  4. 脚本日志经 `{ }>file` 块重定向在进程被杀时**整块丢失**（stdio 缓冲）→ 改逐行 `>>` 追加。
+- 判读口径、探针文件（`C:/tmp/c5-proj/C34-fav-{A1..A3,B1..B3}-1790486644.md`）、cmd 探针命名（`C34cmd<tag>X`）不变；A/B 全过=c1 转「竞态未证实」。
+- 另：本窗口 `adb logcat -c`（不带 `-b`）在华为机上会挂死 ≥90s，用 `timeout 8 adb logcat -c -b main -b crash`。

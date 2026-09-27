@@ -43,5 +43,12 @@
 
 1. 复现链转回归测试：**在案**（f7ed26b1：history-mapper.test.ts 两单测 + daemon e2e `omp-import-refresh-fork-replay.e2e.test.ts`，均证修复前失败=C24 症状逐字复现）
 2. 三 provider 矩阵实测记录：**在案**（`evidence/C35/provider-matrix.md`；codex 行为 INFERENCE 标注，理由见文内）
-3. 真机 app 刷新→时间线增长实拍：**移交 Main 设备窗口**（v0.2.0 后统一拍）；daemon 侧等价链已由真机探针闭环（`probe-ws-roundtrip.md`）
+3. 真机 app 刷新→时间线增长实拍：**在案**（CLOSE-DEV1 设备窗口闭环，见下「真机③闭环」节；此前 daemon 侧等价链由真机探针闭环 `probe-ws-roundtrip.md`）
 4. 恰一次 commit + 报告 JSON：修复轮=f7ed26b1（报告已交）；本证据补齐轮=独立 docs commit
+
+## 真机③闭环（CLOSE-DEV1 设备窗口，2026-09-27 22:22，AHPEBB1826005071 + metro HEAD bundle）
+
+- 链：omp 真会话（`C:\tmp\close-dev1-probe`，`omp --no-tools -p` 生成）→ app 导入（CLI import 同 RPC，带 C22 章）→ 首次打开走分叉确认（顺带完成 R2-10 复验，见 CLOSE-DEV1 报告）→ PC 端 `omp -r <源jsonl> --no-tools -p` 追加两轮（「say ok」+「C35 ui-refresh marker」，文件 2024→4812→6115B）→ app 胶囊 ⋯「刷新」。
+- 实拍：`evidence/CLOSE-DEV1/c35-01-before-refresh.png`（时间线尾=「R2-10 dialog-window activity」，marker 命中 0）→ `c35-02-after-refresh.png`（时间线长出「say ok」+「Reply with exactly: C35 ui-refresh marker」→「C35 ui-refresh marker」，dump 命中 2）；刷新后行不掉目录（agent 仍在列表）。
+- 断言脚本+日志：`C:/tmp/c34/r35.sh` / `log-r35.txt`（marker before=0 / after=2）。
+- 验收③状态改：**在案**（v0.1.0 遗留欠账清偿；daemon 等价链 + 真机 UI 半环双绿）。
