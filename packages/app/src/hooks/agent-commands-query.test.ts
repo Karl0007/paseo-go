@@ -53,8 +53,10 @@ describe("agent command query keys", () => {
   });
 
   it("normalizes cwd values so equivalent workspace paths share one draft scope", () => {
+    // R2-09: the drive-letter locator folds too, so both separator spellings of
+    // one checkout collapse onto a single query scope.
     expect(normalizeAgentCommandsCwd("C:\\Users\\Ezekiel Bulver\\project")).toBe(
-      "C:/Users/Ezekiel Bulver/project",
+      "c:/Users/Ezekiel Bulver/project",
     );
     expect(
       draftAgentCommandsQueryKey({

@@ -33,13 +33,13 @@
 // screen in-window: touches outside the bar pass through to the session, and
 // system back/gesture pop it untouched.
 import { useCallback, useMemo } from "react";
-import { Pressable, Text, View } from "react-native";
+import { Platform, Pressable, Text, useWindowDimensions, View } from "react-native";
 import { GestureDetector } from "react-native-gesture-handler";
 import { router, usePathname, useRootNavigation } from "expo-router";
 import { Portal } from "@gorhom/portal";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useTranslation } from "react-i18next";
-import { StyleSheet, withUnistyles } from "react-native-unistyles";
+import { StyleSheet, UnistylesRuntime, withUnistyles } from "react-native-unistyles";
 import {
   ChevronLeft,
   Files,
@@ -69,6 +69,8 @@ import {
   HEADER_INNER_HEIGHT,
   HEADER_INNER_HEIGHT_MOBILE,
   HEADER_TOP_PADDING_MOBILE,
+  supportsDesktopPaneSplits,
+  WORKSPACE_SECONDARY_HEADER_HEIGHT,
 } from "@/constants/layout";
 import { useBlockMobilePanelOpenGestures } from "@/mobile-panels/provider";
 import {
@@ -95,6 +97,7 @@ import {
 import { SessionHeaderScriptsPage } from "@/shell/session-header/scripts-submenu";
 import { SHELL_EDGE_BAND_WIDTH_DP } from "@/shell/session-header/edge-swipe";
 import { useShellEdgeBackGesture } from "@/shell/session-header/use-shell-edge-back-gesture";
+import { tabRowCoverHeightDp } from "@/shell/session-header/tab-row-cover";
 
 /** Stable portal slot: one header capsule app-wide. */
 const SESSION_HEADER_PORTAL_NAME = "paseoGo-session-header";
@@ -294,13 +297,43 @@ function CapsuleInner({
   // C24: the imported stamp (C22) is what gates the 刷新 row.
   const imported = isImportedProviderSession(agent);
 
+  // R2-08③: the bar doubles as the tab-row cover. The official tab row — compact's
+  // MobileWorkspaceTabSwitcher / the native-wide fallback row, the shell's ONLY
+  // remaining 关 tab→归档 entry (close-tab-policy archive-on-close, C24 真机误触) —
+  // sits directly under the header and is painted out by the same opaque surface0
+  // span. Heights = official token maths, machine-pinned by tab-row-cover.test.ts;
+  // Live theme tokens (pane.tsx's UnistylesRuntime.getTheme() precedent — the
+  // useUnistyles hook import is burn-down-banned): the row styles resolve the
+  // SAME tokens, so the cover tracks appearance-font-size updates.
+  const theme = UnistylesRuntime.getTheme();
+  const { fontScale } = useWindowDimensions();
+  const tabRowCover = tabRowCoverHeightDp({
+    isCompact,
+    triggerPaddingDp: theme.spacing[2],
+    triggerFontSizeDp: theme.fontSize.base,
+    triggerIconDp: theme.iconSize.sm,
+    borderWidthDp: theme.borderWidth[1],
+    secondaryHeaderHeightDp: WORKSPACE_SECONDARY_HEADER_HEIGHT,
+    // RN applies Android's fontScale to text height; iOS' getFontScale() is the
+    // DISPLAY scale (2–3×) and RN iOS text does not scale — using it there would
+    // over-cover the session top by tens of dp.
+    fontScale: Platform.OS === "android" ? fontScale : 1,
+    desktopSplits: supportsDesktopPaneSplits(),
+  });
   // The bar IS the header: top-anchored full width, official height + status
-  // bar inset, opaque surface0 with the shared bottom-border token.
+  // bar inset + the tab-row cover, opaque surface0 with the shared bottom-border
+  // token.
   const barStyle = useMemo(() => {
     const topPad = isCompact ? HEADER_TOP_PADDING_MOBILE : 0;
     const inner = isCompact ? HEADER_INNER_HEIGHT_MOBILE : HEADER_INNER_HEIGHT;
-    return [styles.bar, { height: insets.top + topPad + inner, paddingTop: insets.top + topPad }];
-  }, [insets.top, isCompact]);
+    return [
+      styles.bar,
+      {
+        height: insets.top + topPad + inner + tabRowCover,
+        paddingTop: insets.top + topPad,
+      },
+    ];
+  }, [insets.top, isCompact, tabRowCover]);
 
   const goBack = useCallback(() => {
     // Same verb as the system back and the edge swipe: pops the official screen

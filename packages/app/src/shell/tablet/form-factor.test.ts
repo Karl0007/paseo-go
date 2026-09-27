@@ -53,6 +53,25 @@ describe("Unistyles breakpoint mirror (R2-11 source-pair gate)", () => {
     expect(unistylesBreakpoint("lg")).toBe(992); // guard the regex itself
     expect(TABLET_LARGE_MIN_WIDTH_DP).toBe(unistylesBreakpoint("lg"));
   });
+
+  // R2-04 (2a) extended the mirror to the OFFICIAL face: constants/layout.ts
+  // re-implements the compact verdict on useWindowDimensions with the md floor
+  // INLINED (official files cannot import this shell module). If upstream moves
+  // md — or the fork edits the literal — the official hook and the split would
+  // disagree mid-frame again, so the literal is pinned to the table by source
+  // parse (importing layout.ts here would boot react-native's hook for nothing;
+  // compact-form-factor.test.tsx owns the behavioural side).
+  it("pins the official useIsCompactFormFactor threshold to the same md floor", () => {
+    const src = readFileSync(
+      fileURLToPath(new URL("../../constants/layout.ts", import.meta.url)),
+      "utf8",
+    );
+    const value = Number(src.match(/COMPACT_FORM_FACTOR_MAX_WIDTH\s*=\s*(\d+)/u)?.[1]);
+    expect(value).toBe(unistylesBreakpoint("md"));
+    expect(value).toBe(TABLET_SPLIT_MIN_WIDTH_DP);
+    // The hook must keep reading the rotation-correct subscription (C31-F1).
+    expect(src).toContain("useWindowDimensions()");
+  });
 });
 
 describe("isCompactWindowWidth (window → compact/split threshold)", () => {

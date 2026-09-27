@@ -53,11 +53,13 @@ describe("providers snapshot query scope", () => {
   });
 
   it("uses one query scope for Windows cwd values with either separator", () => {
+    // R2-09: the drive locator also folds, so `C:\x` and `c:/x` land on ONE
+    // cache scope (the daemon reports one checkout under both shapes).
     expect(normalizeProvidersSnapshotCwd("C:\\Users\\Ezekiel Bulver\\project")).toBe(
-      "C:/Users/Ezekiel Bulver/project",
+      "c:/Users/Ezekiel Bulver/project",
     );
     expect(providersSnapshotQueryKey("server-1", "C:\\Users\\Ezekiel Bulver\\project")).toEqual(
-      providersSnapshotQueryKey("server-1", "C:/Users/Ezekiel Bulver/project"),
+      providersSnapshotQueryKey("server-1", "c:/Users/Ezekiel Bulver/project"),
     );
   });
 });

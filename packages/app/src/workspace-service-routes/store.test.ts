@@ -32,17 +32,21 @@ describe("workspace service route preferences", () => {
     expect(restored.getState().byServerId).toEqual({ desktop: "direct", devbox: "public" });
   });
 
-  it("clears the complete persisted value when one route kind is invalid", async () => {
+  it("keeps an invalid persisted value untouched and hydrates nothing", async () => {
+    // R2-13: a rejected envelope is never evicted — the store boots from its
+    // initial state (falsy read = nothing hydrated) while the bytes stay for
+    // diagnosis until the first accepted write replaces them.
+    const tampered = JSON.stringify({
+      state: { byServerId: { desktop: "direct", broken: "unknown" } },
+      version: 1,
+    });
     const storage = createMemoryStorage({
-      "workspace-service-route-preferences": JSON.stringify({
-        state: { byServerId: { desktop: "direct", broken: "unknown" } },
-        version: 1,
-      }),
+      "workspace-service-route-preferences": tampered,
     });
     const store = createWorkspaceServiceRoutePreferencesStore(storage);
     await store.persist.rehydrate();
 
     expect(store.getState().byServerId).toEqual({});
-    expect(storage.values.has("workspace-service-route-preferences")).toBe(false);
+    expect(storage.values.get("workspace-service-route-preferences")).toBe(tampered);
   });
 });

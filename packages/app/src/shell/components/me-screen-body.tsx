@@ -36,6 +36,7 @@ import { OFFICIAL } from "@/shell/routes";
 import { useShellHostStatuses } from "@/shell/runtime/use-shell-host-statuses";
 import { clearPaseoGoLocalData, resetShellStores } from "@/shell/stores/clear-local-data";
 import { usePaseoGoSettingsStore, type ShellTab } from "@/shell/stores/settings";
+import { usePaseoGoArchiveStore } from "@/shell/stores/archive";
 import { confirmDialog } from "@/utils/confirm-dialog";
 import { subscribeRailRetap } from "@/shell/tablet/rail-events";
 
@@ -224,9 +225,12 @@ export function MeScreenBody() {
   const { agents, isInitialLoad: agentsLoading } = useAggregatedAgents();
   const hostIds = useMemo(() => hosts.map((host) => host.serverId), [hosts]);
   const statuses = useShellHostStatuses(hostIds);
+  // R2-21: M 项目 = the 工作区 tree's L1 rows (buildShellOverview derives it from
+  // the same builder); R2-08①: 壳归档 agents leave 活跃.
+  const archivedIds = usePaseoGoArchiveStore((state) => state.archivedIds);
   const overview = useMemo(
-    () => buildShellOverview({ hosts, projects, agents }),
-    [hosts, projects, agents],
+    () => buildShellOverview({ hosts, projects, agents, archivedIds }),
+    [hosts, projects, agents, archivedIds],
   );
   const overviewLoading = projectsLoading || agentsLoading;
 

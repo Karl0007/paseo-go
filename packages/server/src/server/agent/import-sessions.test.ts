@@ -382,7 +382,12 @@ test("listImportableProviderSessions requests a bounded deep scan for search res
   ]);
 });
 
-test("listImportableProviderSessions includes a provider session after its Paseo agent is archived", async () => {
+test("listImportableProviderSessions keeps an archived import out of the list", async () => {
+  // R2-19 A-side (FIX-B2 ruling): an ARCHIVED imported session is still an
+  // imported session. The old skip-archivedAt read re-listed it as importable
+  // (double-import entry) and under-counted filteredAlreadyImportedCount. The
+  // revive path (importProviderSession unarchiving the same record) is unchanged
+  // and covered by the importProviderSession restore tests below.
   const cwd = "/tmp/project";
   const archivedSession = makeImportableSession({
     provider: "claude",
@@ -390,7 +395,7 @@ test("listImportableProviderSessions includes a provider session after its Paseo
     cwd,
     title: "Archived import",
     lastActivityAt: "2026-04-30T12:00:00.000Z",
-    firstPrompt: "import me again",
+    firstPrompt: "already imported once",
   });
 
   const result = await listImportableProviderSessions({
@@ -414,11 +419,14 @@ test("listImportableProviderSessions includes a provider session after its Paseo
     providerSnapshotManager: { getProviderLabel: () => "Claude" },
   });
 
-  expect(result.entries.map((entry) => entry.providerHandleId)).toEqual(["archived-session"]);
-  expect(result.filteredAlreadyImportedCount).toBe(0);
+  expect(result.entries).toEqual([]);
+  expect(result.filteredAlreadyImportedCount).toBe(1);
 });
 
-test("listImportableProviderSessions includes an archived provider session still loaded in memory", async () => {
+test("listImportableProviderSessions filters an archived provider session still loaded in memory", async () => {
+  // R2-19 A-side, runtime half: the agent object is live in the manager while its
+  // stored record carries archivedAt (archive of a loaded tab). Both the runtime
+  // loop and the storage loop must count it as imported.
   const cwd = "/tmp/project";
   const agentId = "00000000-0000-4000-8000-000000000633";
   const archivedSession = makeImportableSession({
@@ -427,7 +435,7 @@ test("listImportableProviderSessions includes an archived provider session still
     cwd,
     title: "Archived live import",
     lastActivityAt: "2026-04-30T12:00:00.000Z",
-    firstPrompt: "import the loaded session again",
+    firstPrompt: "already imported, still loaded",
   });
 
   const result = await listImportableProviderSessions({
@@ -459,8 +467,8 @@ test("listImportableProviderSessions includes an archived provider session still
     providerSnapshotManager: { getProviderLabel: () => "Claude" },
   });
 
-  expect(result.entries.map((entry) => entry.providerHandleId)).toEqual(["archived-live-session"]);
-  expect(result.filteredAlreadyImportedCount).toBe(0);
+  expect(result.entries).toEqual([]);
+  expect(result.filteredAlreadyImportedCount).toBe(1);
 });
 
 test("listImportableProviderSessions filters out metadata generation sessions", async () => {

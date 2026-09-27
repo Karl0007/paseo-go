@@ -12,6 +12,7 @@ import { useHostRegistryStatus, useHosts } from "@/runtime/host-runtime";
 import { deriveSidebarStateBucket } from "@/utils/sidebar-agent-state";
 import { finiteTimeMs } from "@/shell/chats/derive";
 import { usePaseoGoPinsStore } from "@/shell/stores/pins";
+import { usePaseoGoArchiveStore } from "@/shell/stores/archive";
 import { usePaseoGoSettingsStore } from "@/shell/stores/settings";
 import { SHELL_I18N_NAMESPACE } from "@/shell/i18n";
 import {
@@ -32,6 +33,7 @@ export function useShellNotifications(): void {
   const hosts = useHosts();
   const hostRegistryStatus = useHostRegistryStatus();
   const aliases = usePaseoGoPinsStore((state) => state.aliases);
+  const archivedIds = usePaseoGoArchiveStore((state) => state.archivedIds);
   const enabled = usePaseoGoSettingsStore((state) => state.notifications);
 
   useEffect(() => {
@@ -51,8 +53,13 @@ export function useShellNotifications(): void {
       .join(",");
     const rebaseline = !primed || hostSignature !== lastHostSignature;
     lastHostSignature = hostSignature;
+    // R2-08①: 壳归档 mutes the pipeline — the row is hidden in the 对话 tab, so
+    // an attention transition on it must not wake the user either. The key is
+    // the archive store's `${serverId}:${agentId}` row key; the server-side
+    // archivedAt flag in the same filter stays as the other half (host-archived).
+    const shellArchived = new Set(archivedIds);
     const snapshots: AttentionAgentSnapshot[] = agents
-      .filter((agent) => !agent.archivedAt)
+      .filter((agent) => !agent.archivedAt && !shellArchived.has(`${agent.serverId}:${agent.id}`))
       .map((agent) => ({
         key: `${agent.serverId}:${agent.id}`,
         serverId: agent.serverId,
@@ -94,5 +101,5 @@ export function useShellNotifications(): void {
         },
       });
     }
-  }, [agents, isLoading, hosts, hostRegistryStatus, aliases, enabled, t]);
+  }, [agents, isLoading, hosts, hostRegistryStatus, aliases, archivedIds, enabled, t]);
 }

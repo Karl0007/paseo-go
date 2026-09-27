@@ -19,13 +19,23 @@ export function createValidatedPersistStorage<State>(
       try {
         decoded = JSON.parse(raw);
       } catch {
-        await backingStorage.removeItem(name);
+        // R2-13: an unparseable envelope is NOT removed. Falsy here means "nothing
+        // persisted" to zustand's hydrate (it truthiness-checks the value), so the
+        // store boots from its initial state while the bytes stay for diagnosis —
+        // and the first accepted write replaces them. The old removeItem turned a
+        // one-off corruption into permanent, silent whole-store loss.
+        console.warn("[validatedPersistStorage] getItem: unparseable JSON; kept, not hydrated", {
+          name,
+        });
         return null;
       }
 
       const result = envelopeSchema.safeParse(decoded);
       if (!result.success) {
-        await backingStorage.removeItem(name);
+        console.warn("[validatedPersistStorage] getItem: rejected by schema; kept, not hydrated", {
+          name,
+          issues: result.error.issues.map((issue) => issue.path.join(".") + ": " + issue.code),
+        });
         return null;
       }
       return result.data;
@@ -33,17 +43,14 @@ export function createValidatedPersistStorage<State>(
     setItem: async (name, value) => {
       const result = envelopeSchema.safeParse(value);
       if (!result.success) {
-        // R2-13 (warn half only): this drop used to be silent, which hid
-        // R2-14's NaN-driven whole-store eviction. Log it; the removeItem
-        // behaviour itself is still R2-13's pending ruling — unchanged here.
-        console.warn(
-          "[validatedPersistStorage] setItem rejected by schema; dropped persisted copy",
-          {
-            name,
-            issues: result.error.issues.map((issue) => issue.path.join(".") + ": " + issue.code),
-          },
-        );
-        await backingStorage.removeItem(name);
+        // R2-13: a poisoned write is skipped, the previously accepted copy stays
+        // (removeItem here is what evicted whole stores when R2-14's NaN reached
+        // the schema — the panel-store schema tombstones are that damage). The
+        // live in-memory state is untouched either way; only this persist loses.
+        console.warn("[validatedPersistStorage] setItem rejected by schema; previous copy kept", {
+          name,
+          issues: result.error.issues.map((issue) => issue.path.join(".") + ": " + issue.code),
+        });
         return;
       }
       await backingStorage.setItem(name, JSON.stringify(result.data));

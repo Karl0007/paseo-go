@@ -11,10 +11,13 @@
 // has no updatedAt field, so agent activity is the honest proxy for 「最近更新」.
 // L3 hangs the sessions of EVERY merged record (workspaceId set membership).
 //
-// Identity comparison is deliberately conservative (the preview-root.ts posture):
-// separators unify to "/", trailing separators drop, case is PRESERVED (a case-fold
-// would merge two genuinely different directories on a case-sensitive host). Records
-// without a usable cwd never merge — each is its own L2 keyed by workspace id.
+// Identity comparison follows the preview-root posture with ONE Windows carve-out
+// (R2-09): separators unify to "/", trailing separators drop, and a definite
+// Windows shape folds its drive-letter/UNC locator (`C:\x` ≡ `c:/x` — the daemon
+// reports one checkout under both shapes). Everything else is case-PRESERVED: a
+// blanket case-fold would merge two genuinely different directories on a
+// case-sensitive host. The fold lives in normalizeWorkspacePath (truth-pointer
+// comment there); the server's utils/path.ts comparison is the semantic source.
 //
 // Badges are the SAME SOURCE as the 对话 tab's live lights (R2-06): 活跃 = the
 // official bucket (deriveAgentStateBucket via deriveSidebarStateBucket) landing
@@ -127,6 +130,13 @@ export interface BuildWorkspaceTreeInput<A extends WorkspaceTreeAgent = Workspac
    * Missing entry = cwd-less record (never merges).
    */
   workspacePaths: ReadonlyMap<string, string>;
+  /**
+   * R2-08①: 壳归档 row keys (`${serverId}:${agentId}`, the archive store — same
+   * input the 对话 tab's derive consumes). Archived sessions leave L3 and stop
+   * feeding the badges/recency maths; the L2/L1 ROWS survive (归档 is per-session,
+   * the worktree record itself is untouched).
+   */
+  archivedIds: readonly string[];
 }
 
 // 活跃 = the official bucket's live set: running or needs_input. The bucket is
@@ -397,8 +407,14 @@ function buildProjectRow<A extends WorkspaceTreeAgent>(
 export function buildWorkspaceTree<A extends WorkspaceTreeAgent>(
   input: BuildWorkspaceTreeInput<A>,
 ): ShellHostSection<A>[] {
-  const agentStats = indexAgents(input.agents);
-  const sessionsByRecord = indexSessions(input.agents);
+  // R2-08①: the 壳归档 filter runs BEFORE the stats — one pass, and every
+  // consumer (badges, recency/代表记录 election, L3 membership) reads the same
+  // live set. The worktree/project rows come from the project records, so they
+  // survive; only per-session surfaces lose an archived agent.
+  const archived = new Set(input.archivedIds);
+  const liveAgents = input.agents.filter((agent) => !archived.has(`${agent.serverId}:${agent.id}`));
+  const agentStats = indexAgents(liveAgents);
+  const sessionsByRecord = indexSessions(liveAgents);
 
   // host → project → worktree drafts. The seen guard keeps a record that somehow
   // appears under two project entries from being counted twice.

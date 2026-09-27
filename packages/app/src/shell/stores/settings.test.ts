@@ -50,14 +50,20 @@ describe("defaultTab resolution", () => {
   });
 
   it("keeps the chats default when the persisted tab is unknown", async () => {
-    await AsyncStorage.setItem(
-      SETTINGS_KEY,
-      JSON.stringify({ state: { shellMode: true, defaultTab: "settings" }, version: 0 }),
-    );
+    const tampered = JSON.stringify({
+      state: { shellMode: true, defaultTab: "settings" },
+      version: 0,
+    });
+    await AsyncStorage.setItem(SETTINGS_KEY, tampered);
     await usePaseoGoSettingsStore.persist.rehydrate();
     expect(usePaseoGoSettingsStore.getState().defaultTab).toBe("chats");
-    // The invalid envelope is discarded, not carried into the next write.
-    expect(await AsyncStorage.getItem(SETTINGS_KEY)).toBeNull();
+    // R2-13: the rejected envelope is KEPT (falsy read = nothing hydrated, the
+    // bytes stay for diagnosis) — and the next accepted write replaces it, so a
+    // bad envelope can never resurface, without the old whole-store eviction.
+    expect(await AsyncStorage.getItem(SETTINGS_KEY)).toBe(tampered);
+    usePaseoGoSettingsStore.getState().setDefaultTab("workspace");
+    const raw = await AsyncStorage.getItem(SETTINGS_KEY);
+    expect(JSON.parse(String(raw)).state.defaultTab).toBe("workspace");
   });
 
   it("resolves the seam: explicit boolean wins, null defers to the env default", () => {

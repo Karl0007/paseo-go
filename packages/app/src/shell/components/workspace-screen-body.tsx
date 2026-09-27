@@ -52,8 +52,10 @@ import { shellNavigateToAgent } from "@/shell/chats/shell-navigate-to-agent";
 import { WorkspaceWorktreeRow } from "@/shell/components/workspace-worktree-row";
 import { WorkspaceSessionRow } from "@/shell/components/workspace-session-row";
 import { usePaseoGoReadStateStore } from "@/shell/stores/readState";
+import { usePaseoGoArchiveStore } from "@/shell/stores/archive";
 import { useShellAgentActions } from "@/shell/shellAgentActions";
 import { archiveWorkspacesOptimistically } from "@/workspace/workspace-archive";
+import { archiveWorktreeRowWithRiskGate } from "@/shell/workspace/archive-gate";
 import {
   CommandWorkspacePickerSheet,
   type CommandWorkspaceOption,
@@ -240,14 +242,20 @@ export function WorkspaceScreenBody({ selectedAgentKey = null }: ShellScreenBody
     return paths;
   }, [sessions]);
 
+  // R2-08①: 壳归档 rows leave L3 and the badges — the same store the 对话 tab
+  // filters on (chats-screen-body), now feeding the tree derivation too.
+  const archivedIds = usePaseoGoArchiveStore((state) => state.archivedIds);
+
   const sections = useMemo(
-    () => buildWorkspaceTree({ hosts, statuses, projects, agents, workspacePaths }),
-    [hosts, statuses, projects, agents, workspacePaths],
+    () => buildWorkspaceTree({ hosts, statuses, projects, agents, workspacePaths, archivedIds }),
+    [hosts, statuses, projects, agents, workspacePaths, archivedIds],
   );
 
   // C26 L3: the 对话 tab's C4 opener verbatim — markRead 双拍 in the chat's own
   // host-clock domain + the official navigateToAgent (workspace route + open intent),
   // including C24's fork guard: an imported chat's first open confirms once.
+  // R2-02/03: the pending visit lives on the module ledger (this body dying with
+  // a section switch no longer loses it); settlement happens at the leave moments.
   const markRead = usePaseoGoReadStateStore((state) => state.markRead);
   const opener = useMemo(
     () =>
@@ -269,6 +277,7 @@ export function WorkspaceScreenBody({ selectedAgentKey = null }: ShellScreenBody
           }),
         forkAcknowledged: (key) => usePaseoGoForkAckStore.getState().ackedKeys.includes(key),
         acknowledgeFork: (key) => usePaseoGoForkAckStore.getState().ack(key),
+        section: "workspace",
       }),
     [markRead, t],
   );
@@ -528,17 +537,25 @@ export function WorkspaceScreenBody({ selectedAgentKey = null }: ShellScreenBody
     [opener],
   );
   // L2 长按「归档工作区」: 官方 archiveWorkspace RPC (workspace-archive 乐观隐藏，
-  // 失败自动回滚)，对合并前全部记录一次执行。
+  // 失败自动回滚)，对合并前全部记录一次执行。R2-08②: 先闸后归档 — every merged
+  // record first clears the OFFICIAL worktree archive risk confirm
+  // (selectProjectWorkspacesToArchive → confirmRiskyWorktreeArchive +
+  // toWorktreeArchiveRisk, the sidebar-workspace-list rows' call shape); only the
+  // confirmed targets reach the RPC, an all-decline is a no-op.
   const handleArchiveWorktree = useCallback(
     (row: ShellWorktreeRow<AggregatedAgent>) => {
       void (async () => {
-        const failures = await archiveWorkspacesOptimistically({
-          getClient: (serverId) => getHostRuntimeStore().getClient(serverId),
-          workspaces: row.workspaceIds.map((workspaceId) => ({
-            serverId: row.serverId,
-            workspaceId,
-          })),
+        const { attempted, failures } = await archiveWorktreeRowWithRiskGate({
+          row,
+          descriptorOf: (serverId, workspaceId) =>
+            useSessionStore.getState().sessions[serverId]?.workspaces.get(workspaceId),
+          archive: (workspaces) =>
+            archiveWorkspacesOptimistically({
+              getClient: (serverId) => getHostRuntimeStore().getClient(serverId),
+              workspaces,
+            }),
         });
+        if (attempted.length === 0) return;
         if (failures.length === 0) {
           toast.show(t("workspace.toast.workspaceArchived"));
           refetch();

@@ -1,4 +1,4 @@
-import { useUnistyles } from "react-native-unistyles";
+import { useWindowDimensions } from "react-native";
 import { isWeb } from "@/constants/platform";
 
 export const FOOTER_HEIGHT = 75;
@@ -36,12 +36,29 @@ export {
 } from "./platform";
 
 /**
- * Reactive hook — re-renders the component when the breakpoint changes.
- * Always use this instead of reading UnistylesRuntime.breakpoint directly.
+ * Reactive hook — re-renders the component when the compact/wide form factor
+ * changes. Always use this instead of reading UnistylesRuntime.breakpoint directly.
+ *
+ * COMPAT(shellFormFactorRotation): upstream touchpoint #8 (paseo-go fork,
+ * 2026-09-28). Unistyles' breakpoint subscription does NOT fire on a runtime
+ * device rotation — Fabric re-layouts natively while the JS `rt.breakpoint`
+ * stays stale (device evidence C31-F1), so every consumer of this hook kept
+ * phone chrome in a landscape window. The REVIEW2 R2-04 ruling (2a) moves the
+ * source to the RN-core `useWindowDimensions()` subscription (Dimensions change
+ * event — rotates in both directions). The threshold is the Unistyles table's
+ * md floor INLINED because official files must not import the shell mirror
+ * (`src/shell/tablet/form-factor.ts`): truth = `styles/unistyles.ts` breakpoints
+ * (xs|sm ⇔ width < 720), machine-pinned against the table by
+ * `src/shell/tablet/form-factor.test.ts` (R2-11 gate, extended for this file).
+ * known_issue (R2-11 family): window width vs Unistyles' own subscription only
+ * diverge under Android ≤10 free-form multi-window — there the window face is
+ * the rotation-correct one, deliberately chosen.
  */
+const COMPACT_FORM_FACTOR_MAX_WIDTH = 720;
+
 export function useIsCompactFormFactor(): boolean {
-  const { rt } = useUnistyles();
-  return rt.breakpoint === "xs" || rt.breakpoint === "sm";
+  const { width } = useWindowDimensions();
+  return width < COMPACT_FORM_FACTOR_MAX_WIDTH;
 }
 
 // SplitContainer relies on dnd-kit and DOM-backed accessibility helpers.

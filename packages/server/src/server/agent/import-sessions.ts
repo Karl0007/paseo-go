@@ -356,7 +356,6 @@ async function collectImportedProviderSessions(
   const handles = new Set<string>();
   const sessions = new Set<string>();
   const records = await agentStorage.list();
-  const storedRecordsById = new Map(records.map((record) => [record.id, record]));
 
   const collect = (
     provider: AgentProvider | StoredAgentRecord["provider"] | string,
@@ -367,17 +366,16 @@ async function collectImportedProviderSessions(
     collectProviderSessionHandleKeys(handles, provider, persistence);
   };
 
+  // R2-19 A-side: archivedAt is NOT an already-imported exemption. An archived
+  // import is still an import (关 tab 即归档 root agent — re-listing it hands the
+  // user a double-import entry and under-reports filteredAlreadyImportedCount).
+  // The revive path lives in importProviderSession (restore-as-same-agent,
+  // covered by its own tests) and is deliberately untouched here.
   for (const agent of agentManager.listAgents()) {
-    if (storedRecordsById.get(agent.id)?.archivedAt) {
-      continue;
-    }
     collect(agent.provider, agent.persistence);
   }
 
   for (const record of records) {
-    if (record.archivedAt) {
-      continue;
-    }
     collect(record.provider, record.persistence);
   }
 

@@ -3,8 +3,10 @@ import { requireWorkspaceDirectory, resolveWorkspaceDirectory } from "./workspac
 
 describe("resolveWorkspaceDirectory", () => {
   it("canonicalizes a workspace directory and returns null when blank", () => {
+    // R2-09: a definite Windows shape folds its drive-letter locator (identity
+    // parity with the server's path comparison); the rest of the path is kept.
     expect(resolveWorkspaceDirectory({ workspaceDirectory: "C:\\repo\\app\\" })).toBe(
-      "C:/repo/app",
+      "c:/repo/app",
     );
     expect(resolveWorkspaceDirectory({ workspaceDirectory: "   " })).toBeNull();
   });

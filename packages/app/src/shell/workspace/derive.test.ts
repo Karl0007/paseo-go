@@ -5,6 +5,7 @@
 import { describe, expect, it } from "vitest";
 import type { HostRuntimeConnectionStatus } from "@/runtime/host-runtime";
 import type { ProjectHostEntry, ProjectSummary, WorkspaceSummary } from "@/utils/projects";
+import { normalizeWorkspacePath } from "@/utils/workspace-identity";
 import {
   badgeTone,
   buildWorkspaceTree,
@@ -92,6 +93,7 @@ function build(overrides: Partial<BuildWorkspaceTreeInput> = {}): ShellHostSecti
     projects: [],
     agents: [],
     workspacePaths: new Map(),
+    archivedIds: [],
     ...overrides,
   });
 }
@@ -754,5 +756,147 @@ describe("R2-14 — garbage host dates never produce NaN", () => {
     // 可信戳在前，垃圾日期沉底（0=epoch 序），且排序确定性回落到 key。
     expect(l2.sessions.map((s) => s.agentId)).toEqual(["ag-good", "ag-garbage"]);
     expect(l2.sessions.every((s) => Number.isFinite(s.lastEventAt))).toBe(true);
+  });
+});
+
+// R2-09: Windows drive/UNC locator folding in normalizeWorkspacePath — the app-side
+// mirror of the server's comparison semantics (packages/server/src/utils/path.ts is
+// the truth source: looksLikeDefiniteWindowsPath + normalizePathForComparison).
+// Boundary table: drive letters fold (C:\x ≡ c:/x), UNC server+share fold, the \\?\
+// device namespace folds to its plain form, POSIX paths stay byte-identical
+// (case-sensitive host — folding there would merge genuinely different directories).
+describe("R2-09 — Windows 路径形折叠 (identity only)", () => {
+  it.each([
+    ["C:\\x", "c:/x"],
+    ["c:/x", "c:/x"],
+    ["C:\\Work\\Repo\\", "c:/Work/Repo"],
+    ["C:\\", "c:/"],
+    ["c:/", "c:/"],
+    ["\\\\SRV1\\Share\\a", "//srv1/share/a"],
+    ["\\\\?\\C:\\x", "c:/x"],
+    ["\\\\?\\UNC\\SRV\\Share\\a", "//srv/share/a"],
+    ["/a/b", "/a/b"],
+    ["/A/B", "/A/B"],
+    ["~/ProJ", "~/ProJ"],
+  ])("normalizeWorkspacePath(%j) → %j", (input, expected) => {
+    expect(normalizeWorkspacePath(input)).toBe(expected);
+  });
+
+  it("tree merges drive-case variants and keeps POSIX case-split rows apart", () => {
+    const sections = build({
+      projects: [
+        project("v1", [
+          hostEntry("host-a", "paseo", [
+            workspace("ws-1", "one", { currentBranch: "main" }),
+            workspace("ws-2", "two", { currentBranch: "main" }),
+            workspace("ws-3", "three", { currentBranch: "main" }),
+            workspace("ws-4", "four", { currentBranch: "main" }),
+          ]),
+        ]),
+      ],
+      workspacePaths: new Map([
+        ["host-a:ws-1", "C:\\work\\repo"],
+        ["host-a:ws-2", "c:/work/repo"],
+        ["host-a:ws-3", "/a/b"],
+        ["host-a:ws-4", "/A/B"],
+      ]),
+    });
+    const worktrees = section(sections, "host-a").projects[0].worktrees;
+    expect(worktrees).toHaveLength(3);
+    const driveRow = worktrees.find((row) => row.workspaceIds.includes("ws-1"));
+    expect(driveRow?.workspaceIds).toEqual(["ws-1", "ws-2"]);
+    expect(driveRow?.cwd).toBe("c:/work/repo");
+    expect(worktrees.filter((row) => row.cwd === "/a/b")).toHaveLength(1);
+    expect(worktrees.filter((row) => row.cwd === "/A/B")).toHaveLength(1);
+  });
+});
+
+// R2-08①: 壳归档 (the local archive store, the key the 对话 tab already honors)
+// must reach the workspace tab too — archived sessions leave L3, stop feeding the
+// badges/recency, and the L2/L1 rows themselves survive (归档 is per-session).
+describe("R2-08① — archivedIds 剔 L3、角标不计", () => {
+  it("drops archived sessions from L3 and their counts from the L2/L1 badges", () => {
+    const sections = build({
+      projects: [project("v1", [hostEntry("host-a", "paseo", [workspace("ws-1", "a")])])],
+      agents: [
+        agent({ serverId: "host-a", id: "ag-live", workspaceId: "ws-1", status: "running" }),
+        agent({
+          serverId: "host-a",
+          id: "ag-arch",
+          workspaceId: "ws-1",
+          status: "idle",
+          requiresAttention: true,
+          attentionReason: "permission",
+          pendingPermissionCount: 1,
+        }),
+      ],
+      workspacePaths: new Map([["host-a:ws-1", "/repo/x"]]),
+      archivedIds: ["host-a:ag-arch"],
+    });
+    const l1 = section(sections, "host-a").projects[0];
+    const l2 = l1.worktrees[0];
+    expect(l2.sessions.map((s) => s.agentId)).toEqual(["ag-live"]);
+    expect(l2.activeCount).toBe(1);
+    expect(l2.needsInputCount).toBe(0);
+    expect(l1.activeCount).toBe(1);
+    expect(l1.needsInputCount).toBe(0);
+  });
+
+  it("keeps the L2/L1 rows themselves — 归档 is per-session, not per-worktree", () => {
+    const sections = build({
+      projects: [project("v1", [hostEntry("host-a", "paseo", [workspace("ws-1", "a")])])],
+      agents: [
+        agent({
+          serverId: "host-a",
+          id: "ag-arch",
+          workspaceId: "ws-1",
+          status: "running",
+        }),
+      ],
+      workspacePaths: new Map([["host-a:ws-1", "/repo/x"]]),
+      archivedIds: ["host-a:ag-arch"],
+    });
+    const l1 = section(sections, "host-a").projects[0];
+    expect(l1.worktrees).toHaveLength(1);
+    expect(l1.worktrees[0].sessions).toEqual([]);
+    expect(l1.worktrees[0].activeCount).toBe(0);
+  });
+
+  it("an archived agent's activity no longer elects the representative record", () => {
+    // 代表记录 election reads the same stats the badges do — when the newest
+    // record's only activity belongs to an archived session, the row title/files
+    // target must come from a live record.
+    const sections = build({
+      projects: [
+        project("v1", [
+          hostEntry("host-a", "paseo", [
+            workspace("ws-old", "old", { currentBranch: "main" }),
+            workspace("ws-new", "new", { currentBranch: "main" }),
+          ]),
+        ]),
+      ],
+      agents: [
+        agent({
+          serverId: "host-a",
+          id: "ag-old",
+          workspaceId: "ws-old",
+          lastActivityAt: new Date(1_000),
+        }),
+        agent({
+          serverId: "host-a",
+          id: "ag-new",
+          workspaceId: "ws-new",
+          lastActivityAt: new Date(9_000),
+        }),
+      ],
+      workspacePaths: new Map([
+        ["host-a:ws-old", "/repo/x"],
+        ["host-a:ws-new", "/repo/x"],
+      ]),
+      archivedIds: ["host-a:ag-new"],
+    });
+    const l2 = section(sections, "host-a").projects[0].worktrees[0];
+    expect(l2.workspaceId).toBe("ws-old");
+    expect(l2.lastUsedAt).toBe(1_000);
   });
 });
