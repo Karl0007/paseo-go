@@ -18,8 +18,21 @@
 // (Roboto ≈1.172, SF ≈1.195 — ceil keeps the cover ≥ the real row). Over-cover
 // eats ≤~1dp of the session top at scale 1; under-cover would leave a tappable
 // sliver — the safe direction is over.
+//
+// FixB4 (CLOSE-DEV4 g6-01..06, portrait density 400): the token maths alone still
+// UNDER-covered the real row — the official tab row rendered [220,312] (92px)
+// while the bar's bottom edge sat at y=308, i.e. the row's top edge lands ~4px
+// BELOW the token maths (RN per-node integer rounding). The 37dp=92.5px cover
+// left a 4px sliver at the bar bottom; taps at (800,309)/(800,311) still opened
+// the 切换标签 sheet → 关 tab→归档 remained reachable in portrait. The compact
+// branch therefore carries COMPACT_SLIVER_REDUNDANCY_DP of over-cover slack;
+// the native-wide branch renders the fixed-height row and needs none.
 
+/** RN text line-height ceiling the mobile cover tracks (header, fontScale maths). */
 export const TEXT_LINE_HEIGHT_CEILING = 1.2;
+
+/** Measured portrait rounding slack the token maths misses (header, FixB4). */
+export const COMPACT_SLIVER_REDUNDANCY_DP = 4;
 
 export interface TabRowCoverInput {
   /** The capsule's compact flag (window-width source, C32 增补裁定 5). */
@@ -47,7 +60,7 @@ export function tabRowCoverHeightDp(input: TabRowCoverInput): number {
   const textHeight = Math.ceil(
     input.triggerFontSizeDp * Math.max(1, input.fontScale) * TEXT_LINE_HEIGHT_CEILING,
   );
-  return (
-    input.triggerPaddingDp * 2 + Math.max(input.triggerIconDp, textHeight) + input.borderWidthDp
-  );
+  const tokenRowHeight =
+    input.triggerPaddingDp * 2 + Math.max(input.triggerIconDp, textHeight) + input.borderWidthDp;
+  return tokenRowHeight + COMPACT_SLIVER_REDUNDANCY_DP;
 }

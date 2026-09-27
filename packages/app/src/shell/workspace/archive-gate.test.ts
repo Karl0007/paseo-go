@@ -404,3 +404,258 @@ describe("archiveWorktreeRowWithRiskGate fail-closed (null-risk 必弹, R2-08②
     expect(archive).toHaveBeenCalledOnce();
   });
 });
+
+// FixB4 (CLOSE-DEV4 g5-00..03 device 实锤): the FixB3 gate covered kind==="worktree"
+// only — selectProjectWorkspacesToArchive AND overlayLiveCheckoutRisk both skip
+// non-worktree records, so the CLOSE-DEV3 accident surface (main worktree row =
+// local_checkout; the 23+23 cascade) still archived with ZERO dialogs (one-shot
+// fixture gate-main: row gone, archivedAt set, no dialog in the 2s/5s dumps). The
+// shell gate now confirms every git-checkout kind through the IDENTICAL overlay +
+// fail-closed layers — an intentional deviation from the official skip semantics
+// (paseo-go/UPSTREAM-ISSUES.md #3).
+describe("archiveWorktreeRowWithRiskGate local_checkout 入闸 (FixB4, CLOSE-DEV4 g5)", () => {
+  it("known-dirty local_checkout gets the OFFICIAL rich dialog (was: zero dialogs)", async () => {
+    const byId = new Map<string, WorkspaceDescriptor>([
+      [
+        "w1",
+        descriptor({
+          id: "w1",
+          workspaceKind: "local_checkout",
+          gitRuntime: { isDirty: true, aheadOfOrigin: 2 } as WorkspaceDescriptor["gitRuntime"],
+          diffStat: { additions: 1, deletions: 0 },
+        }),
+      ],
+    ]);
+    const archive = vi.fn(async () => []);
+    await archiveWorktreeRowWithRiskGate({
+      row: { ...ROW, workspaceIds: ["w1"] },
+      descriptorOf: (_serverId, id) => byId.get(id),
+      fetchLiveRisk: noLiveRisk,
+      archive,
+    });
+    expect(confirmDialogMock).toHaveBeenCalledOnce();
+    const dialog = confirmDialogMock.mock.calls[0][0] as ConfirmDialogInput;
+    expect(dialog.message).not.toBe(GENERIC_MESSAGE);
+    expect(dialog.message).toBe(
+      buildWorktreeArchiveConfirmationMessage({
+        workspaceName: "feature",
+        isDirty: true,
+        aheadOfOrigin: 2,
+        diffStat: { additions: 1, deletions: 0 },
+      }),
+    );
+    expect(dialog.destructive).toBe(true);
+    expect(archive).toHaveBeenCalledOnce();
+  });
+
+  it("null-risk local_checkout raises the generic fail-closed warning", async () => {
+    const byId = new Map<string, WorkspaceDescriptor>([
+      ["w1", descriptor({ id: "w1", workspaceKind: "local_checkout" })],
+    ]);
+    const archive = vi.fn(async () => []);
+    await archiveWorktreeRowWithRiskGate({
+      row: { ...ROW, workspaceIds: ["w1"] },
+      descriptorOf: (_serverId, id) => byId.get(id),
+      fetchLiveRisk: noLiveRisk,
+      archive,
+    });
+    expect(confirmDialogMock).toHaveBeenCalledOnce();
+    const dialog = confirmDialogMock.mock.calls[0][0] as ConfirmDialogInput;
+    expect(dialog.message).toBe(GENERIC_MESSAGE);
+    expect(archive).toHaveBeenCalledOnce();
+  });
+
+  it("known-clean local_checkout keeps auto-passing (直通保持)", async () => {
+    const byId = new Map<string, WorkspaceDescriptor>([
+      [
+        "w1",
+        descriptor({
+          id: "w1",
+          workspaceKind: "local_checkout",
+          gitRuntime: { isDirty: false, aheadOfOrigin: 0 } as WorkspaceDescriptor["gitRuntime"],
+        }),
+      ],
+    ]);
+    const archive = vi.fn(async () => []);
+    await archiveWorktreeRowWithRiskGate({
+      row: { ...ROW, workspaceIds: ["w1"] },
+      descriptorOf: (_serverId, id) => byId.get(id),
+      fetchLiveRisk: noLiveRisk,
+      archive,
+    });
+    expect(confirmDialogMock).not.toHaveBeenCalled();
+    expect(archive).toHaveBeenCalledOnce();
+  });
+
+  it("live overlay queries a local_checkout's cwd and resolves null risks into the official dialog", async () => {
+    const byId = new Map<string, WorkspaceDescriptor>([
+      [
+        "w1",
+        descriptor({
+          id: "w1",
+          workspaceKind: "local_checkout",
+          workspaceDirectory: "C:\\repo\\main",
+        }),
+      ],
+    ]);
+    const fetchLiveRisk = vi.fn(
+      async (): Promise<WorktreeArchiveLiveRisk> => ({
+        isDirty: true,
+        aheadOfOrigin: 0,
+      }),
+    );
+    await archiveWorktreeRowWithRiskGate({
+      row: { ...ROW, workspaceIds: ["w1"] },
+      descriptorOf: (_serverId, id) => byId.get(id),
+      fetchLiveRisk,
+      archive: async () => [],
+    });
+    expect(fetchLiveRisk).toHaveBeenCalledWith("s1", "C:\\repo\\main");
+    expect(confirmDialogMock).toHaveBeenCalledOnce();
+    const dialog = confirmDialogMock.mock.calls[0][0] as ConfirmDialogInput;
+    expect(dialog.message).not.toBe(GENERIC_MESSAGE);
+  });
+
+  it("declining the local_checkout confirm is a pure no-op", async () => {
+    confirmDialogMock.mockImplementation(async () => false);
+    const byId = new Map<string, WorkspaceDescriptor>([
+      ["w1", descriptor({ id: "w1", workspaceKind: "local_checkout" })],
+    ]);
+    const archive = vi.fn();
+    const result = await archiveWorktreeRowWithRiskGate({
+      row: { ...ROW, workspaceIds: ["w1"] },
+      descriptorOf: (_serverId, id) => byId.get(id),
+      fetchLiveRisk: noLiveRisk,
+      archive,
+    });
+    expect(confirmDialogMock).toHaveBeenCalledOnce();
+    expect(archive).not.toHaveBeenCalled();
+    expect(result).toEqual({ attempted: [], failures: [] });
+  });
+});
+
+// FixB4 级联计数: the official rich message states git facts only (uncommitted /
+// unpushed) — never the session cascade that WAS the CLOSE-DEV3 blast radius
+// (23+23). The shell appends the merged row's session count (row.sessions = the L3
+// membership the server cascade archives, archiveWorkspaceContents by workspaceId —
+// kind-AGNOSTIC, verified in packages/server workspace-archive-service.ts) to its
+// fail-closed warning; and because that teardown is kind-agnostic, a directory-kind
+// record that carries sessions cascades exactly like a worktree record: it gets the
+// cascade dialog (no git risk exists there to show). A session-less directory row
+// keeps the official skip — nothing destructive happens beyond the record.
+describe("archiveWorktreeRowWithRiskGate 级联会话计数 + directory 入闸 (FixB4)", () => {
+  const sessions = [{ agentId: "a1" }, { agentId: "a2" }];
+  const CASCADE_TEXT = i18n.t(`${SHELL_I18N_NAMESPACE}:workspace.archiveGate.cascadeSessions`, {
+    count: 2,
+  });
+  const DIRECTORY_CASCADE_MESSAGE = i18n.t(
+    `${SHELL_I18N_NAMESPACE}:workspace.archiveGate.directoryCascadeMessage`,
+    { count: 2 },
+  );
+
+  it("generic warning states the row's cascade session count", async () => {
+    const byId = new Map<string, WorkspaceDescriptor>([["w1", descriptor({ id: "w1" })]]);
+    await archiveWorktreeRowWithRiskGate({
+      row: { ...ROW, workspaceIds: ["w1"], sessions },
+      descriptorOf: (_serverId, id) => byId.get(id),
+      fetchLiveRisk: noLiveRisk,
+      archive: async () => [],
+    });
+    expect(confirmDialogMock).toHaveBeenCalledOnce();
+    const dialog = confirmDialogMock.mock.calls[0][0] as ConfirmDialogInput;
+    expect(dialog.message).toBe(`${GENERIC_MESSAGE}\n${CASCADE_TEXT}`);
+  });
+
+  it("generic warning keeps the plain message for a session-less row", async () => {
+    const byId = new Map<string, WorkspaceDescriptor>([["w1", descriptor({ id: "w1" })]]);
+    await archiveWorktreeRowWithRiskGate({
+      row: { ...ROW, workspaceIds: ["w1"] },
+      descriptorOf: (_serverId, id) => byId.get(id),
+      fetchLiveRisk: noLiveRisk,
+      archive: async () => [],
+    });
+    expect(confirmDialogMock).toHaveBeenCalledOnce();
+    const dialog = confirmDialogMock.mock.calls[0][0] as ConfirmDialogInput;
+    expect(dialog.message).toBe(GENERIC_MESSAGE);
+  });
+
+  it("directory record WITH sessions must confirm the cascade; declining is a pure no-op", async () => {
+    confirmDialogMock.mockImplementation(async () => false);
+    const byId = new Map<string, WorkspaceDescriptor>([
+      ["w1", descriptor({ id: "w1", workspaceKind: "directory" })],
+    ]);
+    const archive = vi.fn();
+    const result = await archiveWorktreeRowWithRiskGate({
+      row: { ...ROW, workspaceIds: ["w1"], sessions },
+      descriptorOf: (_serverId, id) => byId.get(id),
+      fetchLiveRisk: noLiveRisk,
+      archive,
+    });
+    expect(confirmDialogMock).toHaveBeenCalledOnce();
+    const dialog = confirmDialogMock.mock.calls[0][0] as ConfirmDialogInput;
+    expect(dialog.message).toBe(DIRECTORY_CASCADE_MESSAGE);
+    expect(dialog.destructive).toBe(true);
+    expect(archive).not.toHaveBeenCalled();
+    expect(result).toEqual({ attempted: [], failures: [] });
+  });
+
+  it("confirmed directory cascade archives the record; no git RPC is spent on its cwd", async () => {
+    const byId = new Map<string, WorkspaceDescriptor>([
+      [
+        "w1",
+        descriptor({ id: "w1", workspaceKind: "directory", workspaceDirectory: "/plain/dir" }),
+      ],
+    ]);
+    const fetchLiveRisk = vi.fn(noLiveRisk);
+    const archive = vi.fn(async () => []);
+    await archiveWorktreeRowWithRiskGate({
+      row: { ...ROW, workspaceIds: ["w1"], sessions },
+      descriptorOf: (_serverId, id) => byId.get(id),
+      fetchLiveRisk,
+      archive,
+    });
+    expect(confirmDialogMock).toHaveBeenCalledOnce();
+    expect(fetchLiveRisk).not.toHaveBeenCalled();
+    expect(archive).toHaveBeenCalledWith([{ serverId: "s1", workspaceId: "w1" }]);
+  });
+
+  it("directory record on a session-less row keeps the official skip", async () => {
+    const byId = new Map<string, WorkspaceDescriptor>([
+      ["w1", descriptor({ id: "w1", workspaceKind: "directory" })],
+    ]);
+    const archive = vi.fn(async () => []);
+    await archiveWorktreeRowWithRiskGate({
+      row: { ...ROW, workspaceIds: ["w1"] },
+      descriptorOf: (_serverId, id) => byId.get(id),
+      fetchLiveRisk: noLiveRisk,
+      archive,
+    });
+    expect(confirmDialogMock).not.toHaveBeenCalled();
+    expect(archive).toHaveBeenCalledOnce();
+  });
+
+  it("mixed row: declining the directory cascade drops ONLY the directory record", async () => {
+    confirmDialogMock.mockImplementation(async () => false);
+    const byId = new Map<string, WorkspaceDescriptor>([
+      [
+        "w1",
+        descriptor({
+          id: "w1",
+          name: "clean",
+          workspaceDirectory: "/repo/clean",
+          gitRuntime: { isDirty: false, aheadOfOrigin: 0 } as WorkspaceDescriptor["gitRuntime"],
+        }),
+      ],
+      ["w2", descriptor({ id: "w2", name: "dir", workspaceKind: "directory" })],
+    ]);
+    const archive = vi.fn(async () => []);
+    await archiveWorktreeRowWithRiskGate({
+      row: { ...ROW, sessions },
+      descriptorOf: (_serverId, id) => byId.get(id),
+      fetchLiveRisk: noLiveRisk,
+      archive,
+    });
+    expect(confirmDialogMock).toHaveBeenCalledOnce();
+    expect(archive).toHaveBeenCalledWith([{ serverId: "s1", workspaceId: "w1" }]);
+  });
+});

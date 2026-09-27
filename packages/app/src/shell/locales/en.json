@@ -161,6 +161,10 @@
     "archiveGate": {
       "unknownRiskTitle": "Archive \"{{workspaceName}}\"?",
       "unknownRiskMessage": "Unable to confirm whether this workspace has uncommitted changes. Archive it anyway?",
+      "cascadeSessions_one": "Its {{count}} session will be archived along with it.",
+      "cascadeSessions_other": "Its {{count}} sessions will be archived along with it.",
+      "directoryCascadeMessage_one": "This workspace has {{count}} session; archiving it archives that session too. Archive anyway?",
+      "directoryCascadeMessage_other": "This workspace has {{count}} sessions; archiving it archives them all too. Archive anyway?",
       "confirm": "Archive anyway",
       "cancel": "Cancel"
     },

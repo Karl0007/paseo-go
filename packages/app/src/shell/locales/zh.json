@@ -161,6 +161,10 @@
     "archiveGate": {
       "unknownRiskTitle": "归档「{{workspaceName}}」？",
       "unknownRiskMessage": "无法确认该工作区是否有未提交内容，仍要归档？",
+      "cascadeSessions_one": "其 {{count}} 个会话将一并归档。",
+      "cascadeSessions_other": "其 {{count}} 个会话将一并归档。",
+      "directoryCascadeMessage_one": "该工作区有 {{count}} 个会话，归档会一并归档这些会话，仍要归档？",
+      "directoryCascadeMessage_other": "该工作区有 {{count}} 个会话，归档会一并归档这些会话，仍要归档？",
       "confirm": "仍然归档",
       "cancel": "取消"
     },

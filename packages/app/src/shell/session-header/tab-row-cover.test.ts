@@ -11,7 +11,11 @@ import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 import { WORKSPACE_SECONDARY_HEADER_HEIGHT } from "@/constants/layout";
 import { BORDER_WIDTH, FONT_SIZE, ICON_SIZE, SPACING } from "@/styles/theme";
-import { TEXT_LINE_HEIGHT_CEILING, tabRowCoverHeightDp } from "./tab-row-cover";
+import {
+  COMPACT_SLIVER_REDUNDANCY_DP,
+  TEXT_LINE_HEIGHT_CEILING,
+  tabRowCoverHeightDp,
+} from "./tab-row-cover";
 
 const TOKENS = {
   triggerPaddingDp: SPACING[2],
@@ -32,10 +36,26 @@ function cover(overrides: Partial<Parameters<typeof tabRowCoverHeightDp>[0]> = {
 }
 
 describe("tabRowCoverHeightDp (胶囊盖高)", () => {
-  it("compact: paddings + max(icon, ceiling'd text line) + border", () => {
+  it("compact: paddings + max(icon, ceiling'd text line) + border + 4dp sliver redundancy", () => {
     expect(cover()).toBe(
-      SPACING[2] * 2 + Math.ceil(FONT_SIZE.base * TEXT_LINE_HEIGHT_CEILING) + BORDER_WIDTH[1],
+      SPACING[2] * 2 +
+        Math.ceil(FONT_SIZE.base * TEXT_LINE_HEIGHT_CEILING) +
+        BORDER_WIDTH[1] +
+        COMPACT_SLIVER_REDUNDANCY_DP,
     );
+  });
+
+  // CLOSE-DEV4 g6-01..06 (portrait, density 400): the official tab row rendered
+  // [220,312] (92px) while the shell bar's bottom edge sat at y=308 — the row's
+  // TOP lands ~4px below the token maths (RN per-node integer rounding), so the
+  // 37dp=92.5px cover left a 4px tappable sliver: taps at (800,309)/(800,311)
+  // opened the 切换标签 sheet → 关 tab→归档 stayed reachable. The cover must stay
+  // ≥ the token-derived row bottom + the measured rounding slack.
+  it("compact: cover ≥ token row bottom + 4dp device sliver (CLOSE-DEV4 g6-05/06)", () => {
+    const tokenRowHeight =
+      SPACING[2] * 2 + Math.ceil(FONT_SIZE.base * TEXT_LINE_HEIGHT_CEILING) + BORDER_WIDTH[1];
+    expect(cover()).toBeGreaterThanOrEqual(tokenRowHeight + COMPACT_SLIVER_REDUNDANCY_DP);
+    expect(COMPACT_SLIVER_REDUNDANCY_DP).toBe(4);
   });
 
   it("compact: Android fontScale inflates the cover with the row", () => {
@@ -43,7 +63,8 @@ describe("tabRowCoverHeightDp (胶囊盖高)", () => {
       expect(cover({ fontScale })).toBe(
         SPACING[2] * 2 +
           Math.ceil(FONT_SIZE.base * fontScale * TEXT_LINE_HEIGHT_CEILING) +
-          BORDER_WIDTH[1],
+          BORDER_WIDTH[1] +
+          COMPACT_SLIVER_REDUNDANCY_DP,
       );
     }
     // A sub-1 scale never shrinks below the icon floor.

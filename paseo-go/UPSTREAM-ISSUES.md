@@ -19,6 +19,7 @@
 - 现象：workspace descriptor 的 `gitRuntime/diffStat` 为懒填充（`peekSnapshot` 未解析=缺字段）；`confirmRiskyWorktreeArchive` 空风险 auto-pass → 官方 sidebar 行菜单归档在未观察过的 worktree 上不弹风险确认。官方 screen 面（use-actions live overlay + canArchive fail-closed）已有正确姿势，sidebar 面未对齐。
 - 证据：FixB3 定性链（archive-gate 报告在册：`sidebar-workspaces-view-model.ts:180-181`、`worktree-archive-warning.ts:86-123`、`session.ts:5570-5587`）；壳侧真机事故复现=同输入不弹框。
 - 建议：sidebar 归档动作对齐 screen 面：动作时 `ensureCheckoutStatus` 实取 + 未知即 fail-closed。
+- 补充（FixB4）：`selectProjectWorkspacesToArchive` 的 `kind==="worktree"` 跳过确认在级联归档语义下=无闸数据破坏面——服务端 teardown 与 kind 无关（`workspace-archive-service.ts` `archiveWorkspaceContents` 按 workspaceId 归档全部 agent），`local_checkout` 行（主 worktree 即此 kind，CLOSE-DEV3/4 事故面）零弹直归档。建议上游对齐 screen 面 `canArchive` 的 fail-closed 姿势并覆盖全部可级联会话的 kind。
 
 ## 4. RNGH 2.28 组件树重挂期确定性红屏（P1 上游库）
 
