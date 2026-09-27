@@ -288,6 +288,11 @@ const styles = StyleSheet.create((theme) => ({
   },
   pillTrigger: {
     borderRadius: theme.borderRadius.full,
+    // C32 wide matrix: in the split's 260/300dp list column the row overflows
+    // (measured: search/＋ pushed fully past the column edge). The status pill
+    // absorbs the whole overflow (ellipsize → dot); the icons stay reachable.
+    // Compact never overflows → flexShrink is inert there (pixel-identical).
+    flexShrink: 1,
   },
   pill: {
     flexDirection: "row",
@@ -295,6 +300,8 @@ const styles = StyleSheet.create((theme) => ({
     borderColor: theme.colors.border,
     borderRadius: theme.borderRadius.full,
     backgroundColor: theme.colors.surface1,
+    // Shrink with the trigger (Yoga children default to flexShrink:0).
+    flexShrink: 1,
   },
   pillRow: {
     alignItems: "center",
@@ -305,6 +312,8 @@ const styles = StyleSheet.create((theme) => ({
   pillText: {
     fontSize: theme.fontSize.sm,
     color: theme.colors.foregroundMuted,
+    // RN Text defaults to flexShrink:0 — allow the ellipsize the row needs.
+    flexShrink: 1,
   },
   dot: {
     width: 8,
@@ -341,11 +350,15 @@ const styles = StyleSheet.create((theme) => ({
   segmentGroup: {
     padding: theme.spacing[0.5],
     gap: theme.spacing[0.5],
+    // Never shrinks: the 进行中/已归档 labels must stay readable — the status
+    // pill absorbs the whole row overflow (C32 wide matrix; inert on compact).
+    flexShrink: 0,
   },
   segment: {
     borderRadius: theme.borderRadius.full,
     paddingVertical: theme.spacing[1],
     paddingHorizontal: theme.spacing[3],
+    flexShrink: 0,
   },
   segmentSelected: {
     backgroundColor: theme.colors.surface2,
@@ -356,6 +369,7 @@ const styles = StyleSheet.create((theme) => ({
   segmentText: {
     fontSize: theme.fontSize.sm,
     color: theme.colors.foregroundMuted,
+    flexShrink: 0,
   },
   segmentTextSelected: {
     color: theme.colors.foreground,

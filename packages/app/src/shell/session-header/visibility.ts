@@ -16,6 +16,9 @@
 //    while the explorer owns the top. Wide layouts open the Explorer as a pane
 //    instead — `mobilePanel.target` never leaves "agent" there, so the wide-form
 //    capsule (C32) is untouched by this input.
+// 6. (C32 裁定 2) `isCompact` is part of the input but does NOT gate the capsule:
+//    wide keeps it — it IS the detail-column header (DESIGN-tablet §3.2). It is
+//    the edge-back band's only gate; see `shouldEnableShellEdgeBack`.
 //
 // The agent identity itself is NOT parsed from the pathname: the official route
 // consumes and clears the `?open=agent:<id>` intent, and tab switches never touch
@@ -37,6 +40,12 @@ export interface ShellSessionVisibilityInput {
   rootIndex: number;
   /** C21: compact explorer overlay open ⇒ the capsule yields its top band. */
   explorerOverlayOpen?: boolean;
+  /**
+   * C32: window is compact (xs/sm, per shell/tablet/form-factor). Capsule
+   * visibility is breakpoint-INDEPENDENT (wide keeps the capsule); the input
+   * exists for `shouldEnableShellEdgeBack`, which is the compact-only half.
+   */
+  isCompact: boolean;
 }
 
 export interface ShellSessionWorkspaceTarget {
@@ -53,6 +62,16 @@ export function resolveShellSessionWorkspace(
   if (top !== HOST_ROOT_ROUTE) return null;
   if (!input.rootRoutes.slice(0, input.rootIndex).includes(SHELL_ROOT_ROUTE)) return null;
   return parseHostWorkspaceRouteFromPathname(input.pathname);
+}
+
+// C32 裁定 2 (DESIGN-tablet §3.2): the transparent left-edge right-swipe band is
+// compact-only. In the wide split the session lives in the right column and its
+// pop is carried by hardware back and the capsule's visible 返回 key — an edge
+// band at the window's left edge would sit over the LIST column, where swiping
+// must never pop the session. Same input set as the capsule predicate so the
+// two can never disagree about "is the capsule up".
+export function shouldEnableShellEdgeBack(input: ShellSessionVisibilityInput): boolean {
+  return resolveShellSessionWorkspace(input) !== null && input.isCompact;
 }
 
 // ---------------------------------------------------------------------------

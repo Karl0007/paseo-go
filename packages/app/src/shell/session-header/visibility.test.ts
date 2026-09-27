@@ -8,19 +8,22 @@ import { OFFICIAL } from "@/shell/routes";
 import {
   createSessionHeaderRunner,
   HOST_ROOT_ROUTE,
-  SHELL_ROOT_ROUTE,
   resolveShellSessionWorkspace,
   sessionHeaderMenuPlan,
+  SHELL_ROOT_ROUTE,
+  shouldEnableShellEdgeBack,
+  type ShellSessionVisibilityInput,
 } from "./visibility";
 
 const SESSION_PATH = OFFICIAL.workspace("srv_1", "wks_86ef0");
 
-function input(over: Partial<Parameters<typeof resolveShellSessionWorkspace>[0]> = {}) {
+function input(over: Partial<ShellSessionVisibilityInput> = {}): ShellSessionVisibilityInput {
   return {
     shellMode: true,
     pathname: SESSION_PATH,
     rootRoutes: [SHELL_ROOT_ROUTE, HOST_ROOT_ROUTE],
     rootIndex: 1,
+    isCompact: true,
     ...over,
   };
 }
@@ -98,6 +101,56 @@ describe("resolveShellSessionWorkspace", () => {
     // /h/<sid>/workspace/<wid>/plugin/... is not the session screen route.
     const pathname = `${SESSION_PATH}/plugin/p/surface`;
     expect(resolveShellSessionWorkspace(input({ pathname }))).toBeNull();
+  });
+});
+
+// C32 裁定 2 acceptance: the 扩参 matrix. Every visibility bucket is replayed at
+// isCompact=true/false — the CAPSULE verdict must be value-identical across the
+// breakpoint (wide keeps it: it IS the detail-column header, DESIGN-tablet §3.2),
+// and the edge-back band is the one compact-only half of the overlay.
+const VISIBILITY_BUCKETS: ReadonlyArray<readonly [string, ShellSessionVisibilityInput]> = [
+  ["shell session (capsule up)", input()],
+  [
+    "shell session, open intent on URL (capsule up)",
+    input({ pathname: OFFICIAL.agentOpen("srv_1", "wks_86ef0", "agent-9") }),
+  ],
+  ["shell off", input({ shellMode: false })],
+  ["explorer overlay open", input({ explorerOverlayOpen: true })],
+  ["no shell provenance", input({ rootRoutes: [HOST_ROOT_ROUTE], rootIndex: 0 })],
+  [
+    "(shell) entry on top",
+    input({ rootRoutes: [SHELL_ROOT_ROUTE, HOST_ROOT_ROUTE, SHELL_ROOT_ROUTE], rootIndex: 2 }),
+  ],
+  ["tab route /chats", input({ pathname: "/chats" })],
+  ["official sessions route", input({ pathname: "/h/srv_1/sessions" })],
+  ["nested route below workspace index", input({ pathname: `${SESSION_PATH}/plugin/p/surface` })],
+];
+
+describe("C32 isCompact extension (capsule breakpoint-free, edge band compact-only)", () => {
+  it.each(VISIBILITY_BUCKETS)("%s: capsule verdict identical compact vs wide", (_label, base) => {
+    const compact = resolveShellSessionWorkspace({ ...base, isCompact: true });
+    const wide = resolveShellSessionWorkspace({ ...base, isCompact: false });
+    expect(wide).toEqual(compact);
+  });
+
+  it.each(VISIBILITY_BUCKETS)("%s: edge band on iff capsule up AND compact", (_label, base) => {
+    const capsuleUp = resolveShellSessionWorkspace(base) !== null;
+    expect(shouldEnableShellEdgeBack({ ...base, isCompact: true })).toBe(capsuleUp);
+    expect(shouldEnableShellEdgeBack({ ...base, isCompact: false })).toBe(false);
+  });
+
+  it("keeps the compact verdict byte-for-byte the pre-C32 predicate (既有桶逐值不变)", () => {
+    // The §6 zero-regression claim: with isCompact=true every bucket still
+    // returns exactly what the C21 predicate returned before the 扩参.
+    expect(resolveShellSessionWorkspace(input())).toEqual({
+      serverId: "srv_1",
+      workspaceId: "wks_86ef0",
+    });
+    expect(resolveShellSessionWorkspace(input({ shellMode: false }))).toBeNull();
+    expect(resolveShellSessionWorkspace(input({ explorerOverlayOpen: true }))).toBeNull();
+    expect(
+      resolveShellSessionWorkspace(input({ rootRoutes: [HOST_ROOT_ROUTE], rootIndex: 0 })),
+    ).toBeNull();
   });
 });
 

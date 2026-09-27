@@ -16,7 +16,7 @@ import { StyleSheet } from "react-native-unistyles";
 import { useTranslation } from "react-i18next";
 import { SHELL_I18N_NAMESPACE } from "@/shell/i18n";
 import { SHELL } from "@/shell/routes";
-import { TABLET_RAIL_WIDTH } from "./metrics";
+import { useTabletColumns } from "./form-factor";
 import { emitRailRetap } from "./rail-events";
 import type { TabletSection } from "./split-predicates";
 
@@ -89,8 +89,11 @@ function RailItemButton({
 
 export function TabletNavRail({ section }: { section: TabletSection }) {
   const { t } = useTranslation(SHELL_I18N_NAMESPACE);
+  // C31-F1: width from the window-dimension source shared with split activation
+  // (breakpoint-keyed style values would ride the stale Unistyles breakpoint).
+  const { rail } = useTabletColumns();
   return (
-    <View style={styles.rail} testID="shell-tablet-rail">
+    <View style={[styles.rail, { width: rail }]} testID="shell-tablet-rail">
       {TABLET_SECTIONS.map((item) => (
         <RailItemButton
           key={item.section}
@@ -105,9 +108,6 @@ export function TabletNavRail({ section }: { section: TabletSection }) {
 
 const styles = StyleSheet.create((theme) => ({
   rail: {
-    // §4: 56 at md, 64 at lg/xl — breakpoint values inherit upward from their
-    // definition, so xl needs no entry. Reactive without useUnistyles.
-    width: { md: TABLET_RAIL_WIDTH.md, lg: TABLET_RAIL_WIDTH.lg },
     flexShrink: 0,
     alignItems: "center",
     gap: theme.spacing[2],

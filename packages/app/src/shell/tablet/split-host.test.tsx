@@ -1,12 +1,14 @@
 // @vitest-environment jsdom
-// C30 acceptance 2 (passthrough half, C31-wired): the host is the §6 "byte-identical
-// tree" claim — inactive returns `children` with no wrapper element at all; active
-// renders [rail | list bodies | children] and the rail drives navigation (§4-3) plus
-// the §4-8 retap. C31 additions pinned here: the list column keep-alives visited
-// bodies (切 tab 不重挂, card 裁定 5) and feeds them the route-derived selection
-// (§3.2 选中态单一真相). The real bodies are stubbed — their own behaviour is the
-// screen tests' business; the column's is mounting/hiding/feeding.
-import React from "react";
+// C30 acceptance 2 (passthrough half, C31-wired, C32-C31-F1 shape): inactive
+// adds no rail/column and no split testID — just two transparent flex:1 wrappers
+// (the §6 tree claim restated: no visual/layout delta, verified on-device);
+// active renders [rail | list bodies | children] and the rail drives navigation
+// (§4-3) plus the §4-8 retap. C31 additions pinned here: the list column
+// keep-alives visited bodies (切 tab 不重挂, card 裁定 5) and feeds them the
+// route-derived selection (§3.2 选中态单一真相). C32 adds the structural half of
+// C31-F1: the activation flip must NEVER remount the children subtree (device
+// redscreen: RNGH 2.28 dies on the old conditional-shape remount mid-rotation).
+import React, { useState } from "react";
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { router, usePathname } from "expo-router";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -34,7 +36,9 @@ const env = vi.hoisted(() => {
     borderRadius: { base: 4, md: 6, lg: 8, xl: 12, full: 9999 },
   };
   const state = {
-    breakpoint: "lg" as string | undefined,
+    // C31-F1: activation + column widths key off the window-dimension hook
+    // (mocked below) — the test drives rotation via `compact`, not a breakpoint.
+    compact: false,
     pending: false,
     active: true,
     selectedAgentKey: null as string | null,
@@ -46,7 +50,7 @@ const env = vi.hoisted(() => {
         typeof styles === "function" ? (styles as (t: typeof theme) => unknown)(theme) : styles,
     },
     withUnistyles: <T,>(component: T): T => component,
-    useUnistyles: () => ({ theme, rt: { breakpoint: state.breakpoint } }),
+    useUnistyles: () => ({ theme, rt: { breakpoint: state.compact ? "sm" : "lg" } }),
   };
 });
 
@@ -54,6 +58,11 @@ vi.mock("react-native-unistyles", () => ({
   StyleSheet: env.StyleSheet,
   withUnistyles: env.withUnistyles,
   useUnistyles: env.useUnistyles,
+}));
+// The form-factor seam (split activation + rail/list widths, C31-F1) driven directly.
+vi.mock("./form-factor", () => ({
+  useShellWindowCompact: () => env.state.compact,
+  useTabletColumns: () => ({ rail: 64, list: 300 }),
 }));
 vi.mock("@/shell/use-shell-seam", () => ({
   useShellSeam: () => ({ pending: env.state.pending, active: env.state.active }),
@@ -83,16 +92,29 @@ vi.mock("./use-tablet-selection", () => ({
 
 const pathname = vi.mocked(usePathname);
 
-function renderHost() {
-  return render(
+// The detail-column stand-in stamps its mount identity: any remount changes
+// the text, so "DETAIL-1 forever" IS the no-remount assertion.
+let childMounts = 0;
+function CountingChild() {
+  const [stamp] = useState(() => `DETAIL-${(childMounts += 1)}`);
+  return <Text testID="split-child">{stamp}</Text>;
+}
+
+function hostTree() {
+  return (
     <ShellTabletSplitHost>
-      <Text testID="split-child">DETAIL-COLUMN</Text>
-    </ShellTabletSplitHost>,
+      <CountingChild />
+    </ShellTabletSplitHost>
   );
 }
 
+function renderHost() {
+  return render(hostTree());
+}
+
 beforeEach(() => {
-  env.state.breakpoint = "lg";
+  childMounts = 0;
+  env.state.compact = false;
   env.state.pending = false;
   env.state.active = true;
   env.state.selectedAgentKey = null;
@@ -102,15 +124,39 @@ beforeEach(() => {
 afterEach(cleanup);
 
 describe("ShellTabletSplitHost", () => {
-  it("passes children through with NO wrapper when compact", () => {
-    env.state.breakpoint = "sm";
+  it("renders no rail/column and no split testID when compact (transparent wrappers only)", () => {
+    env.state.compact = true;
     const { container } = renderHost();
     expect(screen.queryByTestId("shell-tablet-split")).toBeNull();
     expect(screen.queryByTestId("shell-tablet-rail")).toBeNull();
-    // The child IS the container's root — the seam adds no element.
-    expect(container.firstElementChild).toBe(screen.getByTestId("split-child"));
+    // The seam adds a full-size transparent wrapper CHAIN (row → detail slot);
+    // the child is still the only content, filling the same box.
+    const wrapper = container.firstElementChild;
+    expect(wrapper).not.toBeNull();
+    expect(wrapper?.firstElementChild?.firstElementChild).toBe(screen.getByTestId("split-child"));
     // Compact never mounts a list body (the tab screens own them there).
     expect(screen.queryByTestId("body-chats")).toBeNull();
+  });
+
+  it("never remounts the children subtree across the split flip (C31-F1)", () => {
+    // Rotation = compact↔wide flip with a session open. The pre-C32 host swapped
+    // the element type at the children slot → full AppContainer remount → RNGH
+    // 2.28 mount-listener race crashed the app (device redscreen). The stable
+    // wrapper chain keeps the official tree — and its gesture detectors — alive.
+    env.state.compact = true;
+    const { rerender } = renderHost();
+    expect(screen.getByTestId("split-child").textContent).toBe("DETAIL-1");
+
+    env.state.compact = false; // portrait → landscape
+    rerender(hostTree());
+    expect(screen.getByTestId("shell-tablet-split")).not.toBeNull();
+    expect(screen.getByTestId("split-child").textContent).toBe("DETAIL-1");
+    expect(childMounts).toBe(1);
+
+    env.state.compact = true; // landscape → portrait
+    rerender(hostTree());
+    expect(screen.getByTestId("split-child").textContent).toBe("DETAIL-1");
+    expect(childMounts).toBe(1);
   });
 
   it("passes children through with the shell off and on full-bleed routes", () => {
@@ -162,11 +208,7 @@ describe("ShellTabletSplitHost", () => {
     expect(screen.getByTestId("body-chats")).not.toBeNull();
 
     pathname.mockReturnValue("/workspace");
-    rerender(
-      <ShellTabletSplitHost>
-        <Text testID="split-child">DETAIL-COLUMN</Text>
-      </ShellTabletSplitHost>,
-    );
+    rerender(hostTree());
     // The workspace body mounts AND the chats body stays mounted (hidden pane) —
     // its scroll position and in-body state survive the switch.
     expect(screen.getByTestId("body-workspace")).not.toBeNull();

@@ -2,31 +2,31 @@
 // C30 acceptance 2: the hook-level activation gate — seam pending (R-2/KI3),
 // compact, shell-off and full-bleed all hold the passthrough; the section
 // memory across `/h/…`-style pushes is the §3.2-2 "宿主 ref 记忆" behaviour.
+// C32 (C31-F1): the compact signal is the window-dimension hook (form-factor),
+// not the Unistyles breakpoint — the width→compact threshold itself is pinned
+// in form-factor.test.ts; here the hook is driven directly, which is also the
+// rotation itself (compact flips without any breakpoint machinery in the graph).
 import { renderHook } from "@testing-library/react";
-import { useTabletSplit } from "./use-tablet-split";
 import { usePathname } from "expo-router";
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { useTabletSplit } from "./use-tablet-split";
 
 const env = vi.hoisted(() => ({
-  breakpoint: "lg" as string | undefined,
+  compact: false,
   seam: { pending: false, active: true },
 }));
 
-// Full replacement (not importOriginal+spread): vitest's alias to the unistyles
-// test double does not apply to importOriginal, and the hook's graph only needs
-// useUnistyles (constants/layout subscribes through it).
-vi.mock("react-native-unistyles", () => ({
-  useUnistyles: () => ({
-    theme: { colors: { accent: "#2563eb", foregroundMuted: "#666666" } },
-    rt: { breakpoint: env.breakpoint },
-  }),
+// The activation source is mocked at the hook seam — form-factor's own pure
+// thresholds are unit-pinned separately (form-factor.test.ts).
+vi.mock("./form-factor", () => ({
+  useShellWindowCompact: () => env.compact,
 }));
 vi.mock("@/shell/use-shell-seam", () => ({ useShellSeam: () => env.seam }));
 
 const pathname = vi.mocked(usePathname);
 
 beforeEach(() => {
-  env.breakpoint = "lg";
+  env.compact = false;
   env.seam.pending = false;
   env.seam.active = true;
   pathname.mockReturnValue("/chats");
@@ -38,10 +38,21 @@ describe("useTabletSplit", () => {
     expect(result.current).toEqual({ active: true, section: "chats" });
   });
 
-  it.each(["xs", "sm"] as const)("passes through at the compact breakpoint %s", (bp) => {
-    env.breakpoint = bp;
+  it("passes through while the window is compact (portrait / half-split)", () => {
+    env.compact = true;
     const { result } = renderHook(() => useTabletSplit());
     expect(result.current.active).toBe(false);
+  });
+
+  it("flips the split on with the window on every rotation (C31-F1)", () => {
+    const { result, rerender } = renderHook(() => useTabletSplit());
+    expect(result.current.active).toBe(true);
+    env.compact = true; // portrait
+    rerender();
+    expect(result.current.active).toBe(false);
+    env.compact = false; // landscape — the frame Unistyles never delivered
+    rerender();
+    expect(result.current.active).toBe(true);
   });
 
   it("passes through with the shell off (official IA untouched)", () => {

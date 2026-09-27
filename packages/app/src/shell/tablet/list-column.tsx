@@ -28,13 +28,16 @@ import { StyleSheet } from "react-native-unistyles";
 import { ChatsScreenBody } from "@/shell/components/chats-screen-body";
 import { MeScreenBody } from "@/shell/components/me-screen-body";
 import { WorkspaceScreenBody } from "@/shell/components/workspace-screen-body";
-import { TABLET_LIST_WIDTH } from "./metrics";
+import { useTabletColumns } from "./form-factor";
 import { TABLET_SECTIONS } from "./nav-rail";
 import type { TabletSection } from "./split-predicates";
 import { useTabletSelectedAgentKey } from "./use-tablet-selection";
 
 export function TabletListColumn({ section }: { section: TabletSection }) {
   const selectedAgentKey = useTabletSelectedAgentKey();
+  // C31-F1: same window-dimension source as split activation — the column flips
+  // its 260/300 pair in the same frame the split activates (no stale breakpoint).
+  const { list } = useTabletColumns();
   // Keep-alive: 首访挂载，此后只遮挡不卸载 (see header note).
   const [visited, setVisited] = useState<readonly TabletSection[]>(() => [section]);
   if (!visited.includes(section)) {
@@ -43,7 +46,7 @@ export function TabletListColumn({ section }: { section: TabletSection }) {
     setVisited((prev) => (prev.includes(section) ? prev : [...prev, section]));
   }
   return (
-    <View style={styles.column} testID="shell-tablet-list-column">
+    <View style={[styles.column, { width: list }]} testID="shell-tablet-list-column">
       {TABLET_SECTIONS.map((meta) => {
         if (!visited.includes(meta.section)) return null;
         const active = meta.section === section;
@@ -70,8 +73,7 @@ function renderSectionBody(section: TabletSection, selectedAgentKey: string | nu
 
 const styles = StyleSheet.create((theme) => ({
   column: {
-    // §4: 260 at md, 300 at lg/xl (breakpoint values inherit upward).
-    width: { md: TABLET_LIST_WIDTH.md, lg: TABLET_LIST_WIDTH.lg },
+    // §4 widths come from `useTabletColumns` (window dimensions, C31-F1).
     flexShrink: 0,
     backgroundColor: theme.colors.surface0,
     borderRightWidth: theme.borderWidth[1],

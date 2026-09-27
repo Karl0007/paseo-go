@@ -1,9 +1,9 @@
 // C30 split sizing (DESIGN-tablet.md §2 matrix / §4 row 5). The split only ever
-// renders at md+ (≥720dp, §2), so these tables key md and lg (xl inherits lg —
-// Unistyles breakpoint values cascade upward from their definition point). The
-// components consume them as breakpoint-keyed style values inside
-// StyleSheet.create, which keeps theme/breakpoint reactivity in the Unistyles
-// native path (no useUnistyles, docs/unistyles.md).
+// renders at md+ (≥720dp, §2), so these tables key md and lg (xl inherits lg).
+// C31-F1 (C32): the tables are consumed through form-factor.ts — the active pair
+// is picked from `useWindowDimensions()`, NOT from Unistyles breakpoint-keyed
+// style values, because `rt.breakpoint` stays stale across a runtime rotation
+// (device-proven) and would leave the columns on the old breakpoint.
 import { MAX_CONTENT_WIDTH } from "@/constants/layout";
 
 /** Nav rail: 56 (md) / 64 (lg+). */

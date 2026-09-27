@@ -7,7 +7,7 @@ import { FolderTree, MessageCircle, User } from "lucide-react-native";
 import { useEffect, useMemo } from "react";
 import { useTranslation } from "react-i18next";
 import { StyleSheet, withUnistyles } from "react-native-unistyles";
-import { useIsCompactFormFactor } from "@/constants/layout";
+import { useShellWindowCompact } from "@/shell/tablet/form-factor";
 import { useShellNotifications } from "@/shell/notify/use-shell-notifications";
 import { ensureShellI18n, SHELL_I18N_NAMESPACE } from "@/shell/i18n";
 import { usePaseoGoSettingsStore, type ShellTab } from "@/shell/stores/settings";
@@ -62,7 +62,10 @@ function ShellTabsBase({
   // C30 (DESIGN-tablet.md §3.2-1): on wide screens the bottom bar is replaced by
   // the ShellTabletSplitHost nav rail, so it is hidden — Tabs skeleton, hidden
   // screens and the lastFocusedTab recovery below all stay as-is.
-  const isCompact = useIsCompactFormFactor();
+  // C31-F1 (C32): same window-dimension source as the split host itself — a
+  // runtime rotation flips bar and split in the same frame (the Unistyles
+  // breakpoint stayed stale portrait→landscape and left the bar visible mid-split).
+  const isCompact = useShellWindowCompact();
   const screenOptions = useMemo(
     () => ({
       headerShown: false,

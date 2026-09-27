@@ -18,7 +18,8 @@
 // (agent list) and right-open (explorer) swipes and releases them on unmount
 // (shell-off / non-session routes see zero behaviour change), while a
 // transparent 32dp left-edge band carries the shell's own rightward-swipe →
-// router.back() (session-header/edge-swipe + use-shell-edge-back-gesture).
+// router.back() (shell-header/edge-swipe + use-shell-edge-back-gesture). The band
+// is compact-only (C32 裁定 2): wide pops via hardware back / the capsule 返回 key.
 // While the compact explorer overlay is open the capsule yields its band
 // (visibility input explorerOverlayOpen) — the overlay owns the top rail then.
 //
@@ -68,7 +69,6 @@ import {
   HEADER_INNER_HEIGHT,
   HEADER_INNER_HEIGHT_MOBILE,
   HEADER_TOP_PADDING_MOBILE,
-  useIsCompactFormFactor,
 } from "@/constants/layout";
 import { useBlockMobilePanelOpenGestures } from "@/mobile-panels/provider";
 import {
@@ -82,10 +82,12 @@ import { usePaseoGoPinsStore } from "@/shell/stores/pins";
 import { usePaseoGoShellActive } from "@/shell/stores/settings";
 import { useShellAgentActions, type ShellChatTarget } from "@/shell/shellAgentActions";
 import { ChatStatusLight } from "@/shell/components/chat-status-light";
+import { useShellWindowCompact } from "@/shell/tablet/form-factor";
 import {
   createSessionHeaderRunner,
   resolveShellSessionWorkspace,
   sessionHeaderMenuPlan,
+  shouldEnableShellEdgeBack,
   type SessionHeaderActionableId,
   type SessionHeaderActionId,
   type ShellSessionWorkspaceTarget,
@@ -164,16 +166,29 @@ export function ShellSessionHeaderOverlay() {
   // every push/pop changes the pathname below, which re-renders this overlay.
   const rootState = useRootNavigation()?.getState()?.routes[0]?.state;
 
-  const workspace = useMemo(
-    () =>
-      resolveShellSessionWorkspace({
-        shellMode: shellActive,
-        pathname,
-        rootRoutes: (rootState?.routes ?? []).map((route) => route.name),
-        rootIndex: rootState?.index ?? -1,
-        explorerOverlayOpen,
-      }),
-    [shellActive, pathname, rootState, explorerOverlayOpen],
+  // C31-F1/C32: the compact flag comes from the window-dimension source the
+  // tablet split uses — a runtime rotation flips the capsule's compact/wide
+  // metrics together with the split (the Unistyles breakpoint stayed stale).
+  const isCompact = useShellWindowCompact();
+
+  const visibilityInput = useMemo(
+    () => ({
+      shellMode: shellActive,
+      pathname,
+      rootRoutes: (rootState?.routes ?? []).map((route) => route.name),
+      rootIndex: rootState?.index ?? -1,
+      explorerOverlayOpen,
+      isCompact,
+    }),
+    [shellActive, pathname, rootState, explorerOverlayOpen, isCompact],
+  );
+  const workspace = useMemo(() => resolveShellSessionWorkspace(visibilityInput), [visibilityInput]);
+  // C32 裁定 2: the left-edge back band is compact-only (wide pops via
+  // hardware back / the capsule's 返回 key — an edge band would sit over the
+  // split's list column).
+  const edgeBackEnabled = useMemo(
+    () => shouldEnableShellEdgeBack(visibilityInput),
+    [visibilityInput],
   );
   const serverId = workspace?.serverId ?? null;
 
@@ -192,7 +207,14 @@ export function ShellSessionHeaderOverlay() {
   }, [agents, serverId, focusedAgentId]);
 
   if (!workspace || !agent) return null;
-  return <ShellSessionHeaderCapsule workspace={workspace} agent={agent} />;
+  return (
+    <ShellSessionHeaderCapsule
+      workspace={workspace}
+      agent={agent}
+      isCompact={isCompact}
+      edgeBackEnabled={edgeBackEnabled}
+    />
+  );
 }
 
 // The provider lives ABOVE the consumer (the ChatListRow/ChatRowInner split):
@@ -200,14 +222,23 @@ export function ShellSessionHeaderOverlay() {
 function ShellSessionHeaderCapsule({
   workspace,
   agent,
+  isCompact,
+  edgeBackEnabled,
 }: {
   workspace: ShellSessionWorkspaceTarget;
   agent: AggregatedAgent;
+  isCompact: boolean;
+  edgeBackEnabled: boolean;
 }) {
   return (
     <Portal hostName={DEFAULT_FLOATING_PANEL_PORTAL_HOST} name={SESSION_HEADER_PORTAL_NAME}>
       <ContextMenu compactMode="popover">
-        <CapsuleInner workspace={workspace} agent={agent} />
+        <CapsuleInner
+          workspace={workspace}
+          agent={agent}
+          isCompact={isCompact}
+          edgeBackEnabled={edgeBackEnabled}
+        />
       </ContextMenu>
     </Portal>
   );
@@ -216,15 +247,18 @@ function ShellSessionHeaderCapsule({
 function CapsuleInner({
   workspace,
   agent,
+  isCompact,
+  edgeBackEnabled,
 }: {
   workspace: ShellSessionWorkspaceTarget;
   agent: AggregatedAgent;
+  isCompact: boolean;
+  edgeBackEnabled: boolean;
 }) {
   const { t } = useTranslation(SHELL_I18N_NAMESPACE);
   const insets = useSafeAreaInsets();
   const menu = useContextMenu();
   const actions = useShellAgentActions();
-  const isCompact = useIsCompactFormFactor();
   const descriptor = useWorkspace(workspace.serverId, workspace.workspaceId);
 
   // C21 edge reroute, part 1: park the official left-open (agent list) and
@@ -233,7 +267,8 @@ function CapsuleInner({
   // and every non-session route see the official gestures untouched.
   useBlockMobilePanelOpenGestures(true);
   // C21 edge reroute, part 2: the shell's own left-edge right-swipe → back.
-  const edgeGesture = useShellEdgeBackGesture(true);
+  // C32 裁定 2: enabled only while compact (the overlay's pure predicate decides).
+  const edgeGesture = useShellEdgeBackGesture(edgeBackEnabled);
 
   const key = `${workspace.serverId}:${agent.id}`;
   const alias = usePaseoGoPinsStore((state) => state.aliases[key]);
@@ -367,14 +402,17 @@ function CapsuleInner({
           The layer is skipped by RN's hit-test, so touches land on the session
           underneath while RNGH still arbitrates the stream; the ≈32dp edge is
           the hook's start-x gate. The plain band View below is a layout/testID
-          anchor for that edge only. */}
+          anchor for that edge only — and compact-only (C32 裁定 2): wide drops
+          it, so the testID's absence is the on-device proof of the gate. */}
       <GestureDetector gesture={edgeGesture}>
         <View pointerEvents="box-none" style={styles.layer}>
-          <View
-            pointerEvents="none"
-            style={styles.edgeBand}
-            testID={`shell-session-edge-band-${key}`}
-          />
+          {edgeBackEnabled ? (
+            <View
+              pointerEvents="none"
+              style={styles.edgeBand}
+              testID={`shell-session-edge-band-${key}`}
+            />
+          ) : null}
           <View style={barStyle} testID={`shell-session-header-${key}`}>
             <Pressable
               onPress={goBack}
