@@ -806,6 +806,24 @@ const AgentActiveTurnPayloadSchema = z.object({
   startedAt: z.string().nullable(),
 });
 
+/**
+ * R2-14 (Paseo Go review): the date fields on the agent/session payloads below
+ * (`createdAt`/`updatedAt`/`lastUserMessageAt`/`attentionTimestamp`/
+ * `archivedAt`, `RecentProviderSessionDescriptorPayload.lastActivityAt`) are
+ * deliberately plain `z.string()` — narrowing them to `z.coerce.date()` (the
+ * ActivityLogPayloadSchema.timestamp precedent) or `z.string().datetime()`
+ * would start REJECTING non-compliant hosts on the wire, which the protocol
+ * compat rule forbids for shipped fields. That makes every date string
+ * untrusted input: `new Date(garbage).getTime()` is NaN, and NaN leaks into
+ * sort comparators, renders "Invalid Date NaN", and fails int/nonnegative
+ * persist schemas — which downstream drops whole stores. Consumers MUST parse
+ * through this helper and treat null as "no trustworthy timestamp".
+ */
+export function parseDateOrNull(value: string): Date | null {
+  const date = new Date(value);
+  return Number.isNaN(date.getTime()) ? null : date;
+}
+
 export const AgentSnapshotPayloadSchema = z.object({
   id: z.string(),
   provider: AgentProviderSchema,
@@ -816,7 +834,7 @@ export const AgentSnapshotPayloadSchema = z.object({
   thinkingOptionId: z.string().nullable().optional(),
   effectiveThinkingOptionId: z.string().nullable().optional(),
   createdAt: z.string(),
-  updatedAt: z.string(),
+  updatedAt: z.string(), // R2-14: untrusted date string — parse via parseDateOrNull
   lastUserMessageAt: z.string().nullable(),
   status: AgentStatusSchema,
   activeTurn: AgentActiveTurnPayloadSchema.nullable().optional(),
@@ -850,7 +868,7 @@ export const AgentListItemPayloadSchema = z.object({
   status: AgentStatusSchema,
   cwd: z.string(),
   createdAt: z.string(),
-  updatedAt: z.string(),
+  updatedAt: z.string(), // R2-14: untrusted date string — parse via parseDateOrNull
   lastUserMessageAt: z.string().nullable(),
   archivedAt: z.string().nullable().optional(),
   requiresAttention: z.boolean().optional(),
@@ -872,7 +890,7 @@ export const RecentProviderSessionDescriptorPayloadSchema = z.object({
   title: z.string().nullable(),
   firstPromptPreview: z.string().nullable(),
   lastPromptPreview: z.string().nullable(),
-  lastActivityAt: z.string(),
+  lastActivityAt: z.string(), // R2-14: untrusted date string — parse via parseDateOrNull
   // COMPAT(importDescriptorParentChain): added 2026-09-27 (Paseo Go C25), optional
   // while clients support older daemons. Providers that have no parent-chain
   // concept (claude/codex/pi) omit these entirely. `parentHandleId` is

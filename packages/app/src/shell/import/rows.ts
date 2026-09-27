@@ -4,7 +4,9 @@
 // getPromptPreview），壳不重抄一份降级规则。
 
 import type { FetchRecentProviderSessionEntry } from "@getpaseo/client/internal/daemon-client";
+import { parseDateOrNull } from "@getpaseo/protocol/messages";
 import { getPromptPreview, getSessionTitle } from "@/components/import-session-sheet-view-model";
+import { formatCompactTimeAgo } from "@/utils/time";
 
 /** 一行的全部渲染事实；key 与官方聚合一致：`providerId:providerHandleId`。 */
 export interface ImportRow {
@@ -17,7 +19,10 @@ export interface ImportRow {
   preview: string;
   /** 项目目录的短标签（官方 resolveDirectoryLabel 结果）；未知目录为 null。 */
   folder: string | null;
-  lastActivityAt: number;
+  /** R2-14: epoch ms of the host-reported activity; null = the host sent a
+   *  non-date string (the wire field is a bare z.string()). Rows with null
+   *  sort last and render the placeholder time segment, never "Invalid Date". */
+  lastActivityAt: number | null;
   /**
    * C25 父链副标题的父名段：parentTitle 优先，缺席时取 parentHandleId 尾段
    * （omp=父 transcript 路径的文件名去扩展名）；两者都无（claude/codex 或旧
@@ -97,14 +102,27 @@ export function mapEntriesToImportRows(
       title: getSessionTitle(entry),
       preview: getPromptPreview(entry),
       folder: folderFor(entry.cwd),
-      lastActivityAt: new Date(entry.lastActivityAt).getTime(),
+      lastActivityAt: parseDateOrNull(entry.lastActivityAt)?.getTime() ?? null,
       parentLabel: parent?.text ?? null,
       parentIsRawId: parent?.raw ?? false,
       looksActive: entry.looksActive === true,
     });
   }
-  rows.sort((a, b) => b.lastActivityAt - a.lastActivityAt);
+  // R2-14: unknown dates (null) sink below every trustworthy one (0=epoch 序).
+  rows.sort((a, b) => (b.lastActivityAt ?? 0) - (a.lastActivityAt ?? 0));
   return rows;
+}
+
+/**
+ * 行 meta 的时间段（纯函数，屏只负责占位措辞的 t() 包裹）。
+ * R2-14: null = 主机日期串不可解析 → 屏渲染占位，绝不让
+ * formatCompactTimeAgo(new Date(NaN)) 吐出 "Invalid Date NaN"。
+ */
+export function importRowTimeLabel(
+  lastActivityAt: number | null,
+  now: Date = new Date(),
+): string | null {
+  return lastActivityAt === null ? null : formatCompactTimeAgo(new Date(lastActivityAt), now);
 }
 
 /**

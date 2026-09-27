@@ -256,7 +256,9 @@ export function WorkspaceScreenBody({ selectedAgentKey = null }: ShellScreenBody
         navigateToAgent: shellNavigateToAgent,
         lastEventAtOf: (serverId, agentId) => {
           const agent = useSessionStore.getState().sessions[serverId]?.agents.get(agentId);
-          return agent ? chatLastEventAtFromAgent(agent) : undefined;
+          // R2-14: null (garbage host dates) maps to undefined = "no fresh
+          // watermark"; the opener keeps its pending visit, never writes NaN.
+          return agent ? (chatLastEventAtFromAgent(agent) ?? undefined) : undefined;
         },
         confirmFork: () =>
           confirmDialog({

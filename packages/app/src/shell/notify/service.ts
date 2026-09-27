@@ -80,10 +80,12 @@ function openFromResponse(response: Notifications.NotificationResponse): void {
   // (cold start) leaves the dot instead of writing a device-clock watermark that
   // would swallow every host event until the clocks cross.
   const agent = useSessionStore.getState().sessions[payload.serverId]?.agents.get(payload.agentId);
-  if (agent) {
-    usePaseoGoReadStateStore
-      .getState()
-      .markRead(`${payload.serverId}:${payload.agentId}`, chatLastEventAtFromAgent(agent));
+  // R2-14: chatLastEventAtFromAgent is null when the host's date strings are
+  // garbage — leave the dot (the same no-bogus-watermark posture as an
+  // unloaded directory) instead of writing NaN into the persisted store.
+  const at = agent ? chatLastEventAtFromAgent(agent) : null;
+  if (at !== null) {
+    usePaseoGoReadStateStore.getState().markRead(`${payload.serverId}:${payload.agentId}`, at);
   }
   shellNavigateToAgent(payload);
   void Notifications.dismissNotificationAsync(identifier).catch(() => {});

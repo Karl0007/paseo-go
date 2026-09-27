@@ -10,6 +10,7 @@ import { useTranslation } from "react-i18next";
 import { useAggregatedAgents } from "@/hooks/use-aggregated-agents";
 import { useHostRegistryStatus, useHosts } from "@/runtime/host-runtime";
 import { deriveSidebarStateBucket } from "@/utils/sidebar-agent-state";
+import { finiteTimeMs } from "@/shell/chats/derive";
 import { usePaseoGoPinsStore } from "@/shell/stores/pins";
 import { usePaseoGoSettingsStore } from "@/shell/stores/settings";
 import { SHELL_I18N_NAMESPACE } from "@/shell/i18n";
@@ -63,8 +64,11 @@ export function useShellNotifications(): void {
           attentionReason: agent.attentionReason ?? null,
           pendingPermissionCount: agent.pendingPermissionCount ?? 0,
         }),
-        attentionTimestamp: agent.attentionTimestamp ? agent.attentionTimestamp.getTime() : null,
-        lastActivityAt: agent.lastActivityAt.getTime(),
+        // R2-14: untrusted host dates → finiteTimeMs; garbage activity reads as
+        // epoch (0) and garbage attention as absent, so a NaN stamp can never
+        // enter the notified ledger (NaN would defeat dedupe → re-notify storm).
+        attentionTimestamp: finiteTimeMs(agent.attentionTimestamp),
+        lastActivityAt: finiteTimeMs(agent.lastActivityAt) ?? 0,
       }));
     const plan = planAttentionEvents({
       enabled,

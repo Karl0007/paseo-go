@@ -33,6 +33,16 @@ export function createValidatedPersistStorage<State>(
     setItem: async (name, value) => {
       const result = envelopeSchema.safeParse(value);
       if (!result.success) {
+        // R2-13 (warn half only): this drop used to be silent, which hid
+        // R2-14's NaN-driven whole-store eviction. Log it; the removeItem
+        // behaviour itself is still R2-13's pending ruling — unchanged here.
+        console.warn(
+          "[validatedPersistStorage] setItem rejected by schema; dropped persisted copy",
+          {
+            name,
+            issues: result.error.issues.map((issue) => issue.path.join(".") + ": " + issue.code),
+          },
+        );
         await backingStorage.removeItem(name);
         return;
       }

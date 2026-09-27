@@ -41,7 +41,6 @@ import { useDebouncedValue } from "@/hooks/use-debounced-value";
 import { useHostFeature } from "@/runtime/host-features";
 import { SearchModeBar } from "@/shell/components/search/search-mode-bar";
 import { normalizeSearchQuery } from "@/shell/search/query";
-import { formatCompactTimeAgo } from "@/utils/time";
 import { SHELL_I18N_NAMESPACE } from "@/shell/i18n";
 import { OFFICIAL, SHELL_TAB } from "@/shell/routes";
 import {
@@ -49,6 +48,7 @@ import {
   classifyImportError,
   deriveImportStatus,
   filterImportEntriesByQuery,
+  importRowTimeLabel,
   mapEntriesToImportRows,
   summarizeImportAttempts,
   toggleRowSelection,
@@ -87,9 +87,11 @@ function ImportRowCell({
 }) {
   const { t } = useTranslation(SHELL_I18N_NAMESPACE);
   const ProviderIcon = getProviderIcon(row.providerId, serverId);
-  const meta = [row.folder, formatCompactTimeAgo(new Date(row.lastActivityAt))]
-    .filter(Boolean)
-    .join(" · ");
+  // R2-14: a non-compliant host's date string maps to lastActivityAt=null on
+  // the row; the meta shows the bilingual placeholder instead of the
+  // "Invalid Date NaN" the formatter would produce for NaN.
+  const timeLabel = importRowTimeLabel(row.lastActivityAt) ?? t("import.metaTimeUnknown");
+  const meta = [row.folder, timeLabel].filter(Boolean).join(" · ");
   const handlePress = useCallback(() => onToggle(row.key), [onToggle, row.key]);
   return (
     <Pressable

@@ -29,10 +29,21 @@ export const usePaseoGoReadStateStore = create<PaseoGoReadStateState>()(
   persist<PaseoGoReadStateState, [], [], z.infer<typeof PaseoGoReadStatePersistedSchema>>(
     (set) => ({
       lastReadAt: {},
-      markRead: (key, at) =>
+      markRead: (key, at) => {
+        // R2-14 entry guard: `at` is an untrusted derivation of host date
+        // strings (protocol bare z.string()). The persisted schema is
+        // int/nonnegative — a NaN/Infinity/negative stamp written here would
+        // fail setItem validation, and validated-persist-storage answers that
+        // by dropping the WHOLE store (the R2-13 eviction chain). Refuse the
+        // bad watermark instead: the row keeps its previous stamp.
+        if (!Number.isSafeInteger(at) || at < 0) {
+          console.warn("[readState] markRead dropped non-stamp watermark", { key, at });
+          return;
+        }
         set((state) => ({
           lastReadAt: { ...state.lastReadAt, [key]: at },
-        })),
+        }));
+      },
       clear: (key) =>
         set((state) => {
           if (!(key in state.lastReadAt)) return state;

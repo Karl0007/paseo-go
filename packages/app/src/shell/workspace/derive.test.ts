@@ -695,3 +695,64 @@ describe("buildWorkspaceTree — 无会话 / 空态 / 主机", () => {
     expect(sections[0]?.projects).toEqual([]);
   });
 });
+
+// R2-14: the L3 twin of chatLastEventAtFromAgent over the same untrusted
+// protocol date fields. Garbage dates must read as "no trustworthy stamp"
+// (null → lastUsedAt stays null, the row sinks like a never-used one), never
+// as NaN — NaN used to poison the tree sort comparators and the L2 lastUsedAt
+// the screen renders.
+describe("R2-14 — garbage host dates never produce NaN", () => {
+  it("workspaceAgentLastEventAt: null when every date is garbage, the trustworthy one otherwise", () => {
+    expect(
+      workspaceAgentLastEventAt(
+        agent({ serverId: "h", id: "a", lastActivityAt: new Date("not-a-date") }),
+      ),
+    ).toBeNull();
+    expect(
+      workspaceAgentLastEventAt(
+        agent({
+          serverId: "h",
+          id: "a",
+          lastActivityAt: new Date("not-a-date"),
+          attentionTimestamp: new Date(2_500),
+        }),
+      ),
+    ).toBe(2_500);
+    expect(
+      workspaceAgentLastEventAt(
+        agent({
+          serverId: "h",
+          id: "a",
+          lastActivityAt: new Date(3_000),
+          attentionTimestamp: new Date("not-a-date"),
+        }),
+      ),
+    ).toBe(3_000);
+  });
+
+  it("tree: garbage dates sink like never-used; a trustworthy sibling still sorts", () => {
+    const sections = build({
+      projects: [project("v1", [hostEntry("host-a", "paseo", [workspace("ws-1", "a")])])],
+      agents: [
+        agent({
+          serverId: "host-a",
+          id: "ag-garbage",
+          workspaceId: "ws-1",
+          lastActivityAt: new Date("not-a-date"),
+        }),
+        agent({
+          serverId: "host-a",
+          id: "ag-good",
+          workspaceId: "ws-1",
+          lastActivityAt: new Date(2_000),
+        }),
+      ],
+      workspacePaths: new Map([["host-a:ws-1", "/repo/x"]]),
+    });
+    const l2 = section(sections, "host-a").projects[0].worktrees[0];
+    expect(l2.lastUsedAt).toBe(2_000);
+    // 可信戳在前，垃圾日期沉底（0=epoch 序），且排序确定性回落到 key。
+    expect(l2.sessions.map((s) => s.agentId)).toEqual(["ag-good", "ag-garbage"]);
+    expect(l2.sessions.every((s) => Number.isFinite(s.lastEventAt))).toBe(true);
+  });
+});

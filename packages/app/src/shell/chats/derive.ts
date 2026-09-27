@@ -55,17 +55,41 @@ export type ChatListItem<T extends ChatAgentInput = ChatAgentInput> =
   | { type: "section-header"; key: string; section: ChatSection<T> }
   | { type: "row"; key: string; row: ChatRow<T> };
 
-/** The chat's last event: directory activity, or the attention request if newer. */
-export function chatLastEventAt(agent: ChatAgentInput): number {
-  return Math.max(agent.lastActivityAt, agent.attentionTimestamp ?? 0);
+/**
+ * R2-14: protocol date fields are bare `z.string()` (wire-compat rule — see
+ * parseDateOrNull in @getpaseo/protocol/messages), so a non-compliant host can
+ * hand us an Invalid Date whose getTime() is NaN. NaN through Math.max is NaN,
+ * and NaN poisons sort comparators, renders "Invalid Date NaN", and fails the
+ * readState persist schema (int/nonnegative) — which validated-persist-storage
+ * answers by dropping the WHOLE store (R2-13). Shell consumers of untrusted
+ * Dates go through this helper; null = "no trustworthy timestamp", never NaN.
+ */
+export function finiteTimeMs(date: Date | null | undefined): number | null {
+  if (!date) return null;
+  const ms = date.getTime();
+  return Number.isFinite(ms) ? ms : null;
 }
 
-/** Date-field twin of chatLastEventAt for callers holding session-store rows. */
+/** The chat's last event: directory activity, or the attention request if newer.
+ *  R2-14: non-finite inputs (a caller that skipped finiteTimeMs) read as absent,
+ *  so the family's number contract can never carry NaN onward. */
+export function chatLastEventAt(agent: ChatAgentInput): number {
+  const activity = Number.isFinite(agent.lastActivityAt) ? agent.lastActivityAt : 0;
+  const attention = agent.attentionTimestamp ?? 0;
+  return Math.max(activity, Number.isFinite(attention) ? attention : 0);
+}
+
+/** Date-field twin of chatLastEventAt for callers holding session-store rows.
+ *  R2-14: null = every host date is garbage (the caller must skip the write);
+ *  one trustworthy date survives a garbage sibling. */
 export function chatLastEventAtFromAgent(agent: {
   lastActivityAt: Date;
   attentionTimestamp?: Date | null;
-}): number {
-  return Math.max(agent.lastActivityAt.getTime(), agent.attentionTimestamp?.getTime() ?? 0);
+}): number | null {
+  const activity = finiteTimeMs(agent.lastActivityAt);
+  const attention = finiteTimeMs(agent.attentionTimestamp);
+  if (activity === null && attention === null) return null;
+  return Math.max(activity ?? 0, attention ?? 0);
 }
 
 /** Unread is completion-gated (DESIGN §14.6, C18): only an attention event

@@ -29,6 +29,7 @@
     "subsession": "↳ Sub-session · {{parent}}",
     "subsessionRaw": "↳ Sub-session · source: {{parent}}",
     "activeBadge": "possibly active",
+    "metaTimeUnknown": "unknown time",
     "providerError": "{{provider}}: {{message}}",
     "submit": "Import ({{count}})",
     "importing": "Importing {{current}}/{{total}}…",

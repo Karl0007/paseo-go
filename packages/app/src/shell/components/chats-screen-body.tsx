@@ -58,6 +58,7 @@ import {
   chatLastEventAt,
   chatLastEventAtFromAgent,
   deriveChatSections,
+  finiteTimeMs,
   flattenChatSections,
   type ChatListItem,
   type ChatSectionKind,
@@ -276,7 +277,9 @@ export function ChatsScreenBody({ selectedAgentKey = null }: ShellScreenBodyProp
         navigateToAgent: shellNavigateToAgent,
         lastEventAtOf: (serverId, agentId) => {
           const agent = useSessionStore.getState().sessions[serverId]?.agents.get(agentId);
-          return agent ? chatLastEventAtFromAgent(agent) : undefined;
+          // R2-14: null (garbage host dates) maps to undefined = "no fresh
+          // watermark"; the opener keeps its pending visit, never writes NaN.
+          return agent ? (chatLastEventAtFromAgent(agent) ?? undefined) : undefined;
         },
         confirmFork: () =>
           confirmDialog({
@@ -347,8 +350,8 @@ export function ChatsScreenBody({ selectedAgentKey = null }: ShellScreenBodyProp
     let inputs: ShellChatAgent[] = agents.map((agent) => ({
       key: `${agent.serverId}:${agent.id}`,
       serverId: agent.serverId,
-      lastActivityAt: agent.lastActivityAt.getTime(),
-      attentionTimestamp: agent.attentionTimestamp ? agent.attentionTimestamp.getTime() : null,
+      lastActivityAt: finiteTimeMs(agent.lastActivityAt) ?? 0,
+      attentionTimestamp: finiteTimeMs(agent.attentionTimestamp),
       bucket: deriveSidebarStateBucket({
         status: agent.status,
         requiresAttention: Boolean(agent.requiresAttention),

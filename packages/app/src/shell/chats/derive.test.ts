@@ -1,6 +1,8 @@
 // C2 acceptance: grouping/sorting/unread pure logic (边界: 空/离线/多 host/等待批准优先).
 import { describe, expect, it } from "vitest";
 import {
+  chatLastEventAt,
+  chatLastEventAtFromAgent,
   deriveChatSections,
   flattenChatSections,
   isChatUnread,
@@ -234,5 +236,55 @@ describe("showsUnreadDot (C18 双点收敛)", () => {
     expect(showsUnreadDot("attention", 0)).toBe(true);
     expect(showsUnreadDot("done", 1)).toBe(false);
     expect(showsUnreadDot("attention", 2)).toBe(false);
+  });
+});
+
+// R2-14: protocol date fields are bare z.string() (wire-compat rule), so a
+// non-compliant host can deliver "not-a-date". getTime() on that is NaN, and
+// NaN used to flow chatLastEventAtFromAgent → markRead → the int/nonnegative
+// persist schema rejecting the envelope → validated-persist-storage dropping
+// the WHOLE readState store. The family must never emit NaN.
+describe("chatLastEventAt family — R2-14 untrusted protocol dates", () => {
+  it("chatLastEventAtFromAgent returns null (not NaN) when every host date is garbage", () => {
+    expect(chatLastEventAtFromAgent({ lastActivityAt: new Date("not-a-date") })).toBeNull();
+    expect(
+      chatLastEventAtFromAgent({
+        lastActivityAt: new Date("not-a-date"),
+        attentionTimestamp: new Date("also-garbage"),
+      }),
+    ).toBeNull();
+  });
+
+  it("one garbage field never poisons the trustworthy other", () => {
+    expect(
+      chatLastEventAtFromAgent({
+        lastActivityAt: new Date("not-a-date"),
+        attentionTimestamp: new Date(T0),
+      }),
+    ).toBe(T0);
+    expect(
+      chatLastEventAtFromAgent({
+        lastActivityAt: new Date(T0),
+        attentionTimestamp: new Date("not-a-date"),
+      }),
+    ).toBe(T0);
+  });
+
+  it("keeps the compliant max semantics untouched", () => {
+    expect(
+      chatLastEventAtFromAgent({
+        lastActivityAt: new Date(T0 + MINUTE),
+        attentionTimestamp: new Date(T0),
+      }),
+    ).toBe(T0 + MINUTE);
+    expect(chatLastEventAtFromAgent({ lastActivityAt: new Date(T0) })).toBe(T0);
+  });
+
+  it("chatLastEventAt never returns NaN even when a caller fed the numbers through", () => {
+    expect(chatLastEventAt(agent({ key: "k", lastActivityAt: Number.NaN }))).toBe(0);
+    expect(chatLastEventAt(agent({ key: "k", attentionTimestamp: Number.NaN }))).toBe(T0);
+    expect(
+      chatLastEventAt(agent({ key: "k", lastActivityAt: Number.NaN, attentionTimestamp: T0 })),
+    ).toBe(T0);
   });
 });

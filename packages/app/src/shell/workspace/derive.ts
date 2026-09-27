@@ -29,6 +29,7 @@ import type { HostRuntimeConnectionStatus } from "@/runtime/host-runtime";
 import type { ProjectSummary, WorkspaceSummary } from "@/utils/projects";
 import { normalizeWorkspacePath } from "@/utils/workspace-identity";
 import { deriveSidebarStateBucket } from "@/utils/sidebar-agent-state";
+import { finiteTimeMs } from "@/shell/chats/derive";
 
 export interface WorkspaceTreeHost {
   serverId: string;
@@ -155,9 +156,14 @@ export function isWorkspaceAgentNeedsInput(agent: WorkspaceTreeAgent): boolean {
   return workspaceAgentBucket(agent) === "needs_input";
 }
 
-/** Host-domain last event (chatLastEventAtFromAgent twin over the derive input). */
-export function workspaceAgentLastEventAt(agent: WorkspaceTreeAgent): number {
-  return Math.max(agent.lastActivityAt.getTime(), agent.attentionTimestamp?.getTime() ?? 0);
+/** Host-domain last event (chatLastEventAtFromAgent twin over the derive input).
+ *  R2-14: null = every host date is garbage (untrusted bare-z.string() wire
+ *  fields) — callers treat it like "never ran"; NaN never enters the tree. */
+export function workspaceAgentLastEventAt(agent: WorkspaceTreeAgent): number | null {
+  const activity = finiteTimeMs(agent.lastActivityAt);
+  const attention = finiteTimeMs(agent.attentionTimestamp);
+  if (activity === null && attention === null) return null;
+  return Math.max(activity ?? 0, attention ?? 0);
 }
 
 /**
@@ -202,7 +208,9 @@ function indexAgents(agents: readonly WorkspaceTreeAgent[]): Map<string, RecordS
     if (isWorkspaceAgentActive(agent)) entry.activeCount += 1;
     if (isWorkspaceAgentNeedsInput(agent)) entry.needsInputCount += 1;
     const at = workspaceAgentLastEventAt(agent);
-    if (entry.lastUsedAt === null || at > entry.lastUsedAt) entry.lastUsedAt = at;
+    if (at !== null && (entry.lastUsedAt === null || at > entry.lastUsedAt)) {
+      entry.lastUsedAt = at;
+    }
   }
   return stats;
 }
@@ -268,7 +276,7 @@ function indexSessions<A extends WorkspaceTreeAgent>(
     const session: WorkspaceTreeSession<A> = {
       key: `${agent.serverId}:${agent.id}`,
       agentId: agent.id,
-      lastEventAt: workspaceAgentLastEventAt(agent),
+      lastEventAt: workspaceAgentLastEventAt(agent) ?? 0,
       active: isWorkspaceAgentActive(agent),
       needsInput: isWorkspaceAgentNeedsInput(agent),
       agent,

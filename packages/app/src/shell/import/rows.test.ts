@@ -10,6 +10,7 @@ import {
   filterImportEntriesByQuery,
   importEntryMatchesQuery,
   importRowKey,
+  importRowTimeLabel,
   mapEntriesToImportRows,
   summarizeImportAttempts,
   toggleRowSelection,
@@ -356,5 +357,36 @@ describe("import row parent chain + looksActive", () => {
     });
     expect(plain).toMatchObject({ parentLabel: null, parentIsRawId: false, looksActive: false });
     expect(idle).toMatchObject({ parentLabel: "0198cd", parentIsRawId: true, looksActive: false });
+  });
+});
+
+// R2-14: `lastActivityAt` is a bare z.string() on the wire — a non-compliant
+// host can send "not-a-date". The row must carry null (unknown), sink like a
+// never-timestamped entry, and the meta time segment must be a placeholder the
+// screen picks, never the "Invalid Date NaN" the formatter produces for NaN.
+describe("R2-14 — non-compliant host dates", () => {
+  it("mapEntriesToImportRows: garbage date → null lastActivityAt, sinks below trustworthy rows", () => {
+    const rows = mapEntriesToImportRows(
+      [
+        entry({ providerHandleId: "garbage", lastActivityAt: "not-a-date" }),
+        entry({ providerHandleId: "ok", lastActivityAt: "2026-09-25T00:00:00.000Z" }),
+        entry({ providerHandleId: "empty", lastActivityAt: "" }),
+      ],
+      () => null,
+    );
+    expect(rows.map((row) => row.providerHandleId)).toEqual(["ok", "garbage", "empty"]);
+    expect(rows[0]?.lastActivityAt).toBe(Date.parse("2026-09-25T00:00:00.000Z"));
+    expect(rows[1]?.lastActivityAt).toBeNull();
+    expect(rows[2]?.lastActivityAt).toBeNull();
+  });
+
+  it("importRowTimeLabel: null for unknown; compact label for a real instant — never Invalid Date", () => {
+    expect(importRowTimeLabel(null)).toBeNull();
+    expect(
+      importRowTimeLabel(
+        Date.parse("2026-09-25T08:00:00.000Z"),
+        new Date("2026-09-25T08:05:00.000Z"),
+      ),
+    ).toBe("5m");
   });
 });
