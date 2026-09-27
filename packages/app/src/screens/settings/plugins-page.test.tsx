@@ -91,6 +91,18 @@ vi.mock("react-native-safe-area-context", () => ({
   useSafeAreaInsets: () => ({ top: 0, right: 0, bottom: 0, left: 0 }),
 }));
 
+// COMPAT(shellFormFactorRotation) touchpoint #8 (5e01f2b9): useIsCompactFormFactor now
+// reads useWindowDimensions(); react-native-web reports width 0 under jsdom, which would
+// flip the actions menu to the compact sheet. The unistyles test stub never carried a
+// breakpoint, so this file's pre-touchpoint compactness was wide — pin a wide window.
+vi.mock("react-native", async (importOriginal) => {
+  const actual = await importOriginal<Record<string, unknown>>();
+  return {
+    ...actual,
+    useWindowDimensions: () => ({ width: 1024, height: 800, scale: 1, fontScale: 1 }),
+  };
+});
+
 function plugin(enabled = true): PluginListItem {
   return {
     id: "example",

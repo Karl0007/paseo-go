@@ -84,6 +84,10 @@ vi.mock("react-native", () => ({
       typeof children === "function" ? children({ pressed: false, hovered: false }) : children,
     ),
   ActivityIndicator: () => React.createElement("span", { "data-testid": "activity-indicator" }),
+  // COMPAT(shellFormFactorRotation) touchpoint #8 (5e01f2b9): useIsCompactFormFactor
+  // now reads useWindowDimensions(); the unistyles mock above pins rt.breakpoint "md"
+  // (wide), so the window width must stay at or above the 720 md floor.
+  useWindowDimensions: () => ({ width: 1024, height: 800, scale: 1, fontScale: 1 }),
 }));
 
 vi.mock("react-native-unistyles", () => ({
