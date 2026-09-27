@@ -67,3 +67,11 @@
 - R2-14=f34a77e5（协议纯增 parseDateOrNull+全链 NaN 掐断+readState 守卫；R2-13 蒸发链源头不可达，warn 已加、removeItem 行为待拍板）
 - 拍板已定（2026-09-28 用户：1a/2a/3a/4 全按推荐，转无人值守）→ FIX-B 双批已落：B1=2dcb59d6（visit-ledger 总线+离开即结算，四子链红→绿）、B2=5e01f2b9（六卡全红→绿；R2-08③ 零新触点=胶囊盖高扩展；R2-04=触点#8 layout.ts）
 - 设备窗口二进行中：C34 18 样本矩阵（C34MatrixRun）
+
+## CLOSE-DEV3 设备窗口（2026-09-28 凌晨，HEAD=e94ee1a1=FIX-B 冻结+账本 roll）：B1 五项+归档扩面 PASS；**R2-08② 风险闸设备面 FAIL（真弹未出现，误归档主 worktree，已恢复）**；tab 遮蔽/转屏官方面/C34 矩阵未跑（预算+事故消耗）
+
+- **B1 visit-ledger 五项全 PASS**（宽屏双拍矩阵；metro 僵尸按批准重启后冷启 54s 基线复现）：①覆盖开 B→A/B 均不灭灯、离开后 A 新完成重亮（b1-00..02）；②核心断言：宽屏开 A→rail 切工作区→A 完成→切回 A 亮未读（静默已读消失，b1-03）；③转屏丢拍：宽屏开 A→visited 期完成→转竖→返回不重现（b1-04）；④通知进入（mock needs_input→横幅→点达会话→Implement→返回不亮；首跑 dot 短暂亮=RN 忙帧 dump 竞态，干净复跑绿+对照绿，b1-05..08）；⑤指令运行（C19-probe→每次选择→新会话 floor-0 槽→ping 完成→返回不亮，b1-09）。
+- **R2-08①③ 设备面 PASS**（item 6）：壳归档 CLOSE3-M → 对话行消失+「已归档 1」计数、工作区 L3 行消失（L1 角标同步落）、概览「1 活跃 agent→0」（M 再进 needs_input 仍 0）、通知静音（needs_input 跃变不弹，dumpsys 计数不变）、已归档筛选可见+取消归档回列表（b2-01..08）。
+- **R2-08② 风险闸 FAIL（P1 回炉信号）**：L2 长按主 worktree（脏=未跟踪目录×2，porcelain 语义 isDirty 应为 true）→归档工作区 → **官方确认框未出现，归档直接生效**：级联归档 23 条 workspace 记录+23 个 agent（daemon 磁盘 archivedAt=事故时刻实锤）。归因假设：壳 `descriptorOf` 读 session-store workspace descriptor 的 `gitRuntime/diffStat` 在壳订阅面为 null → `confirmRiskyWorktreeArchive` 空风险自动放行（archive-gate.ts 自注「null risks auto-pass」正是该形态）=闸在壳内恒开。告警文案/取消 no-op/确认生效/干净 worktree 四子案全部无法拍（无对话框）。**恢复**：workspaces.json archivedAt→null ×23 + agents/\*.json ×22（1 条 09-27T01:20 为事故前既有态保留）+ devd 重启；树/列表/概览复原验证（b2-10=无框实锤，b2-12=复原）。
+- 未跑：item 8（tab 行遮蔽）、item 9（转屏官方面）、C34 18 样本矩阵（**0/18，c1 维持未裁决**；基建就绪：junction 在、matrix2.sh/reset2.sh 未动、探针在位）。
+- 设备复位：探针 4 agent 已删、wt-discard worktree 已删、rotation 0、百度 IME、壳 ON、app 留 home。

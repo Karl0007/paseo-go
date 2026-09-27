@@ -74,3 +74,8 @@ C19 真机轮观察（known_issues#2 移交）：4:02 收藏的 AGENTS.md 与 4:
 - **新 harness（窗口三直接用）**：矩阵 18=12 核心（fav A/B×3 + cmd A/B×3）+ 6 附加（=卡面「附加样本」A×3+B×3）。附加样本脚本 `hyb_sample.sh`=**tight ≤1s 窗**：收藏 tap→立即 kill（中间无 dump/stat——既有 fav/cmd Round A 实际在变异后 2-4s 才杀，测不到 c1 的毫秒窗，此脚本补上；Round B=同流程+10s 对照；mem=-1，disk_ui+disk_sql 裁决）。`matrix2.sh`=18 样本编排（tag 前缀 fav-/cmd-/hyb- 防 ev/ 与 RKStorage 导出互覆）；`reset2.sh`=12 收藏+6 指令清场包装。附加探针 `C:/tmp/c5-proj/C34-fav-T{A1..A3,B1..B3}-1790530078.md` 已备。
 - **冷启复核**：54-65s 进首页（metro 温热、URL 行 tap 后 bundle 30s）——基建就绪，只欠 shell 冻结窗。
 - **设备复位**：三次中止均止于变异前，磁盘真相=基线（favorites=[AGENTS.md]、commands=[C19-probe]、pins 未动，零 C34 探针）；IME 已切回百度；app 留 home。c1 终笔判读移交窗口三。
+
+## CLOSE-DEV3 设备窗口（2026-09-28 凌晨）：矩阵仍未跑（0/18），c1 维持「未裁决」
+
+- 窗口预算被两件事消耗：① metro 僵尸化（私有 12.6GB，KI#7 形态；按批准 spec 重启+设备侧首包 46-83s 重建，冷启 54s 基线复现）；② FIX-B 复验 item 7（L2 风险闸）设备面 FAIL 引发误归档主 worktree 事故与恢复（详见 REVIEW2-INDEX CLOSE-DEV3 记录节）。矩阵未开跑即触达预算上限。
+- 基建复核：junction %TEMP%\c34→C:\tmp\c34 在位、matrix2.sh/reset2.sh/探针文件未动、`env -u PASEO_AGENT_ID -u PASEO_AGENT_CWD` 前缀对 devd 全 CLI 操作必需（否则 CLI 以本会话 agent 身份打 devd 报 Caller not found——即卡面 ⚠ 的解）。判读口径不变；移交下一窗口。
