@@ -158,6 +158,12 @@
     "worktreeEmpty": "No chats",
     "a11yExpanded": "Expanded",
     "a11yCollapsed": "Collapsed",
+    "archiveGate": {
+      "unknownRiskTitle": "Archive \"{{workspaceName}}\"?",
+      "unknownRiskMessage": "Unable to confirm whether this workspace has uncommitted changes. Archive it anyway?",
+      "confirm": "Archive anyway",
+      "cancel": "Cancel"
+    },
     "menu": {
       "copyPath": "Copy worktree path",
       "archiveWorkspace": "Archive workspace"

@@ -158,6 +158,12 @@
     "worktreeEmpty": "暂无对话",
     "a11yExpanded": "已展开",
     "a11yCollapsed": "已收起",
+    "archiveGate": {
+      "unknownRiskTitle": "归档「{{workspaceName}}」？",
+      "unknownRiskMessage": "无法确认该工作区是否有未提交内容，仍要归档？",
+      "confirm": "仍然归档",
+      "cancel": "取消"
+    },
     "menu": {
       "copyPath": "复制 worktree 路径",
       "archiveWorkspace": "归档工作区"

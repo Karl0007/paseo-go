@@ -537,10 +537,12 @@ export function WorkspaceScreenBody({ selectedAgentKey = null }: ShellScreenBody
     [opener],
   );
   // L2 长按「归档工作区」: 官方 archiveWorkspace RPC (workspace-archive 乐观隐藏，
-  // 失败自动回滚)，对合并前全部记录一次执行。R2-08②: 先闸后归档 — every merged
+  // 失败自动回滚)，对合并前全部记录一次执行。R2-08② (回炉): 先闸后归档 — every merged
   // record first clears the OFFICIAL worktree archive risk confirm
   // (selectProjectWorkspacesToArchive → confirmRiskyWorktreeArchive +
-  // toWorktreeArchiveRisk, the sidebar-workspace-list rows' call shape); only the
+  // toWorktreeArchiveRisk, the sidebar-workspace-list rows' call shape), with the gate's
+  // risks overlaid from the official live checkout-status query and unresolved risks
+  // fail-closed behind a generic warning (shell/workspace/archive-gate.ts); only the
   // confirmed targets reach the RPC, an all-decline is a no-op.
   const handleArchiveWorktree = useCallback(
     (row: ShellWorktreeRow<AggregatedAgent>) => {
