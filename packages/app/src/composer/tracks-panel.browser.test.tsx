@@ -9,6 +9,18 @@ const SUBAGENT_SEGMENTS: ComposerTrackPillSegment[] = [{ bucket: null, text: "3 
 // App sources compile against the classic JSX runtime, which expects React on the global.
 beforeEach(() => vi.stubGlobal("React", React));
 
+// The pill's panel rides the wide (popover) branch of the menu engine (menu-context.ts:112).
+// Under the old breakpoint hook this file read "wide" by accident: it mounts without the app's
+// Unistyles configuration, and an unset breakpoint is not in {xs, sm}. `useIsCompactFormFactor`
+// now derives from the real window width (paseo-go touchpoint #8, constants/layout.ts
+// COMPAT(shellFormFactorRotation)), and the headless iframe is narrower than the md floor, so
+// the form factor under test is declared explicitly. Everything else — the real menu engine,
+// real WAAPI — stays unmocked.
+vi.mock("@/constants/layout", async (importOriginal) => ({
+  ...((await importOriginal()) as object),
+  useIsCompactFormFactor: () => false,
+}));
+
 /**
  * The real menu engine, in a real browser, because both things under test only exist there: the
  * panel's dismissal runs through `selectItem`, and the running mark is a Web Animations rotation
