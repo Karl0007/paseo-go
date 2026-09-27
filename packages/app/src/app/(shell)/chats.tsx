@@ -71,6 +71,9 @@ import { usePaseoGoReadStateStore } from "@/shell/stores/readState";
 import { useShellAgentActions } from "@/shell/shellAgentActions";
 import { deriveSidebarStateBucket } from "@/utils/sidebar-agent-state";
 import { useShellHostStatuses } from "@/shell/runtime/use-shell-host-statuses";
+import { isImportedProviderSession } from "@getpaseo/protocol/agent-labels";
+import { confirmDialog } from "@/utils/confirm-dialog";
+import { usePaseoGoForkAckStore } from "@/shell/stores/forkAck";
 import { shellNavigateToAgent } from "@/shell/chats/shell-navigate-to-agent";
 
 const SECTION_TITLE_KEY: Record<Exclude<ChatSectionKind, "offline">, string> = {
@@ -243,8 +246,11 @@ export default function ShellChatsScreen() {
   // (workspace route + open intent) with a push verb (the official dismissTo pops the
   // list → back exits the app; the parse stub flashes white, SPIKE A2). The opener
   // stamps read on entry and again when this screen regains focus, so a reply watched
-  // inside the session never resurfaces as an unread dot. F4: both beats stamp with
+  // inside the session never resurface as an unread dot. F4: both beats stamp with
   // the chat's own host-domain last-event time, never the device wall clock.
+  // C24: an imported chat's FIRST open passes the fork warning (official confirm
+  // dialog); confirming persists a per-row ack in the forkAck store, cancelling
+  // leaves the list untouched (no read stamp — the user never entered).
   const opener = useMemo(
     () =>
       createChatOpener({
@@ -254,8 +260,17 @@ export default function ShellChatsScreen() {
           const agent = useSessionStore.getState().sessions[serverId]?.agents.get(agentId);
           return agent ? chatLastEventAtFromAgent(agent) : undefined;
         },
+        confirmFork: () =>
+          confirmDialog({
+            title: t("chats.fork.title"),
+            message: t("chats.fork.message"),
+            confirmLabel: t("chats.fork.confirm"),
+            cancelLabel: t("chats.fork.cancel"),
+          }),
+        forkAcknowledged: (key) => usePaseoGoForkAckStore.getState().ackedKeys.includes(key),
+        acknowledgeFork: (key) => usePaseoGoForkAckStore.getState().ack(key),
       }),
-    [markRead],
+    [markRead, t],
   );
   const handleOpenChat = useCallback(
     (agent: ShellChatAgent) =>
@@ -265,6 +280,7 @@ export default function ShellChatsScreen() {
         agentId: agent.agent.id,
         workspaceId: agent.agent.workspaceId,
         lastEventAt: chatLastEventAt(agent),
+        imported: isImportedProviderSession(agent.agent),
       }),
     [opener],
   );

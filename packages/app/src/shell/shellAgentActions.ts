@@ -16,6 +16,7 @@ import { confirmDialog, type ConfirmDialogInput } from "@/utils/confirm-dialog";
 import { SHELL_I18N_NAMESPACE } from "@/shell/i18n";
 import { useToast } from "@/contexts/toast-context";
 import { usePaseoGoArchiveStore } from "@/shell/stores/archive";
+import { usePaseoGoForkAckStore } from "@/shell/stores/forkAck";
 import { usePaseoGoPinsStore } from "@/shell/stores/pins";
 import { usePaseoGoReadStateStore } from "@/shell/stores/readState";
 
@@ -27,7 +28,10 @@ export interface ShellChatTarget {
 }
 
 /** The daemon surface the action layer needs; `Pick` keeps test doubles honest. */
-export type ShellAgentClientPort = Pick<DaemonClient, "cancelAgent" | "deleteAgent">;
+export type ShellAgentClientPort = Pick<
+  DaemonClient,
+  "cancelAgent" | "deleteAgent" | "refreshAgent"
+>;
 
 export type ShellActionTranslate = (key: string, options?: Record<string, unknown>) => string;
 
@@ -54,6 +58,8 @@ export interface ShellAgentActions {
   archive: (target: ShellChatTarget) => void;
   unarchive: (target: ShellChatTarget) => void;
   stop: (target: ShellChatTarget) => Promise<void>;
+  /** C24 (imported-only row): re-sync the daemon copy from the source session file. */
+  refresh: (target: ShellChatTarget) => Promise<void>;
   /** Destructive: native confirm first, daemon delete second, local cleanup third. */
   remove: (target: ShellChatTarget, displayTitle: string) => Promise<void>;
   /** C3 drag-and-drop landing: persists the new 置顶 order with a settle haptic. */
@@ -78,6 +84,10 @@ export function createShellAgentActions(deps: ShellAgentActionDeps): ShellAgentA
     ((serverId: string): ShellAgentClientPort | null => getHostRuntimeStore().getClient(serverId));
   const confirm = deps.confirm ?? confirmDialog;
   const haptic = deps.haptic ?? tapHaptic;
+  // C24: 刷新 in-flight gate — a second trigger for the same row while the RPC is
+  // still out is a silent no-op (the menu has already closed; a repeat toast or a
+  // parallel rehydrate would only race the first).
+  const refreshing = new Set<string>();
 
   const failOffline = (): void => {
     reportError(t("chats.errors.actionFailed"), t("chats.errors.hostOffline"));
@@ -134,6 +144,24 @@ export function createShellAgentActions(deps: ShellAgentActionDeps): ShellAgentA
         reportError(t("chats.errors.actionFailed"), errorText(error));
       }
     },
+    refresh: async (target) => {
+      if (refreshing.has(target.key)) return;
+      haptic();
+      const client = getClient(target.serverId);
+      if (!client) {
+        failOffline();
+        return;
+      }
+      refreshing.add(target.key);
+      try {
+        await client.refreshAgent(target.agentId);
+        notify(t("chats.toast.refreshed"));
+      } catch (error) {
+        reportError(t("chats.errors.actionFailed"), errorText(error));
+      } finally {
+        refreshing.delete(target.key);
+      }
+    },
     remove: async (target, displayTitle) => {
       const confirmed = await confirm({
         title: t("chats.menu.deleteConfirmTitle"),
@@ -161,6 +189,7 @@ export function createShellAgentActions(deps: ShellAgentActionDeps): ShellAgentA
       pins.setAlias(target.key, null);
       usePaseoGoArchiveStore.getState().unarchive(target.key);
       usePaseoGoReadStateStore.getState().clear(target.key);
+      usePaseoGoForkAckStore.getState().clear(target.key);
       notify(t("chats.toast.deleted"));
     },
     reorderPinned: (orderedKeys) => {
@@ -172,8 +201,9 @@ export function createShellAgentActions(deps: ShellAgentActionDeps): ShellAgentA
 
 // ---------------------------------------------------------------------------
 // Menu matrix (the report's 角色×状态→可见项 contract, and the row's render plan).
-// Archived rows carry exactly 取消归档/删除; live rows carry the five designed
-// actions, with 停止 present-but-disabled unless a turn is actually abortable.
+// Archived rows carry exactly 取消归档/删除; live rows carry the designed actions,
+// with 停止 present-but-disabled unless a turn is actually abortable and 刷新
+// appearing only on imported rows (C24).
 // ---------------------------------------------------------------------------
 
 export type ChatMenuActionId =
@@ -183,6 +213,7 @@ export type ChatMenuActionId =
   | "archive"
   | "unarchive"
   | "stop"
+  | "refresh"
   | "delete";
 
 export interface ChatMenuRowState {
@@ -190,6 +221,8 @@ export interface ChatMenuRowState {
   archived: boolean;
   /** A running or approval-blocked turn: what 停止 can actually cancel. */
   stoppable: boolean;
+  /** C24: the row carries `paseo.imported-provider-session` → 刷新 appears. */
+  imported: boolean;
 }
 
 export interface ChatMenuPlanItem {
@@ -204,13 +237,18 @@ export function chatMenuPlan(state: ChatMenuRowState): ChatMenuPlanItem[] {
       { id: "delete", enabled: true },
     ];
   }
-  return [
+  const live: ChatMenuPlanItem[] = [
     { id: state.pinned ? "unpin" : "pin", enabled: true },
     { id: "rename", enabled: true },
     { id: "archive", enabled: true },
     { id: "stop", enabled: state.stoppable },
-    { id: "delete", enabled: true },
   ];
+  // C24: 刷新 is imported-only (a hidden row, not present-but-disabled — the
+  // action is meaningless on a native chat). Archived rows keep the fixed
+  // 取消归档/删除 pair (refresh auto-unarchives there; the C3 contract wins).
+  if (state.imported) live.push({ id: "refresh", enabled: true });
+  live.push({ id: "delete", enabled: true });
+  return live;
 }
 
 /** Screen-side wiring: the factory bound to the shell i18n namespace and the toast host. */

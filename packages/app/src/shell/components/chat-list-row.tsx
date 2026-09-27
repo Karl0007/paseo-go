@@ -42,6 +42,7 @@ import { usePaseoGoPinsStore } from "@/shell/stores/pins";
 import type { ShellAgentActions, ShellChatTarget } from "@/shell/shellAgentActions";
 import { resolveProjectPlacement } from "@/utils/project-placement";
 import type { SidebarStateBucket } from "@/utils/sidebar-agent-state";
+import { isImportedProviderSession } from "@getpaseo/protocol/agent-labels";
 
 /** The derivation input widened with the live agent payload the row renders. */
 export interface ShellChatAgent {
@@ -236,7 +237,11 @@ function ChatRowInner({
     .join(" · ");
   // 停止 only acts on an abortable turn: running, or blocked on an approval.
   const stoppable = agent.bucket === "running" || agent.bucket === "needs_input";
-  const menuState = useMemo(() => ({ pinned, archived, stoppable }), [pinned, archived, stoppable]);
+  const imported = isImportedProviderSession(agent.agent);
+  const menuState = useMemo(
+    () => ({ pinned, archived, stoppable, imported }),
+    [pinned, archived, stoppable, imported],
+  );
   // C33: 重命名 pushes the hidden-tab rename screen (object params, hostile ids).
   const openRename = useCallback(
     (renameTarget: ShellChatTarget) => router.push(shellRenameHref(renameTarget)),

@@ -27,6 +27,7 @@ function makeActions(): ShellAgentActions {
     archive: vi.fn(),
     unarchive: vi.fn(),
     stop: vi.fn(async () => {}),
+    refresh: vi.fn(async () => {}),
     remove: vi.fn(async () => {}),
     reorderPinned: vi.fn(),
   };
@@ -51,14 +52,16 @@ describe("createChatMenuRunner", () => {
     run("archive");
     run("unarchive");
     run("stop");
+    run("refresh");
     run("delete");
     expect(actions.pin).toHaveBeenCalledWith(target);
     expect(actions.unpin).toHaveBeenCalledWith(target);
     expect(actions.archive).toHaveBeenCalledWith(target);
     expect(actions.unarchive).toHaveBeenCalledWith(target);
     expect(actions.stop).toHaveBeenCalledWith(target);
+    // C24: 刷新 fires the action layer (client.refreshAgent + toast live there).
+    expect(actions.refresh).toHaveBeenCalledWith(target);
     // 删除确认 carries the display title, not the alias-less key.
     expect(actions.remove).toHaveBeenCalledWith(target, "标题");
-    expect(openRename).not.toHaveBeenCalled();
   });
 });

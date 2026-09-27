@@ -10,7 +10,16 @@
 import { useCallback, useMemo, type ReactElement } from "react";
 import { withUnistyles } from "react-native-unistyles";
 import { useTranslation } from "react-i18next";
-import { Archive, ArchiveRestore, PenLine, Pin, PinOff, Square, Trash2 } from "lucide-react-native";
+import {
+  Archive,
+  ArchiveRestore,
+  PenLine,
+  Pin,
+  PinOff,
+  RefreshCw,
+  Square,
+  Trash2,
+} from "lucide-react-native";
 import {
   ContextMenuContent,
   ContextMenuItem,
@@ -34,12 +43,17 @@ const ThemedArchiveRestore = withUnistyles(ArchiveRestore, (theme) => ({
   color: theme.colors.foregroundMuted,
 }));
 const ThemedSquare = withUnistyles(Square, (theme) => ({ color: theme.colors.foregroundMuted }));
+const ThemedRefreshCw = withUnistyles(RefreshCw, (theme) => ({
+  color: theme.colors.foregroundMuted,
+}));
 const ThemedTrash2 = withUnistyles(Trash2, (theme) => ({ color: theme.colors.destructive }));
 
 export interface ChatRowMenuState {
   pinned: boolean;
   archived: boolean;
   stoppable: boolean;
+  /** C24: imported row → the plan carries 刷新. */
+  imported: boolean;
 }
 
 const MENU_LABEL_KEY: Record<ChatMenuActionId, string> = {
@@ -49,6 +63,7 @@ const MENU_LABEL_KEY: Record<ChatMenuActionId, string> = {
   archive: "chats.menu.archive",
   unarchive: "chats.menu.unarchive",
   stop: "chats.menu.stop",
+  refresh: "chats.menu.refresh",
   delete: "chats.menu.delete",
 };
 
@@ -66,6 +81,8 @@ function menuLeading(id: ChatMenuActionId): ReactElement {
       return <ThemedArchiveRestore size={16} />;
     case "stop":
       return <ThemedSquare size={16} />;
+    case "refresh":
+      return <ThemedRefreshCw size={16} />;
     case "delete":
       return <ThemedTrash2 size={16} />;
   }
@@ -103,6 +120,9 @@ export function createChatMenuRunner(deps: ChatMenuRunnerDeps): (id: ChatMenuAct
         break;
       case "stop":
         void deps.actions.stop(deps.target);
+        break;
+      case "refresh":
+        void deps.actions.refresh(deps.target);
         break;
       case "delete":
         void deps.actions.remove(deps.target, deps.displayTitle);

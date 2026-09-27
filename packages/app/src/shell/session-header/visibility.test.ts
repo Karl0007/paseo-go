@@ -104,7 +104,8 @@ describe("resolveShellSessionWorkspace", () => {
 describe("sessionHeaderMenuPlan", () => {
   // C21 matrix: the capsule ⋯ aggregates the official header's right cluster.
   // Order is the card's; every gate is present-but-disabled (the 停止 precedent),
-  // never a hidden row, so the menu's shape is stable across states.
+  // never a hidden row, so the menu's shape is stable across states. C24's 刷新
+  // is the one exception: imported-ONLY, appended last, never shown on native.
   it("carries 查看项目文件/查看 diff/查看文件/运行脚本/停止/重命名 in card order", () => {
     expect(
       sessionHeaderMenuPlan({
@@ -112,6 +113,7 @@ describe("sessionHeaderMenuPlan", () => {
         hasScripts: false,
         isGit: false,
         hasCheckout: false,
+        imported: false,
       }).map((item) => item.id),
     ).toEqual(["files", "diff", "explorer", "scripts", "stop", "rename"]);
   });
@@ -122,12 +124,14 @@ describe("sessionHeaderMenuPlan", () => {
       hasScripts: true,
       isGit: true,
       hasCheckout: true,
+      imported: false,
     });
     const disabled = sessionHeaderMenuPlan({
       stoppable: false,
       hasScripts: true,
       isGit: true,
       hasCheckout: true,
+      imported: false,
     });
     expect(enabled.find((item) => item.id === "stop")?.enabled).toBe(true);
     expect(disabled.find((item) => item.id === "stop")?.enabled).toBe(false);
@@ -139,6 +143,7 @@ describe("sessionHeaderMenuPlan", () => {
       hasScripts: false,
       isGit: false,
       hasCheckout: false,
+      imported: false,
     });
     expect(none).toEqual([
       { id: "files", enabled: true },
@@ -154,6 +159,7 @@ describe("sessionHeaderMenuPlan", () => {
       hasScripts: false,
       isGit: true,
       hasCheckout: false,
+      imported: false,
     });
     expect(gitOnly.find((item) => item.id === "diff")?.enabled).toBe(false); // no directory
     const checkoutOnly = sessionHeaderMenuPlan({
@@ -161,6 +167,7 @@ describe("sessionHeaderMenuPlan", () => {
       hasScripts: false,
       isGit: false,
       hasCheckout: true,
+      imported: false,
     });
     expect(checkoutOnly).toEqual([
       { id: "files", enabled: true },
@@ -175,12 +182,13 @@ describe("sessionHeaderMenuPlan", () => {
       hasScripts: true,
       isGit: false,
       hasCheckout: false,
+      imported: false,
     });
     expect(scriptsOnly.find((item) => item.id === "scripts")?.enabled).toBe(true);
     expect(scriptsOnly.find((item) => item.id === "explorer")?.enabled).toBe(false);
   });
 
-  it("pins the full 2×2×2×2 bucket matrix", () => {
+  it("pins the full 2×2×2×2 bucket matrix (imported off: no 刷新 row)", () => {
     const rows: Array<[boolean, boolean, boolean, boolean]> = [];
     for (const stoppable of [false, true]) {
       for (const hasScripts of [false, true]) {
@@ -193,10 +201,13 @@ describe("sessionHeaderMenuPlan", () => {
     }
     for (const [stoppable, hasScripts, isGit, hasCheckout] of rows) {
       expect(
-        sessionHeaderMenuPlan({ stoppable, hasScripts, isGit, hasCheckout }).map((item) => [
-          item.id,
-          item.enabled,
-        ]),
+        sessionHeaderMenuPlan({
+          stoppable,
+          hasScripts,
+          isGit,
+          hasCheckout,
+          imported: false,
+        }).map((item) => [item.id, item.enabled]),
       ).toEqual([
         ["files", true],
         ["diff", isGit && hasCheckout],
@@ -205,11 +216,25 @@ describe("sessionHeaderMenuPlan", () => {
         ["stop", stoppable],
         ["rename", true],
       ]);
+      // C24 discipline: with the stamp the SAME buckets keep their exact values;
+      // 刷新 is only ever appended, enabled, last.
+      expect(
+        sessionHeaderMenuPlan({
+          stoppable,
+          hasScripts,
+          isGit,
+          hasCheckout,
+          imported: true,
+        }),
+      ).toEqual([
+        ...sessionHeaderMenuPlan({ stoppable, hasScripts, isGit, hasCheckout, imported: false }),
+        { id: "refresh", enabled: true },
+      ]);
     }
   });
 });
 
-describe("createSessionHeaderRunner (C33 dispatch, C21 extension)", () => {
+describe("createSessionHeaderRunner (C33 dispatch, C21/C24 extension)", () => {
   // The capsule menu's actionable rows all funnel their id through this table.
   // 重命名 is the row the menu never acts on itself (the C33 rename screen push
   // lives with the caller): it must reach the injected opener and nothing else.
@@ -222,6 +247,7 @@ describe("createSessionHeaderRunner (C33 dispatch, C21 extension)", () => {
       openExplorer: vi.fn(),
       stop: vi.fn(),
       openRename: vi.fn(),
+      refresh: vi.fn(),
     };
   }
 
@@ -255,5 +281,16 @@ describe("createSessionHeaderRunner (C33 dispatch, C21 extension)", () => {
     expect(deps.openFiles).not.toHaveBeenCalled();
     expect(deps.openRename).not.toHaveBeenCalled();
     expect(deps.stop).not.toHaveBeenCalled();
+  });
+
+  it("C24: routes 刷新 to its own callback only", () => {
+    const deps = makeDeps();
+    createSessionHeaderRunner(deps)("refresh");
+    expect(deps.refresh).toHaveBeenCalledTimes(1);
+    expect(deps.openFiles).not.toHaveBeenCalled();
+    expect(deps.openDiff).not.toHaveBeenCalled();
+    expect(deps.openExplorer).not.toHaveBeenCalled();
+    expect(deps.stop).not.toHaveBeenCalled();
+    expect(deps.openRename).not.toHaveBeenCalled();
   });
 });

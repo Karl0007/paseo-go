@@ -67,10 +67,18 @@ export function resolveShellSessionWorkspace(
 //   查看 diff needs a git checkout with a known directory (no changes tab else);
 //   查看文件 needs the checkout directory (openExplorerSidebarView no-ops without);
 //   运行脚本 needs workspace descriptor scripts;
-//   停止 needs an abortable turn; 重命名 always.
+//   停止 needs an abortable turn; 重命名 always;
+//   刷新 (C24) is imported-ONLY — a hidden row, not present-but-disabled.
 // ---------------------------------------------------------------------------
 
-export type SessionHeaderActionId = "files" | "diff" | "explorer" | "scripts" | "stop" | "rename";
+export type SessionHeaderActionId =
+  | "files"
+  | "diff"
+  | "explorer"
+  | "scripts"
+  | "stop"
+  | "rename"
+  | "refresh";
 
 /** Rows the runner acts on. 运行脚本 is a subpage trigger, never a dispatch. */
 export type SessionHeaderActionableId = Exclude<SessionHeaderActionId, "scripts">;
@@ -85,6 +93,8 @@ export interface SessionHeaderMenuState {
   hasScripts: boolean;
   isGit: boolean;
   hasCheckout: boolean;
+  /** C24: `paseo.imported-provider-session` → the plan carries 刷新. */
+  imported: boolean;
 }
 
 export function sessionHeaderMenuPlan(state: SessionHeaderMenuState): SessionHeaderMenuItem[] {
@@ -95,6 +105,8 @@ export function sessionHeaderMenuPlan(state: SessionHeaderMenuState): SessionHea
     { id: "scripts", enabled: state.hasScripts },
     { id: "stop", enabled: state.stoppable },
     { id: "rename", enabled: true },
+    // C24: appended last, imported-only; every existing row keeps its exact value.
+    ...(state.imported ? [{ id: "refresh", enabled: true } as const] : []),
   ];
 }
 
@@ -115,6 +127,7 @@ export interface SessionHeaderRunnerDeps {
   openExplorer: () => void;
   stop: () => void;
   openRename: () => void;
+  refresh: () => void;
 }
 
 export function createSessionHeaderRunner(
@@ -125,6 +138,7 @@ export function createSessionHeaderRunner(
     else if (id === "diff") deps.openDiff();
     else if (id === "explorer") deps.openExplorer();
     else if (id === "stop") deps.stop();
+    else if (id === "refresh") deps.refresh();
     else deps.openRename();
   };
 }

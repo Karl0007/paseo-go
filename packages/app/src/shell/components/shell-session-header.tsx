@@ -48,6 +48,7 @@ import {
   PenLine,
   Play,
   Square,
+  RefreshCw,
 } from "lucide-react-native";
 import {
   ContextMenu,
@@ -62,6 +63,7 @@ import { useSessionStore } from "@/stores/session-store";
 import { useWorkspace } from "@/stores/session-store-hooks";
 import { selectIsCompactFileExplorerOpen, usePanelStore } from "@/stores/panel-store";
 import { deriveSidebarStateBucket } from "@/utils/sidebar-agent-state";
+import { isImportedProviderSession } from "@getpaseo/protocol/agent-labels";
 import {
   HEADER_INNER_HEIGHT,
   HEADER_INNER_HEIGHT_MOBILE,
@@ -113,6 +115,9 @@ const ThemedFiles = withUnistyles(Files, (theme) => ({ color: theme.colors.foreg
 const ThemedPlay = withUnistyles(Play, (theme) => ({ color: theme.colors.foregroundMuted }));
 const ThemedSquare = withUnistyles(Square, (theme) => ({ color: theme.colors.foregroundMuted }));
 const ThemedPenLine = withUnistyles(PenLine, (theme) => ({ color: theme.colors.foregroundMuted }));
+const ThemedRefreshCw = withUnistyles(RefreshCw, (theme) => ({
+  color: theme.colors.foregroundMuted,
+}));
 
 const HEADER_LABEL_KEY: Record<SessionHeaderActionId, string> = {
   files: "header.menuFiles",
@@ -121,6 +126,7 @@ const HEADER_LABEL_KEY: Record<SessionHeaderActionId, string> = {
   scripts: "header.menuScripts",
   stop: "chats.menu.stop",
   rename: "chats.menu.rename",
+  refresh: "chats.menu.refresh",
 };
 
 function actionLeading(id: SessionHeaderActionId) {
@@ -137,6 +143,8 @@ function actionLeading(id: SessionHeaderActionId) {
       return <ThemedSquare size={16} />;
     case "rename":
       return <ThemedPenLine size={16} />;
+    case "refresh":
+      return <ThemedRefreshCw size={16} />;
   }
 }
 
@@ -248,6 +256,8 @@ function CapsuleInner({
   const scripts = descriptor?.scripts ?? NO_SCRIPTS;
   const hasCheckout = Boolean(descriptor?.workspaceDirectory);
   const isGit = descriptor?.project?.checkout?.isGit ?? true;
+  // C24: the imported stamp (C22) is what gates the 刷新 row.
+  const imported = isImportedProviderSession(agent);
 
   // The bar IS the header: top-anchored full width, official height + status
   // bar inset, opaque surface0 with the shared bottom-border token.
@@ -302,6 +312,7 @@ function CapsuleInner({
         openExplorer: () => openWorkspaceView("files"),
         stop: () => void actions.stop(target),
         openRename: () => router.push(shellRenameHref(target)),
+        refresh: () => void actions.refresh(target),
       }),
     [actions, openWorkspaceView, target, workspace.serverId, workspace.workspaceId],
   );
@@ -310,6 +321,7 @@ function CapsuleInner({
   const runExplorer = useCallback(() => run("explorer"), [run]);
   const runStop = useCallback(() => run("stop"), [run]);
   const runRename = useCallback(() => run("rename"), [run]);
+  const runRefresh = useCallback(() => run("refresh"), [run]);
   const handlers = useMemo<Record<SessionHeaderActionableId, () => void>>(
     () => ({
       files: runFiles,
@@ -317,8 +329,9 @@ function CapsuleInner({
       explorer: runExplorer,
       stop: runStop,
       rename: runRename,
+      refresh: runRefresh,
     }),
-    [runDiff, runExplorer, runFiles, runRename, runStop],
+    [runDiff, runExplorer, runFiles, runRefresh, runRename, runStop],
   );
 
   // 运行脚本 is the menu's one subpage (official scripts dropdown's sibling):
@@ -400,6 +413,7 @@ function CapsuleInner({
           hasScripts: scripts.length > 0,
           isGit,
           hasCheckout,
+          imported,
         }).map((item) => {
           if (item.id === "scripts") {
             return (

@@ -96,6 +96,7 @@
       "archive": "归档",
       "unarchive": "取消归档",
       "stop": "停止",
+      "refresh": "刷新",
       "delete": "删除",
       "deleteConfirmTitle": "删除会话？",
       "deleteConfirmMessage": "「{{title}}」将从主机上删除，此操作无法撤销。",
@@ -119,11 +120,18 @@
       "archived": "已归档",
       "unarchived": "已移出归档",
       "stopped": "已停止运行",
-      "deleted": "已删除会话"
+      "deleted": "已删除会话",
+      "refreshed": "已从源会话刷新"
     },
     "errors": {
       "actionFailed": "操作失败",
       "hostOffline": "主机当前离线，无法完成该操作。"
+    },
+    "fork": {
+      "title": "继续该导入会话？",
+      "message": "该会话由电脑端导入。若源会话仍在电脑上运行，从 app 继续会产生分叉。",
+      "confirm": "继续",
+      "cancel": "留在列表"
     }
   },
   "workspace": {

@@ -17,6 +17,14 @@
 //
 // React-free and dependency-injected like shellAgentActions, so the markRead timing is
 // unit-testable without a navigator or a store.
+//
+// C24 fork guard (DESIGN §14.10): an imported provider session keeps pointing at the
+// source transcript — if that session still runs on the PC, continuing from the app
+// forks it. The FIRST open of a stamped (and not yet acknowledged) chat therefore
+// awaits an injected confirmation (the screen wires the official confirm dialog):
+// confirm = acknowledge once (persisted store) and enter, cancel = stay on the list
+// with nothing marked read. No "is the source really active" heuristic — there is no
+// reliable signal (card ruling); the warning is the honest, one-time gate.
 
 export interface ChatOpenTarget {
   /** `${serverId}:${agentId}` — the readState/pins row key. */
@@ -26,6 +34,8 @@ export interface ChatOpenTarget {
   workspaceId: string | null | undefined;
   /** Host-domain last-event stamp (chatLastEventAt) at press time. */
   lastEventAt: number;
+  /** C24: the agent carries `paseo.imported-provider-session` (C22 stamp). */
+  imported: boolean;
 }
 
 export interface ChatOpenerDeps {
@@ -39,11 +49,17 @@ export interface ChatOpenerDeps {
   /** Fresh host-domain last-event stamp; undefined = the agent is not in the
    *  directory yet — the pending visit survives to the next focus. */
   lastEventAtOf: (serverId: string, agentId: string) => number | undefined;
+  /** C24: official confirm dialog for the fork warning; true = 继续进入. */
+  confirmFork: () => Promise<boolean>;
+  /** C24: has this row key already acknowledged the fork warning? */
+  forkAcknowledged: (key: string) => boolean;
+  /** C24: persist the acknowledgement so the warning is exactly-once per chat. */
+  acknowledgeFork: (key: string) => void;
 }
 
 export interface ChatOpener {
-  /** Mark read at the chat's press-time event stamp, remember the visit, navigate. */
-  open: (target: ChatOpenTarget) => void;
+  /** Warn-then-open: fork guard first, then mark read, remember, navigate. */
+  open: (target: ChatOpenTarget) => Promise<void>;
   /** Wire to the screen's focus effect: clears the read stamp of the last visit. */
   onFocus: () => void;
 }
@@ -59,7 +75,15 @@ interface PendingVisit {
 export function createChatOpener(deps: ChatOpenerDeps): ChatOpener {
   let pending: PendingVisit | null = null;
   return {
-    open(target) {
+    async open(target) {
+      // C24: the gate runs BEFORE the read stamp — a cancelled open never entered
+      // the session, so the row must stay unread. Non-imported rows short-circuit
+      // synchronously (the pre-C24 open path is unchanged for them).
+      if (target.imported && !deps.forkAcknowledged(target.key)) {
+        const proceed = await deps.confirmFork();
+        if (!proceed) return;
+        deps.acknowledgeFork(target.key);
+      }
       deps.markRead(target.key, target.lastEventAt);
       pending = {
         key: target.key,

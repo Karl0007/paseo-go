@@ -96,6 +96,7 @@
       "archive": "Archive",
       "unarchive": "Unarchive",
       "stop": "Stop",
+      "refresh": "Refresh",
       "delete": "Delete",
       "deleteConfirmTitle": "Delete this chat?",
       "deleteConfirmMessage": "“{{title}}” will be deleted from the host. This cannot be undone.",
@@ -119,11 +120,18 @@
       "archived": "Archived",
       "unarchived": "Restored from archive",
       "stopped": "Run stopped",
-      "deleted": "Chat deleted"
+      "deleted": "Chat deleted",
+      "refreshed": "Refreshed from source session"
     },
     "errors": {
       "actionFailed": "Action failed",
       "hostOffline": "The host is offline, so this action could not run."
+    },
+    "fork": {
+      "title": "Continue this imported chat?",
+      "message": "This chat was imported from your computer. If the source session is still running there, continuing from the app will fork it.",
+      "confirm": "Continue",
+      "cancel": "Stay in list"
     }
   },
   "workspace": {
