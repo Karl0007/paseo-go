@@ -28,3 +28,30 @@
 
 - 动：`shell/workspace/archive-gate.ts`(+test)、locales（如需）、UPSTREAM-ISSUES.md
 - 不动：官方文件、workspace-screen-body（接线已含）
+
+## 设备复验（窗口五 CLOSE-DEV5，2026-09-28 凌晨，HEAD=0b2a7c3f；证据 `evidence/CLOSE-DEV5/`，逐条见 device-findings.log）
+
+验收 4 全项 **PASS**，无遗留：
+
+1. **local_checkout 脏必弹**（d1-00..03）：gate-d1 夹具（daemon 自然建 kind=local_checkout + 未跟踪
+   DIRTY.txt）L2 长按归档 → 官方富文本框「归档「master」？/ 未 commit 的变更」；取消=纯 no-op（行在、
+   archivedAt=null）。CLOSE-DEV4 g5 零对话框面已闭合。
+2. **主 worktree 行**（d2-00..04）：真实现场 Karl0007/paseo 主 worktree 合并行（23 条 local_checkout，
+   仓脏）→ 逐记录官方弹框（首弹含 diff 统计「新增 30076 行, 删除 104 行」）；全部取消=纯 no-op
+   （23 记录 arch 全 null、全局 archived=0）。未确认任何一弹。
+3. **null-risk 通用告警含级联句**（d3-05..07）：worktree 记录 + 「is-inside-work-tree=true 且 status
+   必失败」损坏仓（截断 .git/index；消失 cwd 与纯目录两形态分别被启动 reconciliation 自动归档/重分类
+   directory，见 findings 基建坑 1-2）→ 壳侧告警「无法确认该工作区是否有未提交内容，仍要归档？\n其 1 个
+   会话将一并归档。」N=1=该行 L3 会话数；取消=纯 no-op。
+4. **竖屏 cover 闭环**（d4-00..04）：header 底边 308→318（+4dp 冗余生效）⊇ tabs-row 315/trigger 312；
+   (800,309)/(800,311)/(800,312)/(800,267) 四点注入零反应（无「切换标签」sheet、无 tab-menu 节点）；
+   阳性对照=返回键双向导航生效。
+5. **壳外不受影响**（d5-00..03）：壳模式关 → 官方会话屏 tab 行点行中心 → 「切换标签」sheet 正常弹出；
+   `paseogo://me -p` 深链回壳，壳模式恢复 ON。
+6. **directory-kind 级联弹框**（d6-00..03）：gate-dir6（kind=directory + 1 会话）→「该工作区有 1 个会话，
+   归档会一并归档这些会话，仍要归档？」；取消=纯 no-op；确认→仅该记录 archivedAt + 其 agent 级联归档，
+   其余记录零波及、行消失。现场已恢复（夹具记录/agent/目录全清，registry 回 31/0 基线 + devd 重启）。
+7. **0.2.0 显示**（d7-00）：我的→关于「Paseo Go 0.2.0」+「上游 paseo @ db4fd334」同帧（bundle 内
+   FixB4 三标记各 5 处命中=新码实锤）。
+
+设备复位：IME 百度、rotation 0、壳 ON、pins/收藏/指令未触碰、app 留 home。
