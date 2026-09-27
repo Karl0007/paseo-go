@@ -268,7 +268,15 @@
   "header": {
     "back": "返回",
     "menu": "会话操作",
-    "menuFiles": "查看项目文件"
+    "menuFiles": "查看项目文件",
+    "menuDiff": "查看 diff",
+    "menuExplorer": "查看文件",
+    "menuScripts": "运行脚本",
+    "scriptRunning": "运行中",
+    "scriptStopped": "未运行",
+    "scriptStartFailed": "启动 {{scriptName}} 失败",
+    "scriptStopFailed": "停止 {{scriptName}} 失败",
+    "scriptsNoClient": "未连接主机"
   },
   "tablet": {
     "listPlaceholder": "列表内容将在此显示"

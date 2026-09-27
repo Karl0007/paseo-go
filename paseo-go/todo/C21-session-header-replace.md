@@ -34,3 +34,13 @@
 4. 读图 ≥6 存 `paseo-go/evidence/C21/`。
 
 - 恰好一次 commit；报告 JSON（含取舍清单）。
+
+## 验证记录
+
+- **代码/定向**：`visibility.ts` 扩 `explorerOverlayOpen` 门（可选输入，既有桶逐值不变）+ 菜单矩阵 6 行×4 输入（2^16 全桶钉死）+ runner 扩 diff/explorer 分发；新增 `edge-swipe.ts`（方向锁纯函数，含 `"worklet"`——真机抓到缺指令时 UI 线程 `non-worklet function` 崩溃后补上）、`use-shell-edge-back-gesture.ts`、`scripts-submenu.tsx`（startWorkspaceScript/killTerminal = 官方 WorkspaceScriptsButton 同一对 RPC）。定向绿：session-header 3 文件 21 例 + locales/routes 13 例；app tsgo / oxlint / oxfmt 全绿。
+- **胶囊上移**：Portal 机制不变，顶位全宽，高=insets.top+8+56（真机 uiautomator 实锤 `[0,0][1600,220]`=88dp×2.5），surface0+下边框；官方 header 被盖（汉堡/⋯/scripts/explorer 控件不可达=预期）。亮 `01`、暗 `12` 双主题截图。
+- **⋯ 聚合**：`02` 六行矩阵（停止置灰=done 桶正确）；`03` 查看 diff→compact explorer「变更」页（真 diff +718/-96）；`04` 查看文件→「文件」页；`05-07` 运行脚本子页（popover 飞页）实跑 typecheck 起→运行中→停→未运行；`08` 重命名屏（C33 不回退）；`11` 查看项目文件（C16 栈实例）。**explorer 让位**：overlay 打开期间胶囊隐藏（其自有 rail 恰好落在被盖带内），`03/04` 可见 explorer 顶栏完整。
+- **边缘手势**：blocker 用官方 `useBlockMobilePanelOpenGestures`（symbol-keyed，卸载即释放）。壳左缘滑动→回对话列表：`09`（3 次实滑均回列表）。**坑修正**：32dp Pan 带不能是独立 View（GestureDetector 的 view 在 Android 可触，实测吞掉该列点击——composer 左缘点不中）；改挂 box-none layer + 起点 x≤32dp 门，`10` 复测 composer 左缘 x=76px 点击键盘弹出=点击穿透。纵向穿透=同一命中测试路径（点击已证）+方向锁单测；测试会话均单屏高，未获得滚动位移正例（如实记录）。
+- **壳外零变化**：壳关+官方会话屏，`13` 左缘 x=100px 右滑→官方抽屉打开（新建工作区可见）=blocker 已释放；官方 header 完整（`13` 背景）。右缘手势一次注入未开 explorer（共享 `openGesturesBlocked` 释放已由左手势证明；explorer 本体经 ⋯ 实开两次）。⚠ 设备侧注：x=20px 起的滑动被 EMUI 系统边缘返回抢先（官方屏上表现为退 app，与壳无关；本卡滑动验收用 x=100px 起点区分）。
+- **取舍清单（官方 ⋯ 其余项）**：舍弃=新建会话（C17 直达 /new 已有）/新建浏览器（仅 Electron）/复制工作区路径/复制分支名/导入会话（壳 C10 导入屏）/显示 setup/新建终端+profile 列表/编辑终端 profile（终端在官方 tabs 面，壳低频）；不聚合=PluginHeaderButtons（插件面）、OpenInEditor（桌面 only）。丑牌抽屉（汉堡）不可达=预期决策（DESIGN §14.5）。
+- **设备复位**：壳模式 ON、主题浅色、auto-rotate+手势导航恢复、`15` 壳列表回归截图。

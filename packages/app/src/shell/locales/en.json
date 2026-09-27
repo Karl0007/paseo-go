@@ -268,7 +268,15 @@
   "header": {
     "back": "Back",
     "menu": "Session actions",
-    "menuFiles": "View project files"
+    "menuFiles": "View project files",
+    "menuDiff": "View diff",
+    "menuExplorer": "View files",
+    "menuScripts": "Run scripts",
+    "scriptRunning": "Running",
+    "scriptStopped": "Stopped",
+    "scriptStartFailed": "Failed to start {{scriptName}}",
+    "scriptStopFailed": "Failed to stop {{scriptName}}",
+    "scriptsNoClient": "Not connected to the host"
   },
   "tablet": {
     "listPlaceholder": "Lists appear here"
