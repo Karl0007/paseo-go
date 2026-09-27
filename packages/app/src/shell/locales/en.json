@@ -152,7 +152,20 @@
     "connectHost": "Connect a new host",
     "newCommand": "New quick command",
     "emptyTitle": "No hosts yet",
-    "emptyHint": "Connect a Paseo daemon and your projects and files show up here."
+    "emptyHint": "Connect a Paseo daemon and your projects and files show up here.",
+    "worktreeEmpty": "No sessions",
+    "a11yExpanded": "Expanded",
+    "a11yCollapsed": "Collapsed",
+    "menu": {
+      "copyPath": "Copy worktree path",
+      "archiveWorkspace": "Archive workspace"
+    },
+    "toast": {
+      "pathCopied": "Worktree path copied",
+      "copyFailed": "Copy failed",
+      "workspaceArchived": "Archived every workspace record of this worktree",
+      "archiveFailed": "Archive failed: {{message}}"
+    }
   },
   "commands": {
     "newTitle": "New quick command",

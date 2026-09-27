@@ -1,27 +1,49 @@
-// 项目行 (DESIGN §5, card C5): workspace icon | workspace display name + 活跃 agent
-// 数角标 | owning-project subtitle. Tapping pushes the shell files route (C6 turns
-// it into the real browser). Geometry follows the 对话 row so the two tabs read as
-// one product (§9).
+// L1 工程行 (DESIGN §14.8, card C26): chevron + 工程名 + 聚合活跃角标. The row body
+// toggles expand/collapse — 长按 is deliberately absent (the host ⚙ already lives in
+// the group header). Geometry follows the 对话 row so the tabs read as one product (§9).
+// Also exports the shared L1/L2 count badge: needs_input 优先橙色, plain 活跃 static.
 import { useCallback } from "react";
 import { Pressable, Text, View } from "react-native";
 import { StyleSheet } from "react-native-unistyles";
 import { useTranslation } from "react-i18next";
-import { Folder } from "lucide-react-native";
+import { ChevronDown, ChevronRight, Folder } from "lucide-react-native";
 import { SHELL_I18N_NAMESPACE } from "@/shell/i18n";
-import type { ShellWorkspaceRow } from "@/shell/workspace/derive";
+import { badgeTone, type ShellProjectRow, type WorkspaceTreeAgent } from "@/shell/workspace/derive";
 
-export function WorkspaceProjectRow({
-  row,
-  dimmed,
-  onOpen,
+/** 活跃计数角标; tone comes from badgeTone (needs=橙, active=运行色静态, 0=不渲染). */
+export function WorkspaceTreeBadge({
+  activeCount,
+  needsInputCount,
+  testID,
 }: {
-  row: ShellWorkspaceRow;
+  activeCount: number;
+  needsInputCount: number;
+  testID: string;
+}) {
+  const tone = badgeTone(activeCount, needsInputCount);
+  if (tone === null) return null;
+  return (
+    <View style={[styles.badge, tone === "needs" && styles.badgeNeeds]} testID={testID}>
+      <Text style={styles.badgeText}>{activeCount}</Text>
+    </View>
+  );
+}
+
+export function WorkspaceProjectRow<A extends WorkspaceTreeAgent>({
+  row,
+  expanded,
+  dimmed,
+  onToggle,
+}: {
+  row: ShellProjectRow<A>;
+  /** 展开态 lives in the screen (useState, never persisted). */
+  expanded: boolean;
   /** Offline-host sections grey their cached rows. */
   dimmed: boolean;
-  onOpen: (row: ShellWorkspaceRow) => void;
+  onToggle: (row: ShellProjectRow<A>) => void;
 }) {
   const { t } = useTranslation(SHELL_I18N_NAMESPACE);
-  const handleOpen = useCallback(() => onOpen(row), [onOpen, row]);
+  const handleToggle = useCallback(() => onToggle(row), [onToggle, row]);
   const rowStyle = useCallback(
     ({ pressed }: { pressed: boolean }) => [
       styles.row,
@@ -30,36 +52,39 @@ export function WorkspaceProjectRow({
     ],
     [dimmed],
   );
-  const labelParts = [row.name, row.projectName];
+  const Chevron = expanded ? ChevronDown : ChevronRight;
+  // C12 无障碍: chevron/badge are purely visual — announce state.
+  const labelParts = [
+    row.name,
+    expanded ? t("workspace.a11yExpanded") : t("workspace.a11yCollapsed"),
+  ];
   if (row.activeCount > 0)
     labelParts.push(t("workspace.a11yActiveAgents", { count: row.activeCount }));
   if (dimmed) labelParts.push(t("chats.hostStatus.offline"));
   return (
     <Pressable
-      onPress={handleOpen}
+      onPress={handleToggle}
       accessibilityRole="button"
       accessibilityLabel={labelParts.join(" · ")}
       style={rowStyle}
-      testID={`shell-workspace-row-${row.key}`}
+      testID={`shell-workspace-project-${row.key}`}
     >
+      <View style={styles.chevronSlot}>
+        <Chevron size={16} color={styles.chevron.color} />
+      </View>
       <View style={styles.iconWrap}>
         <Folder size={18} color={styles.icon.color} />
       </View>
       <View style={styles.textWrap}>
-        <View style={styles.titleLine}>
-          <Text style={styles.title} numberOfLines={1}>
-            {row.name}
-          </Text>
-          {row.activeCount > 0 ? (
-            <View style={styles.badge} testID={`shell-workspace-badge-${row.key}`}>
-              <Text style={styles.badgeText}>{row.activeCount}</Text>
-            </View>
-          ) : null}
-        </View>
-        <Text style={styles.subtitle} numberOfLines={1}>
-          {row.projectName}
+        <Text style={styles.title} numberOfLines={1}>
+          {row.name}
         </Text>
       </View>
+      <WorkspaceTreeBadge
+        activeCount={row.activeCount}
+        needsInputCount={row.needsInputCount}
+        testID={`shell-workspace-project-badge-${row.key}`}
+      />
     </Pressable>
   );
 }
@@ -68,9 +93,10 @@ const styles = StyleSheet.create((theme) => ({
   row: {
     flexDirection: "row",
     alignItems: "center",
-    gap: theme.spacing[3],
+    gap: theme.spacing[2],
     paddingVertical: theme.spacing[3],
-    paddingHorizontal: theme.spacing[4],
+    paddingLeft: theme.spacing[4],
+    paddingRight: theme.spacing[4],
   },
   rowPressed: {
     backgroundColor: theme.colors.surface1,
@@ -78,8 +104,16 @@ const styles = StyleSheet.create((theme) => ({
   rowDimmed: {
     opacity: 0.55,
   },
+  chevronSlot: {
+    width: 18,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  chevron: {
+    color: theme.colors.foregroundExtraMuted,
+  },
   iconWrap: {
-    width: 32,
+    width: 26,
     alignItems: "center",
     justifyContent: "center",
   },
@@ -88,34 +122,28 @@ const styles = StyleSheet.create((theme) => ({
   },
   textWrap: {
     flex: 1,
-    gap: theme.spacing[1],
-  },
-  titleLine: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: theme.spacing[2],
+    gap: theme.spacing[0.5],
   },
   title: {
-    flexShrink: 1,
     fontSize: theme.fontSize.base,
-    fontWeight: theme.fontWeight.medium,
+    fontWeight: theme.fontWeight.semibold,
     color: theme.colors.foreground,
   },
   badge: {
     minWidth: 18,
-    paddingHorizontal: theme.spacing[1],
+    height: 18,
     borderRadius: theme.borderRadius.full,
-    backgroundColor: theme.colors.accent,
+    paddingHorizontal: theme.spacing[1.5],
     alignItems: "center",
     justifyContent: "center",
+    backgroundColor: theme.colors.statusDotRunning,
+  },
+  badgeNeeds: {
+    backgroundColor: theme.colors.statusDotWarning,
   },
   badgeText: {
     fontSize: theme.fontSize.sm,
     fontWeight: theme.fontWeight.semibold,
     color: theme.colors.accentForeground,
-  },
-  subtitle: {
-    fontSize: theme.fontSize.sm,
-    color: theme.colors.foregroundMuted,
   },
 }));

@@ -1,11 +1,12 @@
-// 工作区 tab (DESIGN §5, cards C5+C6+C7+C9): 搜索 (C9: the bar morphs into an input;
-// 文件名 hits come from the session-store explorer cache — the protocol has no
-// filename-search RPC, live-probed on both daemons, so only 已浏览目录 are covered,
-// which the empty state says out loud; a hit pushes the C6 preview directly) →
-// 收藏夹区 (files star + ⚡ 快捷指令混排) → 主机分组 (连接点 + 名称 + ⚙ 官方 host
-// settings；离线置灰+重试) → 项目行 (workspace 名 + 活跃 agent 角标, 最近使用排序) →
-// ＋新建项目 / ＋连接新主机 (官方流程). Cold start rides the official skeleton;
-// pull-to-refresh re-pulls agents + directories.
+// 工作区 tab (DESIGN §5 + §14.8, cards C5+C6+C7+C9+C26): 搜索 (C9: the bar morphs into
+// an input; 文件名 hits come from the session-store explorer cache — the protocol has
+// no filename-search RPC, so only 已浏览目录 are covered, which the empty state says
+// out loud; a hit pushes the C6 preview directly) → 收藏夹区 (files star + ⚡ 快捷指令
+// 混排) → 主机分组 (连接点 + 名称 + ⚙ 官方 host settings；离线置灰+重试) → 三层树
+// (L1 工程行 = 展开/收起 → L2 worktree 行 = 物理合并 (cwd+branch)，行体进文件页，长按
+// 复制路径/归档 → L3 session 行 = C4 opener + C3 长按菜单). 展开态 = 屏内 useState
+// (不 persist). ＋新建项目 / ＋连接新主机 (官方流程). Cold start rides the official
+// skeleton; pull-to-refresh re-pulls agents + directories.
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { FlatList, Pressable, RefreshControl, Text, View } from "react-native";
 import { router, type Href } from "expo-router";
@@ -16,7 +17,7 @@ import { FolderTree, Plus, Search, SearchX, Star, Zap, type LucideIcon } from "l
 import { SidebarAgentListSkeleton } from "@/components/sidebar-agent-list-skeleton";
 import { Button } from "@/components/ui/button";
 import { useToast } from "@/contexts/toast-context";
-import { useAggregatedAgents } from "@/hooks/use-aggregated-agents";
+import { useAggregatedAgents, type AggregatedAgent } from "@/hooks/use-aggregated-agents";
 import { useOpenAddProject } from "@/hooks/use-open-add-project";
 import { useProjects } from "@/hooks/use-projects";
 import { getHostRuntimeStore, useHostRegistryStatus, useHosts } from "@/runtime/host-runtime";
@@ -28,6 +29,18 @@ import { WorkspaceHostHeader } from "@/shell/components/workspace-host-header";
 import { WorkspaceProjectRow } from "@/shell/components/workspace-project-row";
 import { WorkspaceFavoriteRow } from "@/shell/components/workspace-favorite-row";
 import { WorkspaceCommandRow } from "@/shell/components/workspace-command-row";
+import { useFocusEffect } from "@react-navigation/native";
+import { createChatOpener } from "@/shell/chats/open-agent";
+import { chatLastEventAtFromAgent } from "@/shell/chats/derive";
+import { isImportedProviderSession } from "@getpaseo/protocol/agent-labels";
+import { confirmDialog } from "@/utils/confirm-dialog";
+import { usePaseoGoForkAckStore } from "@/shell/stores/forkAck";
+import { shellNavigateToAgent } from "@/shell/chats/shell-navigate-to-agent";
+import { WorkspaceWorktreeRow } from "@/shell/components/workspace-worktree-row";
+import { WorkspaceSessionRow } from "@/shell/components/workspace-session-row";
+import { usePaseoGoReadStateStore } from "@/shell/stores/readState";
+import { useShellAgentActions } from "@/shell/shellAgentActions";
+import { archiveWorkspacesOptimistically } from "@/workspace/workspace-archive";
 import {
   CommandWorkspacePickerSheet,
   type CommandWorkspaceOption,
@@ -47,7 +60,9 @@ import { normalizeSearchQuery } from "@/shell/search/query";
 import {
   buildWorkspaceTree,
   type ShellHostSection,
-  type ShellWorkspaceRow,
+  type ShellProjectRow,
+  type ShellWorktreeRow,
+  type WorkspaceTreeSession,
 } from "@/shell/workspace/derive";
 
 const REFRESH_SETTLE_MS = 700;
@@ -71,9 +86,29 @@ type TreeItem =
       dimmed: boolean;
       running: boolean;
     }
-  | { type: "host"; key: string; section: ShellHostSection }
+  | { type: "host"; key: string; section: ShellHostSection<AggregatedAgent> }
   | { type: "host-empty"; key: string; label: string }
-  | { type: "workspace"; key: string; row: ShellWorkspaceRow; dimmed: boolean };
+  | {
+      type: "project";
+      key: string;
+      row: ShellProjectRow<AggregatedAgent>;
+      dimmed: boolean;
+      expanded: boolean;
+    }
+  | {
+      type: "worktree";
+      key: string;
+      row: ShellWorktreeRow<AggregatedAgent>;
+      dimmed: boolean;
+      expanded: boolean;
+    }
+  | { type: "worktree-empty"; key: string }
+  | {
+      type: "session";
+      key: string;
+      session: WorkspaceTreeSession<AggregatedAgent>;
+      dimmed: boolean;
+    };
 
 // 收藏夹区 empty state — until the first 收藏 lands (files screen chip / preview
 // star), the card teaches the gesture that fills the section below.
@@ -175,23 +210,78 @@ export default function ShellWorkspaceScreen() {
     [hosts],
   );
 
+  // C26: the cwd axis of the L2 physical identity comes from the session-store
+  // descriptors (WorkspaceSummary carries no path). Keys mirror the tree's record keys.
+  const sessions = useSessionStore((state) => state.sessions);
+  const workspacePaths = useMemo(() => {
+    const paths = new Map<string, string>();
+    for (const [serverId, session] of Object.entries(sessions)) {
+      for (const descriptor of session.workspaces.values()) {
+        const directory = descriptor.workspaceDirectory || descriptor.projectRootPath || "";
+        if (directory) paths.set(`${serverId}:${descriptor.id}`, directory);
+      }
+    }
+    return paths;
+  }, [sessions]);
+
   const sections = useMemo(
-    () => buildWorkspaceTree({ hosts, statuses, projects, agents }),
-    [hosts, statuses, projects, agents],
+    () => buildWorkspaceTree({ hosts, statuses, projects, agents, workspacePaths }),
+    [hosts, statuses, projects, agents, workspacePaths],
   );
+
+  // C26 L3: the 对话 tab's C4 opener verbatim — markRead 双拍 in the chat's own
+  // host-clock domain + the official navigateToAgent (workspace route + open intent),
+  // including C24's fork guard: an imported chat's first open confirms once.
+  const markRead = usePaseoGoReadStateStore((state) => state.markRead);
+  const opener = useMemo(
+    () =>
+      createChatOpener({
+        markRead,
+        navigateToAgent: shellNavigateToAgent,
+        lastEventAtOf: (serverId, agentId) => {
+          const agent = useSessionStore.getState().sessions[serverId]?.agents.get(agentId);
+          return agent ? chatLastEventAtFromAgent(agent) : undefined;
+        },
+        confirmFork: () =>
+          confirmDialog({
+            title: t("chats.fork.title"),
+            message: t("chats.fork.message"),
+            confirmLabel: t("chats.fork.confirm"),
+            cancelLabel: t("chats.fork.cancel"),
+          }),
+        forkAcknowledged: (key) => usePaseoGoForkAckStore.getState().ackedKeys.includes(key),
+        acknowledgeFork: (key) => usePaseoGoForkAckStore.getState().ack(key),
+      }),
+    [markRead, t],
+  );
+  useFocusEffect(
+    useCallback(() => {
+      opener.onFocus();
+      return undefined;
+    }, [opener]),
+  );
+  const actions = useShellAgentActions();
+
+  // 展开态 (裁定): 屏内 useState, 不 persist、不跨启动; keys come from the derivation
+  // (project key = host:projectId, worktree key = host:projectId:wt:identity).
+  const [expandedProjects, setExpandedProjects] = useState<ReadonlySet<string>>(() => new Set());
+  const [expandedWorktrees, setExpandedWorktrees] = useState<ReadonlySet<string>>(() => new Set());
 
   // C9 文件名搜索: the session-store explorer cache is the index (no filename-search
   // RPC upstream — see shell/search/file-search.ts). Built only while search mode is
   // open; names reuse the tree sections so results label like the tree below.
-  const sessions = useSessionStore((state) => state.sessions);
   const [searchActive, setSearchActive] = useState(false);
   const [query, setQuery] = useState("");
   const searchSources = useMemo<FileSearchSource[]>(() => {
     if (!searchActive) return [];
     const names = new Map<string, string>();
     for (const section of sections) {
-      for (const row of section.rows) {
-        names.set(`${section.serverId}:${row.workspaceId}`, row.name);
+      for (const projectRow of section.projects) {
+        for (const worktree of projectRow.worktrees) {
+          for (const workspaceId of worktree.workspaceIds) {
+            names.set(`${section.serverId}:${workspaceId}`, worktree.name);
+          }
+        }
       }
     }
     const out: FileSearchSource[] = [];
@@ -259,19 +349,62 @@ export default function ShellWorkspaceScreen() {
     for (const entry of entries) out.push(entry.item);
     for (const section of sections) {
       out.push({ type: "host", key: `host:${section.serverId}`, section });
-      if (section.rows.length === 0) {
+      if (section.projects.length === 0) {
         out.push({
           type: "host-empty",
           key: `host-empty:${section.serverId}`,
           label: section.isOnline ? t("workspace.hostEmpty") : t("workspace.hostEmptyOffline"),
         });
       }
-      for (const row of section.rows) {
-        out.push({ type: "workspace", key: `row:${row.key}`, row, dimmed: !section.isOnline });
+      const dimmed = !section.isOnline;
+      for (const projectRow of section.projects) {
+        const projectExpanded = expandedProjects.has(projectRow.key);
+        out.push({
+          type: "project",
+          key: `project:${projectRow.key}`,
+          row: projectRow,
+          dimmed,
+          expanded: projectExpanded,
+        });
+        if (!projectExpanded) continue;
+        for (const worktree of projectRow.worktrees) {
+          const worktreeExpanded = expandedWorktrees.has(worktree.key);
+          out.push({
+            type: "worktree",
+            key: `worktree:${worktree.key}`,
+            row: worktree,
+            dimmed,
+            expanded: worktreeExpanded,
+          });
+          if (!worktreeExpanded) continue;
+          if (worktree.sessions.length === 0) {
+            // worktree 无会话 → 「暂无会话」行 (裁定 4).
+            out.push({ type: "worktree-empty", key: `worktree-empty:${worktree.key}` });
+            continue;
+          }
+          for (const sessionRow of worktree.sessions) {
+            out.push({
+              type: "session",
+              key: `session:${worktree.key}:${sessionRow.key}`,
+              session: sessionRow,
+              dimmed,
+            });
+          }
+        }
       }
     }
     return out;
-  }, [sections, t, favorites, commands, runningId, hostsById, statuses]);
+  }, [
+    sections,
+    expandedProjects,
+    expandedWorktrees,
+    t,
+    favorites,
+    commands,
+    runningId,
+    hostsById,
+    statuses,
+  ]);
 
   const [refreshing, setRefreshing] = useState(false);
   const refreshTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -328,9 +461,72 @@ export default function ShellWorkspaceScreen() {
     [handleOpenHit],
   );
   const searchKeyExtractor = useCallback((hit: FileSearchHit) => hit.key, []);
-  const handleOpenWorkspace = useCallback(
-    (row: ShellWorkspaceRow) => router.push(shellFilesHref(row.serverId, row.workspaceId)),
+  const toggleProject = useCallback(
+    (row: ShellProjectRow<AggregatedAgent>) =>
+      setExpandedProjects((prev) => {
+        const next = new Set(prev);
+        if (next.has(row.key)) next.delete(row.key);
+        else next.add(row.key);
+        return next;
+      }),
     [],
+  );
+  const toggleWorktree = useCallback(
+    (row: ShellWorktreeRow<AggregatedAgent>) =>
+      setExpandedWorktrees((prev) => {
+        const next = new Set(prev);
+        if (next.has(row.key)) next.delete(row.key);
+        else next.add(row.key);
+        return next;
+      }),
+    [],
+  );
+  // L2 行体 = 该 worktree 的文件页 (代表记录 id, 裁定 §14.8)。
+  const handleOpenWorktree = useCallback(
+    (row: ShellWorktreeRow<AggregatedAgent>) =>
+      router.push(shellFilesHref(row.serverId, row.workspaceId)),
+    [],
+  );
+  // L3 行体 = C4 opener (fork 门 → markRead 双拍 + navigateToAgent)。
+  const handleOpenSession = useCallback(
+    (session: WorkspaceTreeSession<AggregatedAgent>) => {
+      void opener.open({
+        key: session.key,
+        serverId: session.agent.serverId,
+        agentId: session.agent.id,
+        workspaceId: session.agent.workspaceId,
+        lastEventAt: session.lastEventAt,
+        imported: isImportedProviderSession(session.agent),
+      });
+    },
+    [opener],
+  );
+  // L2 长按「归档工作区」: 官方 archiveWorkspace RPC (workspace-archive 乐观隐藏，
+  // 失败自动回滚)，对合并前全部记录一次执行。
+  const handleArchiveWorktree = useCallback(
+    (row: ShellWorktreeRow<AggregatedAgent>) => {
+      void (async () => {
+        const failures = await archiveWorkspacesOptimistically({
+          getClient: (serverId) => getHostRuntimeStore().getClient(serverId),
+          workspaces: row.workspaceIds.map((workspaceId) => ({
+            serverId: row.serverId,
+            workspaceId,
+          })),
+        });
+        if (failures.length === 0) {
+          toast.show(t("workspace.toast.workspaceArchived"));
+          refetch();
+        } else {
+          const first = failures[0];
+          const message =
+            first && first.error instanceof Error
+              ? first.error.message
+              : String(first?.error ?? "");
+          toast.error(t("workspace.toast.archiveFailed", { message }));
+        }
+      })();
+    },
+    [toast, t, refetch],
   );
   const handleNewCommand = useCallback(() => router.push(shellCommandEditHref() as Href), []);
   const handleEditCommand = useCallback(
@@ -347,11 +543,18 @@ export default function ShellWorkspaceScreen() {
   const pickerOptions = useMemo<CommandWorkspaceOption[]>(() => {
     if (!pickerCommand) return [];
     const section = sections.find((entry) => entry.serverId === pickerCommand.hostId);
-    return (section?.rows ?? []).map((row) => ({
-      workspaceId: row.workspaceId,
-      name: row.name,
-      projectName: row.projectName,
-    }));
+    if (!section) return [];
+    const options: CommandWorkspaceOption[] = [];
+    for (const projectRow of section.projects) {
+      for (const worktree of projectRow.worktrees) {
+        options.push({
+          workspaceId: worktree.workspaceId,
+          name: worktree.name,
+          projectName: projectRow.name,
+        });
+      }
+    }
+    return options;
   }, [sections, pickerCommand]);
 
   const renderItem = useCallback(
@@ -407,16 +610,52 @@ export default function ShellWorkspaceScreen() {
           );
         case "host-empty":
           return <Text style={styles.hostEmpty}>{item.label}</Text>;
-        case "workspace":
+        case "project":
           return (
-            <WorkspaceProjectRow row={item.row} dimmed={item.dimmed} onOpen={handleOpenWorkspace} />
+            <WorkspaceProjectRow
+              row={item.row}
+              dimmed={item.dimmed}
+              expanded={item.expanded}
+              onToggle={toggleProject}
+            />
+          );
+        case "worktree":
+          return (
+            <WorkspaceWorktreeRow
+              row={item.row}
+              dimmed={item.dimmed}
+              expanded={item.expanded}
+              onToggle={toggleWorktree}
+              onOpenFiles={handleOpenWorktree}
+              onArchive={handleArchiveWorktree}
+            />
+          );
+        case "worktree-empty":
+          return (
+            <Text style={styles.worktreeEmpty} testID="shell-workspace-worktree-empty">
+              {t("workspace.worktreeEmpty")}
+            </Text>
+          );
+        case "session":
+          return (
+            <WorkspaceSessionRow
+              session={item.session}
+              dimmed={item.dimmed}
+              actions={actions}
+              onOpen={handleOpenSession}
+            />
           );
       }
     },
     [
       handleOpenSettings,
       handleRetryHost,
-      handleOpenWorkspace,
+      toggleProject,
+      toggleWorktree,
+      handleOpenWorktree,
+      handleOpenSession,
+      handleArchiveWorktree,
+      actions,
       handleNewCommand,
       handleEditCommand,
       handleRemoveCommand,
@@ -625,6 +864,13 @@ const styles = StyleSheet.create((theme) => ({
   },
   hostEmpty: {
     paddingHorizontal: theme.spacing[4],
+    paddingVertical: theme.spacing[2],
+    fontSize: theme.fontSize.sm,
+    color: theme.colors.foregroundExtraMuted,
+  },
+  worktreeEmpty: {
+    paddingLeft: theme.spacing[4] + 18 + 22 + 22,
+    paddingRight: theme.spacing[4],
     paddingVertical: theme.spacing[2],
     fontSize: theme.fontSize.sm,
     color: theme.colors.foregroundExtraMuted,

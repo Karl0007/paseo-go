@@ -8,6 +8,7 @@ import type { WorkspaceTreeAgent } from "@/shell/workspace/derive";
 function agent(patch: Partial<WorkspaceTreeAgent> = {}): WorkspaceTreeAgent {
   return {
     serverId: "srv-A",
+    id: "ag-1",
     workspaceId: "ws-1",
     status: "running",
     lastActivityAt: new Date("2026-09-25T06:00:00Z"),

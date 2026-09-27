@@ -152,7 +152,20 @@
     "connectHost": "连接新主机",
     "newCommand": "新建快捷指令",
     "emptyTitle": "还没有主机",
-    "emptyHint": "连接一台 Paseo daemon，项目与文件会出现在这里。"
+    "emptyHint": "连接一台 Paseo daemon，项目与文件会出现在这里。",
+    "worktreeEmpty": "暂无会话",
+    "a11yExpanded": "已展开",
+    "a11yCollapsed": "已收起",
+    "menu": {
+      "copyPath": "复制 worktree 路径",
+      "archiveWorkspace": "归档工作区"
+    },
+    "toast": {
+      "pathCopied": "已复制 worktree 路径",
+      "copyFailed": "复制失败",
+      "workspaceArchived": "已归档该 worktree 的全部工作区记录",
+      "archiveFailed": "归档失败：{{message}}"
+    }
   },
   "commands": {
     "newTitle": "新建快捷指令",

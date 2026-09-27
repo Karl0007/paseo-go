@@ -1,19 +1,35 @@
-// C5 acceptance item 2: the host→workspace tree derivation — badge counting,
-// 最近使用 ordering, multi-host grouping, offline placement, empty workspaces.
+// C26 acceptance item 2: the host → L1 工程 → L2 worktree → L3 session derivation —
+// physical merge (normalized cwd + branch), representative-record election, aggregated
+// badges (needs_input 优先), stable hierarchical ordering, 无会话 worktrees, empty
+// states, offline placement. Pure fixtures; the screen feeds the same function live.
 import { describe, expect, it } from "vitest";
 import type { HostRuntimeConnectionStatus } from "@/runtime/host-runtime";
 import type { ProjectHostEntry, ProjectSummary, WorkspaceSummary } from "@/utils/projects";
-import { buildWorkspaceTree, isWorkspaceAgentActive, type WorkspaceTreeAgent } from "./derive";
+import {
+  badgeTone,
+  buildWorkspaceTree,
+  isWorkspaceAgentActive,
+  isWorkspaceAgentNeedsInput,
+  pathTail,
+  workspaceAgentLastEventAt,
+  type BuildWorkspaceTreeInput,
+  type ShellHostSection,
+  type WorkspaceTreeAgent,
+} from "./derive";
 
-function workspace(id: string, name: string, title?: string | null): WorkspaceSummary {
+function workspace(
+  id: string,
+  name: string,
+  overrides: Partial<WorkspaceSummary> = {},
+): WorkspaceSummary {
   return {
     id,
     name,
-    title: title ?? undefined,
     workspaceKind: "directory",
     status: "done",
     currentBranch: null,
     changeRequestNumber: null,
+    ...overrides,
   };
 }
 
@@ -48,7 +64,9 @@ function project(viewKey: string, hosts: ProjectHostEntry[]): ProjectSummary {
   };
 }
 
-function agent(overrides: Partial<WorkspaceTreeAgent> & { serverId: string }): WorkspaceTreeAgent {
+function agent(
+  overrides: Partial<WorkspaceTreeAgent> & { serverId: string; id: string },
+): WorkspaceTreeAgent {
   return {
     workspaceId: "ws-1",
     status: "idle",
@@ -62,14 +80,36 @@ const HOSTS = [
   { serverId: "host-b", label: "PAD-B" },
 ];
 
-function statuses(entries: Array<[string, HostRuntimeConnectionStatus]>) {
-  return new Map(entries);
+const ONLINE = new Map<string, HostRuntimeConnectionStatus>([
+  ["host-a", "online"],
+  ["host-b", "online"],
+]);
+
+function build(overrides: Partial<BuildWorkspaceTreeInput> = {}): ShellHostSection[] {
+  return buildWorkspaceTree({
+    hosts: HOSTS,
+    statuses: ONLINE,
+    projects: [],
+    agents: [],
+    workspacePaths: new Map(),
+    ...overrides,
+  });
+}
+
+function section(sections: ShellHostSection[], serverId: string): ShellHostSection {
+  const found = sections.find((entry) => entry.serverId === serverId);
+  if (!found) throw new Error(`missing section ${serverId}`);
+  return found;
 }
 
 describe("isWorkspaceAgentActive", () => {
   it("counts running/initializing as active", () => {
-    expect(isWorkspaceAgentActive(agent({ serverId: "h", status: "running" }))).toBe(true);
-    expect(isWorkspaceAgentActive(agent({ serverId: "h", status: "initializing" }))).toBe(true);
+    expect(isWorkspaceAgentActive(agent({ serverId: "h", id: "a", status: "running" }))).toBe(true);
+    expect(isWorkspaceAgentActive(agent({ serverId: "h", id: "a", status: "initializing" }))).toBe(
+      true,
+    );
+    expect(isWorkspaceAgentActive(agent({ serverId: "h", id: "a", status: "idle" }))).toBe(false);
+    expect(isWorkspaceAgentActive(agent({ serverId: "h", id: "a", status: "closed" }))).toBe(false);
   });
 
   it("counts permission-waiting attention as active, finished/error attention as not", () => {
@@ -77,152 +117,543 @@ describe("isWorkspaceAgentActive", () => {
       isWorkspaceAgentActive(
         agent({
           serverId: "h",
+          id: "a",
           status: "idle",
           requiresAttention: true,
           attentionReason: "permission",
         }),
       ),
     ).toBe(true);
-    expect(
-      isWorkspaceAgentActive(
-        agent({
-          serverId: "h",
-          status: "idle",
-          requiresAttention: true,
-          attentionReason: "finished",
-        }),
-      ),
-    ).toBe(false);
-    expect(isWorkspaceAgentActive(agent({ serverId: "h", status: "error" }))).toBe(false);
-    expect(isWorkspaceAgentActive(agent({ serverId: "h", status: "closed" }))).toBe(false);
+    for (const reason of ["finished", "error"] as const) {
+      expect(
+        isWorkspaceAgentActive(
+          agent({
+            serverId: "h",
+            id: "a",
+            status: "idle",
+            requiresAttention: true,
+            attentionReason: reason,
+          }),
+        ),
+      ).toBe(false);
+    }
   });
 });
 
-describe("buildWorkspaceTree", () => {
-  it("groups workspaces under their host with per-workspace badge counts", () => {
-    const sections = buildWorkspaceTree({
-      hosts: HOSTS,
-      statuses: statuses([
-        ["host-a", "online"],
-        ["host-b", "online"],
-      ]),
-      projects: [
-        project("p1", [hostEntry("host-a", "paseo", [workspace("ws-a1", "paseo")])]),
-        project("p2", [hostEntry("host-b", "blog", [workspace("ws-b1", "blog")])]),
-      ],
-      agents: [
-        agent({ serverId: "host-a", workspaceId: "ws-a1", status: "running" }),
-        agent({ serverId: "host-a", workspaceId: "ws-a1", status: "idle" }),
-        agent({ serverId: "host-b", workspaceId: "ws-b1", status: "error" }),
-      ],
+describe("isWorkspaceAgentNeedsInput / workspaceAgentLastEventAt", () => {
+  it("needs_input is exactly the permission-waiting subset of 活跃", () => {
+    const waiting = agent({
+      serverId: "h",
+      id: "a",
+      status: "idle",
+      requiresAttention: true,
+      attentionReason: "permission",
     });
-    expect(sections.map((s) => s.serverId)).toEqual(["host-a", "host-b"]);
-    expect(sections[0]?.rows.map((r) => [r.workspaceId, r.activeCount, r.projectName])).toEqual([
-      ["ws-a1", 1, "paseo"],
-    ]);
-    expect(sections[1]?.rows[0]?.activeCount).toBe(0);
+    const running = agent({ serverId: "h", id: "b", status: "running" });
+    const finished = agent({
+      serverId: "h",
+      id: "c",
+      status: "idle",
+      requiresAttention: true,
+      attentionReason: "finished",
+    });
+    expect(isWorkspaceAgentNeedsInput(waiting)).toBe(true);
+    expect(isWorkspaceAgentNeedsInput(running)).toBe(false);
+    expect(isWorkspaceAgentNeedsInput(finished)).toBe(false);
   });
 
-  it("sorts rows by newest agent activity, agent-less workspaces last and alphabetical there", () => {
-    const sections = buildWorkspaceTree({
-      hosts: [HOSTS[0]!],
-      statuses: statuses([["host-a", "online"]]),
+  it("last event is activity or the newer attention stamp", () => {
+    expect(
+      workspaceAgentLastEventAt(
+        agent({
+          serverId: "h",
+          id: "a",
+          lastActivityAt: new Date(1_000),
+          attentionTimestamp: new Date(2_500),
+        }),
+      ),
+    ).toBe(2_500);
+    expect(
+      workspaceAgentLastEventAt(
+        agent({
+          serverId: "h",
+          id: "a",
+          lastActivityAt: new Date(3_000),
+          attentionTimestamp: new Date(2_000),
+        }),
+      ),
+    ).toBe(3_000);
+    expect(
+      workspaceAgentLastEventAt(agent({ serverId: "h", id: "a", lastActivityAt: new Date(9) })),
+    ).toBe(9);
+  });
+});
+
+describe("badgeTone", () => {
+  it("needs_input outranks running; zero renders nothing", () => {
+    expect(badgeTone(3, 1)).toBe("needs");
+    expect(badgeTone(3, 0)).toBe("active");
+    expect(badgeTone(0, 0)).toBeNull();
+  });
+});
+
+describe("pathTail", () => {
+  it("takes the last segment of the normalized path", () => {
+    expect(pathTail("/home/dev/paseo-go")).toBe("paseo-go");
+    expect(pathTail("C:/work/paseo-go")).toBe("paseo-go");
+    expect(pathTail("paseo-go")).toBe("paseo-go");
+    expect(pathTail("/")).toBe("/");
+    expect(pathTail("")).toBe("");
+    expect(pathTail("  ")).toBe("");
+  });
+});
+
+describe("buildWorkspaceTree — hierarchy shape", () => {
+  it("nests host → project → worktree → session with the display-name fallbacks", () => {
+    const sections = build({
       projects: [
-        project("p1", [
-          hostEntry("host-a", "mono", [
-            workspace("ws-old", "old"),
-            workspace("ws-new", "new"),
-            workspace("ws-zeta", "zeta"),
-            workspace("ws-alpha", "alpha"),
+        project("v1", [
+          hostEntry("host-a", "paseo", [workspace("ws-1", "feat-x", { title: "长摘要标题" })], {
+            projectCustomName: "Paseo 工程",
+          }),
+        ]),
+      ],
+      agents: [agent({ serverId: "host-a", id: "ag-1", workspaceId: "ws-1" })],
+      workspacePaths: new Map([["host-a:ws-1", "/repo/paseo"]]),
+    });
+    const l1 = section(sections, "host-a").projects[0];
+    expect(l1.name).toBe("Paseo 工程");
+    expect(l1.key).toBe("host-a:proj-host-a-paseo");
+    const l2 = l1.worktrees[0];
+    // title ‖ name: the 摘要 lives at L2, not on the project row.
+    expect(l2.name).toBe("长摘要标题");
+    expect(l2.cwd).toBe("/repo/paseo");
+    const l3 = l2.sessions[0];
+    expect(l3.key).toBe("host-a:ag-1");
+    expect(l3.agent.id).toBe("ag-1");
+  });
+
+  it("falls back to projectName / workspace name when titles are blank", () => {
+    const sections = build({
+      projects: [
+        project("v1", [
+          hostEntry("host-a", "paseo", [workspace("ws-1", "main", { title: "   " })], {
+            projectCustomName: "  ",
+          }),
+        ]),
+      ],
+    });
+    const l1 = section(sections, "host-a").projects[0];
+    expect(l1.name).toBe("paseo");
+    expect(l1.worktrees[0].name).toBe("main");
+  });
+
+  it("empty hosts carry no projects; a project without workspaces carries no L1", () => {
+    const sections = build({
+      projects: [project("v1", [hostEntry("host-a", "paseo", [])])],
+    });
+    expect(section(sections, "host-a").projects).toEqual([]);
+  });
+});
+
+describe("buildWorkspaceTree — 物理合并 (cwd + branch)", () => {
+  it("merges same-directory same-branch records into one L2, unioning ids and sessions", () => {
+    const sections = build({
+      projects: [
+        project("v1", [
+          hostEntry("host-a", "paseo", [
+            workspace("ws-old", "rec-old", { title: "旧摘要", currentBranch: "main" }),
+            workspace("ws-new", "rec-new", { title: "新摘要", currentBranch: "main" }),
+            // Separator/trailing-slash variants of the same cwd merge (preview-root
+            // posture: unify separators, keep case).
+            workspace("ws-slash", "rec-slash", { currentBranch: "main" }),
           ]),
         ]),
       ],
       agents: [
         agent({
           serverId: "host-a",
+          id: "ag-old",
           workspaceId: "ws-old",
-          lastActivityAt: new Date("2026-09-24T00:00:00Z"),
+          lastActivityAt: new Date(1_000),
         }),
         agent({
           serverId: "host-a",
+          id: "ag-new",
           workspaceId: "ws-new",
-          lastActivityAt: new Date("2026-09-25T09:00:00Z"),
+          lastActivityAt: new Date(2_000),
+        }),
+        agent({
+          serverId: "host-a",
+          id: "ag-slash",
+          workspaceId: "ws-slash",
+          lastActivityAt: new Date(3_000),
         }),
       ],
+      workspacePaths: new Map([
+        ["host-a:ws-old", "/repo/paseo"],
+        ["host-a:ws-new", "/repo/paseo/"],
+        ["host-a:ws-slash", "\\repo\\paseo\\"],
+      ]),
     });
-    expect(sections[0]?.rows.map((r) => r.workspaceId)).toEqual([
-      "ws-new",
-      "ws-old",
-      "ws-alpha",
-      "ws-zeta",
-    ]);
-    expect(sections[0]?.rows.map((r) => r.lastUsedAt !== null)).toEqual([true, true, false, false]);
+    const l1 = section(sections, "host-a").projects[0];
+    expect(l1.worktrees).toHaveLength(1);
+    const l2 = l1.worktrees[0];
+    expect(l2.workspaceIds).toEqual(["ws-old", "ws-new", "ws-slash"]);
+    // 代表记录 = 最新 activity → ws-slash; its name is title ‖ name.
+    expect(l2.workspaceId).toBe("ws-slash");
+    expect(l2.name).toBe("rec-slash");
+    expect(l2.cwd).toBe("/repo/paseo");
+    expect(l2.sessions.map((s) => s.agentId)).toEqual(["ag-slash", "ag-new", "ag-old"]);
+    expect(l2.lastUsedAt).toBe(3_000);
   });
 
-  it("prefers workspace/project custom titles over raw names", () => {
-    const sections = buildWorkspaceTree({
-      hosts: [HOSTS[0]!],
-      statuses: statuses([["host-a", "online"]]),
+  it("keeps the newest-activity representative even when an older record arrives last", () => {
+    const sections = build({
       projects: [
-        project("p1", [
-          hostEntry("host-a", "paseo", [workspace("ws-1", "worktree-slug", " 主分支 ")], {
-            projectCustomName: "Paseo 主仓",
-          }),
+        project("v1", [
+          hostEntry("host-a", "paseo", [
+            workspace("ws-1", "one", { title: "活跃摘要", currentBranch: "main" }),
+            workspace("ws-2", "two", { currentBranch: "main" }),
+          ]),
         ]),
       ],
-      agents: [],
+      agents: [
+        agent({
+          serverId: "host-a",
+          id: "ag-1",
+          workspaceId: "ws-1",
+          lastActivityAt: new Date(5_000),
+        }),
+        agent({
+          serverId: "host-a",
+          id: "ag-2",
+          workspaceId: "ws-2",
+          lastActivityAt: new Date(1_000),
+        }),
+      ],
+      workspacePaths: new Map([
+        ["host-a:ws-1", "/repo/x"],
+        ["host-a:ws-2", "/repo/x"],
+      ]),
     });
-    expect(sections[0]?.rows[0]).toMatchObject({
-      name: "主分支",
-      projectName: "Paseo 主仓",
-    });
+    const l2 = section(sections, "host-a").projects[0].worktrees[0];
+    expect(l2.workspaceId).toBe("ws-1");
+    expect(l2.name).toBe("活跃摘要");
   });
 
-  it("keeps offline hosts in the tree, greyed via isOnline=false, sorted after online hosts", () => {
-    const sections = buildWorkspaceTree({
-      hosts: HOSTS,
-      statuses: statuses([
+  it("case is preserved: /Repo/x and /repo/x are different physical directories", () => {
+    const sections = build({
+      projects: [
+        project("v1", [
+          hostEntry("host-a", "paseo", [
+            workspace("ws-1", "upper", { currentBranch: "main" }),
+            workspace("ws-2", "lower", { currentBranch: "main" }),
+          ]),
+        ]),
+      ],
+      workspacePaths: new Map([
+        ["host-a:ws-1", "/Repo/x"],
+        ["host-a:ws-2", "/repo/x"],
+      ]),
+    });
+    expect(section(sections, "host-a").projects[0].worktrees).toHaveLength(2);
+  });
+
+  it("branch is an identity axis: same cwd on two branches stays two rows", () => {
+    const sections = build({
+      projects: [
+        project("v1", [
+          hostEntry("host-a", "paseo", [
+            workspace("ws-1", "on-main", { currentBranch: "main" }),
+            workspace("ws-2", "on-dev", { currentBranch: "dev" }),
+          ]),
+        ]),
+      ],
+      workspacePaths: new Map([
+        ["host-a:ws-1", "/repo/x"],
+        ["host-a:ws-2", "/repo/x"],
+      ]),
+    });
+    expect(section(sections, "host-a").projects[0].worktrees).toHaveLength(2);
+  });
+
+  it("cwd-less records never merge into each other", () => {
+    const sections = build({
+      projects: [
+        project("v1", [
+          hostEntry("host-a", "paseo", [workspace("ws-1", "one"), workspace("ws-2", "two")]),
+        ]),
+      ],
+    });
+    const worktrees = section(sections, "host-a").projects[0].worktrees;
+    expect(worktrees).toHaveLength(2);
+    expect(worktrees.every((row) => row.cwd === "")).toBe(true);
+  });
+
+  it("merges across duplicate project summaries sharing a projectId; a record counts once", () => {
+    const sections = build({
+      projects: [
+        project("v1", [
+          hostEntry("host-a", "paseo", [workspace("ws-1", "one", { currentBranch: "main" })]),
+        ]),
+        project("v2", [
+          hostEntry("host-a", "paseo", [workspace("ws-2", "two", { currentBranch: "main" })]),
+        ]),
+      ],
+      workspacePaths: new Map([
+        ["host-a:ws-1", "/repo/x"],
+        ["host-a:ws-2", "/repo/x"],
+      ]),
+    });
+    const projects = section(sections, "host-a").projects;
+    expect(projects).toHaveLength(1);
+    expect(projects[0].worktrees).toHaveLength(1);
+    expect(projects[0].worktrees[0].workspaceIds).toEqual(["ws-1", "ws-2"]);
+  });
+});
+
+describe("buildWorkspaceTree — 角标聚合", () => {
+  it("L2 sums agents over merged records; L1 aggregates its L2s", () => {
+    const sections = build({
+      projects: [
+        project("v1", [
+          hostEntry("host-a", "paseo", [
+            workspace("ws-1", "a", { currentBranch: "main" }),
+            workspace("ws-2", "b", { currentBranch: "dev" }),
+          ]),
+        ]),
+      ],
+      agents: [
+        agent({
+          serverId: "host-a",
+          id: "r1",
+          workspaceId: "ws-1",
+          status: "running",
+        }),
+        agent({
+          serverId: "host-a",
+          id: "p1",
+          workspaceId: "ws-1",
+          requiresAttention: true,
+          attentionReason: "permission",
+        }),
+        agent({ serverId: "host-a", id: "f1", workspaceId: "ws-1" }),
+        agent({
+          serverId: "host-a",
+          id: "r2",
+          workspaceId: "ws-2",
+          status: "running",
+        }),
+        // Unknown workspace: contributes nothing, spawns nothing.
+        agent({
+          serverId: "host-a",
+          id: "ghost",
+          workspaceId: "ws-404",
+          status: "running",
+        }),
+        // No workspaceId: ignored entirely.
+        agent({ serverId: "host-a", id: "orphan", workspaceId: undefined, status: "running" }),
+      ],
+      workspacePaths: new Map([
+        ["host-a:ws-1", "/repo/x"],
+        ["host-a:ws-2", "/repo/y"],
+      ]),
+    });
+    const l1 = section(sections, "host-a").projects[0];
+    const [l2a, l2b] = l1.worktrees;
+    expect(l2a.workspaceId).toBe("ws-1");
+    expect(l2a.activeCount).toBe(2); // running + permission-waiting
+    expect(l2a.needsInputCount).toBe(1);
+    expect(l2b.activeCount).toBe(1);
+    expect(l2b.needsInputCount).toBe(0);
+    expect(l1.activeCount).toBe(3);
+    expect(l1.needsInputCount).toBe(1);
+    expect(badgeTone(l1.activeCount, l1.needsInputCount)).toBe("needs");
+    expect(badgeTone(l2b.activeCount, l2b.needsInputCount)).toBe("active");
+  });
+
+  it("finished/error attention never enters the badge", () => {
+    const sections = build({
+      projects: [project("v1", [hostEntry("host-a", "paseo", [workspace("ws-1", "a")])])],
+      agents: [
+        agent({
+          serverId: "host-a",
+          id: "done1",
+          workspaceId: "ws-1",
+          requiresAttention: true,
+          attentionReason: "finished",
+        }),
+        agent({
+          serverId: "host-a",
+          id: "err1",
+          workspaceId: "ws-1",
+          status: "error",
+          requiresAttention: true,
+          attentionReason: "error",
+        }),
+      ],
+      workspacePaths: new Map([["host-a:ws-1", "/repo/x"]]),
+    });
+    const l1 = section(sections, "host-a").projects[0];
+    expect(l1.worktrees[0].sessions).toHaveLength(2);
+    expect(l1.activeCount).toBe(0);
+    expect(badgeTone(l1.activeCount, l1.needsInputCount)).toBeNull();
+  });
+});
+
+describe("buildWorkspaceTree — 层级排序", () => {
+  it("L2 sorts 活跃 → lastUsedAt → 字典序, never-used sinking", () => {
+    const sections = build({
+      projects: [
+        project("v1", [
+          hostEntry(
+            "host-a",
+            "paseo",
+            [
+              workspace("ws-live", "zeta", { currentBranch: "b1" }),
+              workspace("ws-cold", "alpha", { currentBranch: "b2" }),
+              workspace("ws-idle", "beta", { currentBranch: "b3" }),
+              workspace("ws-fresh", "beta2", { currentBranch: "b4" }),
+              workspace("ws-none", "aardvark", { currentBranch: "b5" }),
+            ],
+            { projectId: "proj-1" },
+          ),
+        ]),
+      ],
+      agents: [
+        agent({
+          serverId: "host-a",
+          id: "s1",
+          workspaceId: "ws-live",
+          status: "running",
+          lastActivityAt: new Date(1),
+        }),
+        agent({
+          serverId: "host-a",
+          id: "s2",
+          workspaceId: "ws-idle",
+          lastActivityAt: new Date(9_000),
+        }),
+        agent({
+          serverId: "host-a",
+          id: "s3",
+          workspaceId: "ws-fresh",
+          lastActivityAt: new Date(5_000),
+        }),
+      ],
+      workspacePaths: new Map([
+        ["host-a:ws-live", "/repo/live"],
+        ["host-a:ws-cold", "/repo/cold"],
+        ["host-a:ws-idle", "/repo/idle"],
+        ["host-a:ws-fresh", "/repo/fresh"],
+        ["host-a:ws-none", "/repo/none"],
+      ]),
+    });
+    const names = section(sections, "host-a").projects[0].worktrees.map((row) => row.name);
+    // 活跃 first; then lastUsedAt desc; then never-used by 字典序 (aardvark < alpha).
+    expect(names).toEqual(["zeta", "beta", "beta2", "aardvark", "alpha"]);
+  });
+
+  it("L1 sorts by aggregated activity, then recency; empty projects hidden", () => {
+    const sections = build({
+      projects: [
+        project("v1", [hostEntry("host-a", "aaa", [], { projectId: "proj-empty" })]),
+        project("v2", [
+          hostEntry("host-a", "paseo", [workspace("ws-live", "x")], { projectId: "proj-live" }),
+        ]),
+        project("v3", [
+          hostEntry("host-a", "zzz", [workspace("ws-quiet", "q")], { projectId: "proj-quiet" }),
+        ]),
+      ],
+      agents: [
+        agent({
+          serverId: "host-a",
+          id: "s1",
+          workspaceId: "ws-live",
+          status: "running",
+          lastActivityAt: new Date(1),
+        }),
+      ],
+      workspacePaths: new Map([
+        ["host-a:ws-live", "/repo/live"],
+        ["host-a:ws-quiet", "/repo/quiet"],
+      ]),
+    });
+    const host = section(sections, "host-a");
+    expect(host.projects.map((row) => row.name)).toEqual(["paseo", "zzz"]);
+    expect(host.projects[0].lastUsedAt).toBe(1);
+    expect(host.projects[1].lastUsedAt).toBeNull();
+  });
+
+  it("L3 sorts by chatLastEventAt desc — attention stamps count", () => {
+    const sections = build({
+      projects: [project("v1", [hostEntry("host-a", "paseo", [workspace("ws-1", "a")])])],
+      agents: [
+        agent({
+          serverId: "host-a",
+          id: "old",
+          workspaceId: "ws-1",
+          lastActivityAt: new Date(1_000),
+        }),
+        agent({
+          serverId: "host-a",
+          id: "quiet-activity",
+          workspaceId: "ws-1",
+          lastActivityAt: new Date(2_000),
+        }),
+        agent({
+          serverId: "host-a",
+          id: "attentioned",
+          workspaceId: "ws-1",
+          lastActivityAt: new Date(1_500),
+          attentionTimestamp: new Date(3_000),
+        }),
+      ],
+      workspacePaths: new Map([["host-a:ws-1", "/repo/x"]]),
+    });
+    const sessions = section(sections, "host-a").projects[0].worktrees[0].sessions;
+    expect(sessions.map((s) => s.agentId)).toEqual(["attentioned", "quiet-activity", "old"]);
+  });
+});
+
+describe("buildWorkspaceTree — 无会话 / 空态 / 主机", () => {
+  it("a worktree with no agents is a session-less L2 row", () => {
+    const sections = build({
+      projects: [project("v1", [hostEntry("host-a", "paseo", [workspace("ws-1", "main")])])],
+      workspacePaths: new Map([["host-a:ws-1", "/repo/x"]]),
+    });
+    const l2 = section(sections, "host-a").projects[0].worktrees[0];
+    expect(l2.sessions).toEqual([]);
+    expect(l2.activeCount).toBe(0);
+    expect(l2.lastUsedAt).toBeNull();
+  });
+
+  it("offline hosts keep their cached tree, flagged offline; online hosts sort first", () => {
+    const sections = build({
+      statuses: new Map([
         ["host-a", "offline"],
         ["host-b", "online"],
       ]),
       projects: [
-        project("p1", [hostEntry("host-a", "paseo", [workspace("ws-a1", "paseo")])]),
-        project("p2", [hostEntry("host-b", "blog", [workspace("ws-b1", "blog")])]),
+        project("v1", [hostEntry("host-a", "paseo", [workspace("ws-1", "a")])]),
+        project("v2", [hostEntry("host-b", "other", [workspace("ws-2", "b")])]),
       ],
-      agents: [],
+      workspacePaths: new Map([
+        ["host-a:ws-1", "/repo/x"],
+        ["host-b:ws-2", "/repo/y"],
+      ]),
     });
-    expect(sections.map((s) => [s.serverId, s.isOnline, s.status])).toEqual([
-      ["host-b", true, "online"],
-      ["host-a", false, "offline"],
-    ]);
-    // The offline host still shows its last-known rows (cached replica).
-    expect(sections[1]?.rows.map((r) => r.workspaceId)).toEqual(["ws-a1"]);
+    expect(sections.map((entry) => entry.serverId)).toEqual(["host-b", "host-a"]);
+    expect(section(sections, "host-a").isOnline).toBe(false);
+    expect(section(sections, "host-a").status).toBe("offline");
+    expect(section(sections, "host-a").projects).toHaveLength(1);
   });
 
-  it("emits empty sections for hosts without projects and unknown statuses as connecting", () => {
-    const sections = buildWorkspaceTree({
-      hosts: [{ serverId: "host-c", label: "NEW-C" }],
-      statuses: new Map(),
-      projects: [],
-      agents: [],
-    });
-    expect(sections).toEqual([
-      { serverId: "host-c", label: "NEW-C", status: "connecting", isOnline: false, rows: [] },
-    ]);
-  });
-
-  it("ignores agents without a workspace and never double-counts a shared project row", () => {
-    const shared = hostEntry("host-a", "paseo", [workspace("ws-a1", "paseo")]);
-    const sections = buildWorkspaceTree({
-      hosts: [HOSTS[0]!],
-      statuses: statuses([["host-a", "online"]]),
-      projects: [
-        project("p1", [shared]),
-        project("p1-dup", [shared]), // same view re-surfaced: row must appear once
-      ],
-      agents: [agent({ serverId: "host-a", workspaceId: undefined, status: "running" })],
-    });
-    expect(sections[0]?.rows).toHaveLength(1);
-    expect(sections[0]?.rows[0]?.activeCount).toBe(0);
+  it("unknown status reads as connecting; hosts without projects stay empty", () => {
+    const sections = build({ statuses: new Map() });
+    expect(sections[0]?.status).toBe("connecting");
+    expect(sections[0]?.isOnline).toBe(false);
+    expect(sections[0]?.projects).toEqual([]);
   });
 });
