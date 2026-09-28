@@ -93,3 +93,28 @@ C19 真机轮观察（known_issues#2 移交）：4:02 收藏的 AGENTS.md 与 4:
   3. `reset2.sh`→`cleanup.sh` 用 **650ms** 长按删指令：行菜单不 materialize（6/6 `DEL MENU FAIL`，fav 侧同坑 1/6）；popover 时代实测要 **1000ms**（与 C20/C33 注入速度纪律同源）→ 另落 `cleanup_cmds.sh`（1000ms 长按 + 再点「删除」确认，模态顶树纪律不变）。
 - 设备复位：12 fav 核心探针 + 6 hyb fav 探针 + 6 cmd 探针全部经 UI 删除，磁盘真相回基线（`paseoGo.favorites=[AGENTS.md]`、`paseoGo.commands=[C19-probe]`，run-as 导出 RKStorage + node:sqlite 复核）；IME 切回百度、rotation 0、壳 ON、app 留 home（`mResumedActivity=app.paseo.shell.debug/.MainActivity`）。
 - **编排失误如实记录**：清场脚本 `cleanup_fav_t.sh` 被我在 `hyb-B2/B3` 仍在跑时启动（设备争用），它因此对 TB1-3 报 `no-fav`（当时尚未创建），并出现 `FAIL tap_desc: 工作区`；两枚受影响样本仍 rc=0 且 `disk_sql=1`（判读依赖磁盘真相 + dt_kill 384-10544ms，结论不受影响），TB1-3 由后续单独一遍（1000ms 长按）删除并复验 favrows=1。纪律补一条：**矩阵在跑时不得并行任何设备侧脚本**。
+
+## C34 release 轮（2026-09-28 上午，`app.paseo.shell` v0.2.0 离线 bundle，metro 已停，设备 AHPEBB1826005071）：8/8 → **c1 终笔=竞态未证实（debug 18/18 + release 8/8 完整）**
+
+- **口径**：release 非 debuggable → `run-as` 不可用，磁盘真相 SQL 面不可达 → **release 轮=UI 断言**（ledger 逐行 `disk_sql=-1` 如实记）；Round A=变异 tap 后 ≤1s 即 force-stop（`mem=-1` 设计使然，同 debug 轮 hyb 姿势），Round B=变异→内存断言→等 10s→杀。冷启基线 **11s 进首页**（16 次冷启全 11s，无 metro 无 launcher 步；vs debug 轮 53-65s）。
+- **8 样本（`evidence/C34/matrix-release/ledger.jsonl`，全 rc=0）**：
+
+  | 样本   | 轮  | 探针                     | dt_kill | mem | disk_ui |
+  | ------ | --- | ------------------------ | ------- | --- | ------- |
+  | fav-A1 | A   | C34-fav-A1-1790486644.md | 343ms   | -1  | 1       |
+  | fav-A2 | A   | C34-fav-A2-1790486644.md | 353ms   | -1  | 1       |
+  | fav-B1 | B   | C34-fav-B1-1790486644.md | 13649ms | 1   | 1       |
+  | fav-B2 | B   | C34-fav-B2-1790486644.md | 13071ms | 1   | 1       |
+  | cmd-A1 | A   | C34relA1X                | 321ms   | -1  | 1       |
+  | cmd-A2 | A   | C34relA2X                | 384ms   | -1  | 1       |
+  | cmd-B1 | B   | C34relB1X                | 15572ms | 1   | 1       |
+  | cmd-B2 | B   | C34relB2X                | 15303ms | 1   | 1       |
+
+- **判读（并入 debug 轮总判）**：A 轮变异后 **321-384ms** 即杀（真 ≤1s 窗，比 debug 核心轮的 3.3-6.5s 更紧），收藏/指令 4/4 冷启后 UI 在；B 轮 4/4 在且杀前内存态已翻转（mem=1）。release 形态（离线 bundle、无 metro、JS 线程无外部打断）同样不存在「persist 未 flush 进程已死」→ 叠加 CLOSE-DEV4 debug 18/18，**c1 终笔=竞态未证实，C34 终笔=观察误差（c4 定案），known_issue 文案「观察误差，竞态未证实」维持不变**。无样本丢失、无功能损坏（0 FAIL）。
+- **release 轮新踩三坑（全部实锤，脚本唯一出处 `evidence/C34/matrix-release/`）**：
+  1. **worktree 行 id 整条小写**：v0.2.0 壳 dump 实测 `shell-workspace-worktree-srv_…:wt:c:c:/tmp/c5-proj`（`c:` 小写盘符），debug 轮 harness 的 `…:wt:c:C:/…` 在此包永不匹配 → 首跑 fav-A1 `ABORT wt row`。文件页头部同样显示 `c:/tmp/c5-proj`（normalizeWorkspacePath 全路径小写形态）。
+  2. **Baidu IME 吞 `input text`**（C13F1 家族复现）：首跑 cmd 4/4 `ABORT name field text mismatch`（name 字段回读为空=变异未发生，release 轮把该断言改成硬 ABORT 是对的）。切 `com.android.adbkeyboard/.AdbIME` 后 `input text` 直落字段，trap 恢复原 IME → 重跑 4/4 `name_ok=1`。
+  3. **横屏 2560×1600 左 rail 形态**：debug 轮滚动坐标 `800,1800/1900→800,800/900` 在此形态 y 越界无效 → 改列表列 `(530,1300)→(530,500)`。
+  4. （清场附加）**删除确认必须点 `android:id/button1`**：`tap_text "删除"` 在弹窗未 materialize 时会点回同名菜单项（弹窗悬挂污染后续断言，首版 cleanup 因此错删 A2X 行）；且虚拟化裁切行无 `text=` 子节点，行定位要用 `content-desc="NAME · …"`。修正版 `cleanup_rel.sh` 重跑幂等绿（favrows=0 cmdrows=0 left=0）。
+- **现场清与复位**：4 收藏+4 指令探针全部 UI 删除，release 基线回「收藏夹空态+无指令行」（release 数据与 debug 包隔离，基线本就空）；rotation 0、IME 百度、release 留 home（`mCurrentFocus=app.paseo.shell/…MainActivity`）。
+- **附：release 冒烟补帧（同窗口）**：三 tab + 版本 + 工作区树 + 文件页 + 深链共 7 帧入 `evidence/RELEASE-020/`（00-chats/01-me/02-version 复用 .dev rel-020 实拍，03/04/05 本窗口补拍）。深链 `am start -a VIEW -d paseogo://chats`：**弹双包选择器（Paseo Go / Paseo Go Debug）——debug 包共存所致，如实记录**（`05-deeplink-chooser.png`）；选 Paseo Go·仅此一次后直落 release 包对话 tab（`05-deeplink-chats.png`，`mResumedActivity=app.paseo.shell/.MainActivity`），与 ACCEPTANCE §14.13「F2 双包选择器=非缺陷记录」口径一致。
