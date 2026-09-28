@@ -1,9 +1,12 @@
 // C10 验收 2：导入项映射/选择态纯逻辑单测。覆盖：key 形态、去重+倒序、标题/预览
 // 回退、勾选幂等与取消、导入结果分类（daemon 的「already imported」幂等语义）。
+// KI-4 验收 2：标题回退矩阵（last→first→官方）、nameLabel、buildImportTree
+// （父子嵌套/孤儿子组/自父防御/两层展平/顺序保持）。
 import { describe, expect, it } from "vitest";
 import type { FetchRecentProviderSessionEntry } from "@getpaseo/client/internal/daemon-client";
 import {
   buildImportToastParts,
+  buildImportTree,
   classifyImportError,
   deriveImportParentLabel,
   deriveImportStatus,
@@ -15,6 +18,7 @@ import {
   summarizeImportAttempts,
   toggleRowSelection,
   type ImportStatusInput,
+  type ImportTreeItem,
 } from "./rows";
 
 function entry(
@@ -42,8 +46,11 @@ describe("mapEntriesToImportRows", () => {
       providerLabel: "Codex",
       providerHandleId: "handle-1",
       cwd: "C:/work/repo",
-      title: "Fix flaky test",
-      preview: "done", // 官方 getPromptPreview：lastPromptPreview 优先于 first
+      // KI-4 裁定 2：标题=末次用户输入，官方 title 降级为 nameLabel。
+      title: "done",
+      nameLabel: "Fix flaky test",
+      parentHandleId: null,
+      preview: "done", // 字段保留在模型里（KI-5 契约），cell 不再渲染。
       lastActivityAt: Date.parse("2026-09-25T08:00:00.000Z"),
     });
   });
@@ -66,15 +73,16 @@ describe("mapEntriesToImportRows", () => {
     expect(rows.map((row) => row.key)).toEqual(["codex:handle-1", "claude:handle-1"]);
   });
 
-  it("falls back through the official title chain and maps the folder label", () => {
+  it("falls back through the KI-4 title chain and maps the folder label", () => {
     const [row] = mapEntriesToImportRows(
       [entry({ title: "   ", firstPromptPreview: "head only", lastPromptPreview: "tail only" })],
       (cwd) => (cwd === "C:/work/repo" ? "repo" : null),
     );
-    // 官方 getSessionTitle 回退链=空标题 → firstPromptPreview（注意不是 last）；
-    // 钉具体值——`length > 0` 对任何非空垃圾都成立（R2-23 假绿修复）。
-    expect(row.title).toBe("head only");
-    // 官方 getPromptPreview: lastPromptPreview 优先于 first。
+    // KI-4 回退链=lastPromptPreview → firstPromptPreview → 官方 getSessionTitle；
+    // 官方 title 只有空白 → nameLabel=null。钉具体值——`length > 0` 对任何
+    // 非空垃圾都成立（R2-23 假绿修复纪律）。
+    expect(row.title).toBe("tail only");
+    expect(row.nameLabel).toBeNull();
     expect(row.preview).toBe("tail only");
     expect(row.folder).toBe("repo");
   });
@@ -388,5 +396,199 @@ describe("R2-14 — non-compliant host dates", () => {
         new Date("2026-09-25T08:05:00.000Z"),
       ),
     ).toBe("5m");
+  });
+});
+
+// KI-4 验收 2：标题回退矩阵（last→first→官方）+ nameLabel + buildImportTree
+// （父子嵌套、孤儿子组聚合、自父防御、两层展平、顺序保持）。
+describe("KI-4 title chain + nameLabel", () => {
+  it("prefers lastPromptPreview, then firstPromptPreview, then the official title", () => {
+    const [lastWins] = mapEntriesToImportRows(
+      [entry({ title: "Official", firstPromptPreview: "F", lastPromptPreview: "L" })],
+      () => null,
+    );
+    expect(lastWins.title).toBe("L");
+    // 官方 title 与新 title 不同 → 降级 nameLabel（子代理名 ReworkR45 不丢）。
+    expect(lastWins.nameLabel).toBe("Official");
+
+    const [firstNext] = mapEntriesToImportRows(
+      [entry({ title: "Official", firstPromptPreview: " F ", lastPromptPreview: "   " })],
+      () => null,
+    );
+    expect(firstNext.title).toBe("F"); // trim 后判空，纯空白不算末次输入。
+    expect(firstNext.nameLabel).toBe("Official");
+
+    const [officialLast] = mapEntriesToImportRows(
+      [entry({ title: "Official", firstPromptPreview: null, lastPromptPreview: null })],
+      () => null,
+    );
+    expect(officialLast.title).toBe("Official");
+    // 与新 title 相同 → null（meta 行不重复展示同一个名字）。
+    expect(officialLast.nameLabel).toBeNull();
+  });
+
+  it("nameLabel is null without an official title; parentHandleId is trimmed, blanks null", () => {
+    const [row] = mapEntriesToImportRows(
+      [entry({ title: null, parentHandleId: "  C:/omp/s/parent.jsonl  " })],
+      () => null,
+    );
+    expect(row.nameLabel).toBeNull();
+    expect(row.parentHandleId).toBe("C:/omp/s/parent.jsonl");
+    const [blank] = mapEntriesToImportRows([entry({ parentHandleId: "   " })], () => null);
+    expect(blank.parentHandleId).toBeNull();
+  });
+});
+
+function omp(
+  handle: string,
+  activity: string,
+  overrides: Partial<FetchRecentProviderSessionEntry> = {},
+): FetchRecentProviderSessionEntry {
+  return entry({
+    providerId: "omp",
+    providerHandleId: handle,
+    lastActivityAt: activity,
+    ...overrides,
+  });
+}
+
+/** 树形断言的可读形状：`handle@depth` / `group(label)@0`。 */
+function treeShape(items: ImportTreeItem[]): string[] {
+  return items.map((item) =>
+    item.kind === "session"
+      ? `${item.row.providerHandleId}@${item.depth}`
+      : `group(${item.label?.text ?? "?"})@${item.depth}`,
+  );
+}
+
+describe("buildImportTree", () => {
+  it("nests children under the listed parent, newest child first", () => {
+    const rows = mapEntriesToImportRows(
+      [
+        omp("p", "2026-09-20T00:00:00.000Z"),
+        omp("c1", "2026-09-22T00:00:00.000Z", { parentHandleId: "p" }),
+        omp("c2", "2026-09-23T00:00:00.000Z", { parentHandleId: "p" }),
+      ],
+      () => null,
+    );
+    expect(treeShape(buildImportTree(rows))).toEqual(["p@0", "c2@1", "c1@1"]);
+  });
+
+  it("keeps tree order over global time order: children follow the parent row", () => {
+    // 全局时间序会是 r, c1, p——树形裁定：r@0 先（根间倒序），但 c1 必须紧跟父 p。
+    const rows = mapEntriesToImportRows(
+      [
+        omp("p", "2026-09-20T00:00:00.000Z"),
+        omp("c1", "2026-09-25T00:00:00.000Z", { parentHandleId: "p" }),
+        omp("r", "2026-09-22T00:00:00.000Z"),
+      ],
+      () => null,
+    );
+    expect(treeShape(buildImportTree(rows))).toEqual(["r@0", "p@0", "c1@1"]);
+  });
+
+  it("aggregates orphans of the same missing parent under one group header", () => {
+    const rows = mapEntriesToImportRows(
+      [
+        omp("o1", "2026-09-21T00:00:00.000Z", {
+          parentHandleId: "C:/omp/s/alpha.jsonl",
+          parentTitle: "Alpha run",
+        }),
+        omp("o2", "2026-09-24T00:00:00.000Z", {
+          parentHandleId: "C:/omp/s/alpha.jsonl",
+          parentTitle: "Alpha run",
+        }),
+        omp("r", "2026-09-22T00:00:00.000Z"),
+      ],
+      () => null,
+    );
+    // 组位置=组内最新活动（o2 09-24 > r 09-22）→ 组头在最前；成员时间倒序。
+    expect(treeShape(buildImportTree(rows))).toEqual(["group(Alpha run)@0", "o2@1", "o1@1", "r@0"]);
+    const header = buildImportTree(rows)[0];
+    expect(header).toMatchObject({
+      kind: "orphan-group",
+      key: "orphan:omp:C:/omp/s/alpha.jsonl",
+      label: { text: "Alpha run", raw: false },
+    });
+  });
+
+  it("group label reuses the deriveImportParentLabel tri-state (path tail / raw id / null)", () => {
+    const tail = buildImportTree(
+      mapEntriesToImportRows(
+        [omp("c", "2026-09-21T00:00:00.000Z", { parentHandleId: "C:/omp/s/beta.jsonl" })],
+        () => null,
+      ),
+    );
+    expect(tail[0]).toMatchObject({ kind: "orphan-group", label: { text: "beta", raw: false } });
+    const raw = buildImportTree(
+      mapEntriesToImportRows(
+        [omp("c", "2026-09-21T00:00:00.000Z", { parentHandleId: "0198cdef0123456789ab" })],
+        () => null,
+      ),
+    );
+    expect(raw[0]).toMatchObject({
+      kind: "orphan-group",
+      label: { text: "0198cdef01234567…", raw: true },
+    });
+    // 父 handle 退化（无任何可用名段）→ label=null，屏渲染无名组头措辞。
+    const nameless = buildImportTree(
+      mapEntriesToImportRows(
+        [omp("c", "2026-09-21T00:00:00.000Z", { parentHandleId: "///" })],
+        () => null,
+      ),
+    );
+    expect(nameless[0]).toMatchObject({ kind: "orphan-group", label: null });
+  });
+
+  it("ignores a self-parent link (standalone depth0, no orphan group)", () => {
+    const rows = mapEntriesToImportRows(
+      [omp("s", "2026-09-21T00:00:00.000Z", { parentHandleId: "s" })],
+      () => null,
+    );
+    expect(treeShape(buildImportTree(rows))).toEqual(["s@0"]);
+  });
+
+  it("flattens to two levels: grandchild follows its nearest listed ancestor at depth1", () => {
+    const rows = mapEntriesToImportRows(
+      [
+        omp("a", "2026-09-20T00:00:00.000Z"),
+        omp("b", "2026-09-21T00:00:00.000Z", { parentHandleId: "a" }),
+        omp("c", "2026-09-22T00:00:00.000Z", { parentHandleId: "b" }),
+      ],
+      () => null,
+    );
+    expect(treeShape(buildImportTree(rows))).toEqual(["a@0", "b@1", "c@1"]);
+  });
+
+  it("matches only within the same provider (exact string, no cross-provider attach)", () => {
+    const rows = mapEntriesToImportRows(
+      [
+        omp("h", "2026-09-20T00:00:00.000Z"),
+        entry({
+          providerId: "claude",
+          providerHandleId: "kid",
+          parentHandleId: "h",
+          lastActivityAt: "2026-09-21T00:00:00.000Z",
+        }),
+      ],
+      () => null,
+    );
+    expect(treeShape(buildImportTree(rows))).toEqual(["group(h)@0", "kid@1", "h@0"]);
+  });
+
+  it("never drops rows: mutually-referencing parents resurface at depth0", () => {
+    const rows = mapEntriesToImportRows(
+      [
+        omp("x", "2026-09-21T00:00:00.000Z", { parentHandleId: "y" }),
+        omp("y", "2026-09-20T00:00:00.000Z", { parentHandleId: "x" }),
+      ],
+      () => null,
+    );
+    const items = buildImportTree(rows);
+    const handles = items.flatMap((item) =>
+      item.kind === "session" ? [item.row.providerHandleId] : [],
+    );
+    expect(handles).toEqual(["x", "y"]); // 各恰好一次，无 depth2。
+    expect(items.every((item) => item.depth <= 1)).toBe(true);
   });
 });

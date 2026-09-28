@@ -15,7 +15,23 @@ export interface ImportRow {
   providerLabel: string;
   providerHandleId: string;
   cwd: string;
+  /**
+   * KI-4 裁定：标题=「最后一次用户输入」——lastPromptPreview → firstPromptPreview
+   * → 官方 getSessionTitle 的回退链（末次输入优先；全空才退回官方标题规则）。
+   */
   title: string;
+  /**
+   * KI-4: 官方 title（子代理名 ReworkR45 这类）；与新 title 相同或缺席时为
+   * null——有值才降级渲染进 meta 行，名字不丢。
+   */
+  nameLabel: string | null;
+  /**
+   * KI-4: 父 handle（trim 后；空/缺席=null）。buildImportTree 的分组键：
+   * `child.parentHandleId === parent.providerHandleId`（同 provider 精确串匹配）。
+   */
+  parentHandleId: string | null;
+  /** 官方 getPromptPreview 结果；KI-4 后 cell 不再渲染（title 即末次输入，同文
+   *  重复），字段保留在模型里（KI-5 契约：不碰它）。 */
   preview: string;
   /** 项目目录的短标签（官方 resolveDirectoryLabel 结果）；未知目录为 null。 */
   folder: string | null;
@@ -26,10 +42,11 @@ export interface ImportRow {
   /**
    * C25 父链副标题的父名段：parentTitle 优先，缺席时取 parentHandleId 尾段
    * （omp=父 transcript 路径的文件名去扩展名）；两者都无（claude/codex 或旧
-   * daemon 字段缺席）= null=不渲染。
+   * daemon 字段缺席）= null=不渲染。KI-4 后 session 行不再渲染副标题（树形结构
+   * 取代），字段保留供 orphan-group 组头 label 复用。
    */
   parentLabel: string | null;
-  /** R2-18: true = parentLabel 是无分隔符的原始父 id（非名），副标题走「源:」措辞。 */
+  /** R2-18: true = parentLabel 是无分隔符的原始父 id（非名），组头走「源:」措辞。 */
   parentIsRawId: boolean;
   /** C25「可能活跃」= descriptor looksActive===true；缺席/false 都不渲染。 */
   looksActive: boolean;
@@ -93,13 +110,20 @@ export function mapEntriesToImportRows(
     if (seen.has(key)) continue;
     seen.add(key);
     const parent = deriveImportParentLabel(entry);
+    // KI-4 裁定 2：标题=末次用户输入；全空才退回官方标题规则。nameLabel 只在
+    // 官方 title 存在且与新 title 不同才有值（同名不重复展示）。
+    const officialTitle = entry.title?.trim() || null;
+    const title =
+      entry.lastPromptPreview?.trim() || entry.firstPromptPreview?.trim() || getSessionTitle(entry);
     rows.push({
       key,
       providerId: entry.providerId,
       providerLabel: entry.providerLabel,
       providerHandleId: entry.providerHandleId,
       cwd: entry.cwd,
-      title: getSessionTitle(entry),
+      title,
+      nameLabel: officialTitle && officialTitle !== title ? officialTitle : null,
+      parentHandleId: entry.parentHandleId?.trim() || null,
       preview: getPromptPreview(entry),
       folder: folderFor(entry.cwd),
       lastActivityAt: parseDateOrNull(entry.lastActivityAt)?.getTime() ?? null,
@@ -111,6 +135,132 @@ export function mapEntriesToImportRows(
   // R2-14: unknown dates (null) sink below every trustworthy one (0=epoch 序).
   rows.sort((a, b) => (b.lastActivityAt ?? 0) - (a.lastActivityAt ?? 0));
   return rows;
+}
+
+/**
+ * KI-4 裁定 1：父子任务树形展示（不是「至少连续排列」）。树项两种：
+ * - session：可勾选会话行；depth 0=父/独立行，1=子行（屏渲染左缩进 + `└`）。
+ * - orphan-group：父不在列表的孤儿子集共享的组头（不可点、不可勾选）；
+ *   label 复用 deriveImportParentLabel 三态（parentTitle→尾段→raw 截断），
+ *   三态全空（如 parentHandleId="///"）= null，屏渲染无名组头措辞。
+ */
+export type ImportTreeItem =
+  | { kind: "session"; row: ImportRow; depth: 0 | 1 }
+  | { kind: "orphan-group"; key: string; label: ImportParentLabel | null; depth: 0 };
+
+/** 与 mapEntriesToImportRows 同一时间序：新在上，null 日期沉底（0=epoch 序）。 */
+const importActivityDesc = (a: ImportRow, b: ImportRow): number =>
+  (b.lastActivityAt ?? 0) - (a.lastActivityAt ?? 0);
+
+/**
+ * 行 → 树（纯函数，勾选语义不变：每个 session 项独立，组头不可选）。
+ * 规则（卡内算法）：
+ * - 匹配：`child.parentHandleId === parent.providerHandleId`，同 provider 精确串；
+ * - 父在列表 → 父 depth0，子按时间倒序紧跟其后 depth1；
+ * - 父不在列表 → 同 parentHandleId 的孤儿子集共享一个 orphan-group 头，
+ *   组位置=组内最新活动时间序；
+ * - 无 parentHandleId → 独立 depth0；
+ * - 防御：自父（parentHandleId===providerHandleId）忽略父链；只铺两层——孙挂
+ *   最近在册祖先（depth1 继续跟随其在册父紧随其后）；parent 互指成环的行不会被
+ *   吞掉（末轮以 depth0 补发，每行恰好出现一次）。
+ */
+export function buildImportTree(rows: ReadonlyArray<ImportRow>): ImportTreeItem[] {
+  const handleKeyOf = (row: ImportRow): string => `${row.providerId}:${row.providerHandleId}`;
+  const byHandle = new Map<string, ImportRow>();
+  for (const row of rows) {
+    const handleKey = handleKeyOf(row);
+    if (!byHandle.has(handleKey)) byHandle.set(handleKey, row);
+  }
+
+  const childrenByParent = new Map<string, ImportRow[]>();
+  const orphanGroups = new Map<string, ImportRow[]>();
+  const roots: ImportRow[] = [];
+  for (const row of rows) {
+    // 重复 handle 与映射层同纪律：先到先得，后来者不进树。
+    if (byHandle.get(handleKeyOf(row)) !== row) continue;
+    // 自父防御：指向自己的父链按无父处理（独立 depth0，不进孤儿子组）。
+    const parentHandle =
+      row.parentHandleId && row.parentHandleId !== row.providerHandleId ? row.parentHandleId : null;
+    const parent = parentHandle
+      ? (byHandle.get(`${row.providerId}:${parentHandle}`) ?? null)
+      : null;
+    if (parent) {
+      const parentKey = handleKeyOf(parent);
+      const kids = childrenByParent.get(parentKey);
+      if (kids) kids.push(row);
+      else childrenByParent.set(parentKey, [row]);
+    } else if (parentHandle) {
+      const groupKey = `${row.providerId}:${parentHandle}`;
+      const members = orphanGroups.get(groupKey);
+      if (members) members.push(row);
+      else orphanGroups.set(groupKey, [row]);
+    } else {
+      roots.push(row);
+    }
+  }
+
+  const items: ImportTreeItem[] = [];
+  const emitted = new Set<string>();
+  const emitSession = (row: ImportRow, depth: 0 | 1): boolean => {
+    const handleKey = handleKeyOf(row);
+    if (emitted.has(handleKey)) return false;
+    emitted.add(handleKey);
+    items.push({ kind: "session", row, depth });
+    return true;
+  };
+  // 两层展平：在册后代的 depth 恒为 1，紧随其最近的在册祖先。emitSession 的
+  // emitted 闸返回 false 时不再下钻——parent 互指的环在这里终止递归。
+  const emitDescendants = (parent: ImportRow): void => {
+    const kids = childrenByParent.get(handleKeyOf(parent));
+    if (!kids) return;
+    kids.sort(importActivityDesc);
+    for (const kid of kids) {
+      if (emitSession(kid, 1)) emitDescendants(kid);
+    }
+  };
+
+  // 顶层序：独立/父行按自身活动时间倒序；孤儿组按组内最新活动参与同一时间序。
+  interface TopLevel {
+    at: number;
+    emit: () => void;
+  }
+  const topLevel: TopLevel[] = roots.map((row) => ({
+    at: row.lastActivityAt ?? 0,
+    emit: () => {
+      emitSession(row, 0);
+      emitDescendants(row);
+    },
+  }));
+  for (const [groupKey, members] of orphanGroups) {
+    members.sort(importActivityDesc);
+    const freshest = members[0];
+    topLevel.push({
+      at: freshest?.lastActivityAt ?? 0,
+      emit: () => {
+        const label =
+          freshest && freshest.parentLabel !== null
+            ? { text: freshest.parentLabel, raw: freshest.parentIsRawId }
+            : null;
+        items.push({ kind: "orphan-group", key: `orphan:${groupKey}`, label, depth: 0 });
+        for (const member of members) {
+          emitSession(member, 1);
+          emitDescendants(member);
+        }
+      },
+    });
+  }
+  // Array#sort 稳定：同时间戳保持入参（=映射层时间序）相对次序。
+  topLevel.sort((a, b) => b.at - a.at);
+  for (const unit of topLevel) unit.emit();
+
+  // 环防御：互指父链的行不属于任何顶层单元，按入参序以 depth0 补发，
+  // 保证「每行恰好出现一次」。
+  for (const row of rows) {
+    if (emitted.has(handleKeyOf(row))) continue;
+    emitSession(row, 0);
+    emitDescendants(row);
+  }
+  return items;
 }
 
 /**

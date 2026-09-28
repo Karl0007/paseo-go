@@ -45,6 +45,7 @@ import { SHELL_I18N_NAMESPACE } from "@/shell/i18n";
 import { OFFICIAL, SHELL_TAB } from "@/shell/routes";
 import {
   buildImportToastParts,
+  buildImportTree,
   classifyImportError,
   deriveImportStatus,
   filterImportEntriesByQuery,
@@ -53,7 +54,9 @@ import {
   summarizeImportAttempts,
   toggleRowSelection,
   type ImportAttempt,
+  type ImportParentLabel,
   type ImportRow,
+  type ImportTreeItem,
 } from "@/shell/import/rows";
 import { useImportList } from "@/shell/import/use-import-list";
 
@@ -70,8 +73,14 @@ function rowPressStyle({ pressed }: { pressed: boolean }) {
   return [styles.row, pressed && styles.rowPressed];
 }
 
+// KI-4: depth1 子行=左缩进（模块级稳定引用，react-perf 纪律同 rowPressStyle）。
+function childRowPressStyle({ pressed }: { pressed: boolean }) {
+  return [styles.row, styles.rowChild, pressed && styles.rowPressed];
+}
+
 function ImportRowCell({
   row,
+  depth,
   index,
   serverId,
   selected,
@@ -79,6 +88,7 @@ function ImportRowCell({
   onToggle,
 }: {
   row: ImportRow;
+  depth: 0 | 1;
   index: number;
   serverId: string | null;
   selected: boolean;
@@ -91,7 +101,9 @@ function ImportRowCell({
   // the row; the meta shows the bilingual placeholder instead of the
   // "Invalid Date NaN" the formatter would produce for NaN.
   const timeLabel = importRowTimeLabel(row.lastActivityAt) ?? t("import.metaTimeUnknown");
-  const meta = [row.folder, timeLabel].filter(Boolean).join(" · ");
+  // KI-4: meta = folder · nameLabel? · time（子代理名降级到此，不丢）；
+  // preview 行不再渲染（title=末次输入，同文重复）。
+  const meta = [row.folder, row.nameLabel, timeLabel].filter(Boolean).join(" · ");
   const handlePress = useCallback(() => onToggle(row.key), [onToggle, row.key]);
   return (
     <Pressable
@@ -100,12 +112,14 @@ function ImportRowCell({
       accessibilityState={selected ? ACCESSIBILITY_CHECKED : ACCESSIBILITY_UNCHECKED}
       disabled={disabled}
       testID={`shell-import-row-${index}`}
-      style={rowPressStyle}
+      style={depth === 1 ? childRowPressStyle : rowPressStyle}
     >
       <ProviderIcon size={16} color={styles.rowIcon.color} />
       <View style={styles.rowBody}>
         <View style={styles.rowTitleRow}>
+          {/* KI-4: 树形连接符=字形，不占 i18n。 */}
           <Text style={styles.rowTitle} numberOfLines={1}>
+            {depth === 1 ? "└ " : ""}
             {row.title}
           </Text>
           {/* C25: 「可能活跃」= mtime 新鲜度启发式，非存活证明；token 色小徽标
@@ -116,30 +130,36 @@ function ImportRowCell({
             </Text>
           ) : null}
         </View>
-        {/* C25: 父链=副标题位（主标题不动）；字段缺席（旧 daemon/无父链
-            provider）=整行不渲染。 */}
-        {row.parentLabel ? (
-          <Text
-            style={styles.rowParent}
-            numberOfLines={1}
-            testID={`shell-import-row-${index}-parent`}
-          >
-            {t(row.parentIsRawId ? "import.subsessionRaw" : "import.subsession", {
-              parent: row.parentLabel,
-            })}
-          </Text>
-        ) : null}
         <Text style={styles.rowMeta} numberOfLines={1}>
           {meta}
-        </Text>
-        <Text style={styles.rowPreview} numberOfLines={2}>
-          {row.preview}
         </Text>
       </View>
       <View style={[styles.checkbox, selected && styles.checkboxOn]}>
         {selected ? <Check size={14} color={styles.check.color} /> : null}
       </View>
     </Pressable>
+  );
+}
+
+// KI-4: 孤儿子组组头（父不在列表）——不可点、不可勾选的 muted 行；
+// label 三态措辞：有名/裸 id（「源:」）/无名。
+function ImportOrphanGroupHeader({
+  label,
+  index,
+}: {
+  label: ImportParentLabel | null;
+  index: number;
+}) {
+  const { t } = useTranslation(SHELL_I18N_NAMESPACE);
+  const text = label
+    ? t(label.raw ? "import.orphanGroupRaw" : "import.orphanGroup", { parent: label.text })
+    : t("import.orphanGroupUnknown");
+  return (
+    <View style={styles.orphanGroup} testID={`shell-import-orphan-group-${index}`}>
+      <Text style={styles.orphanGroupText} numberOfLines={1}>
+        {text}
+      </Text>
+    </View>
   );
 }
 
@@ -264,6 +284,10 @@ export default function ShellImportScreen() {
     return mapEntriesToImportRows(entries, folderFor);
   }, [folderFor, listState.entries, normalizedQuery, supportsSearch]);
 
+  // KI-4: 过滤发生在条目层（rows 已按 query 筛过），树在过滤视图上现建——
+  // 被过滤掉的父自然让子成为孤儿组。
+  const treeItems = useMemo(() => buildImportTree(rows), [rows]);
+
   const [selectedKeys, setSelectedKeys] = useState<string[]>([]);
   const selectedSet = useMemo(() => new Set(selectedKeys), [selectedKeys]);
   const selectedRows = useMemo(
@@ -375,19 +399,26 @@ export default function ShellImportScreen() {
   );
 
   const renderItem = useCallback(
-    ({ item, index }: { item: ImportRow; index: number }) => (
-      <ImportRowCell
-        row={item}
-        index={index}
-        serverId={serverId}
-        selected={selectedSet.has(item.key)}
-        disabled={progress !== null}
-        onToggle={handleToggle}
-      />
-    ),
+    ({ item, index }: { item: ImportTreeItem; index: number }) =>
+      item.kind === "session" ? (
+        <ImportRowCell
+          row={item.row}
+          depth={item.depth}
+          index={index}
+          serverId={serverId}
+          selected={selectedSet.has(item.row.key)}
+          disabled={progress !== null}
+          onToggle={handleToggle}
+        />
+      ) : (
+        <ImportOrphanGroupHeader label={item.label} index={index} />
+      ),
     [handleToggle, progress, selectedSet, serverId],
   );
-  const keyExtractor = useCallback((item: ImportRow) => item.key, []);
+  const keyExtractor = useCallback(
+    (item: ImportTreeItem) => (item.kind === "session" ? item.row.key : item.key),
+    [],
+  );
 
   const isBusy = progress !== null;
   const listRefreshing = Boolean(client) && listState.status === "loading";
@@ -470,7 +501,7 @@ export default function ShellImportScreen() {
       </View>
 
       <FlatList
-        data={rows}
+        data={treeItems}
         keyExtractor={keyExtractor}
         renderItem={renderItem}
         contentContainerStyle={styles.listContent}
@@ -586,9 +617,21 @@ const styles = StyleSheet.create((theme) => ({
     fontSize: theme.fontSize.sm,
     fontWeight: theme.fontWeight.medium,
   },
-  rowParent: {
+  // KI-4: depth1 子行左缩进（连接符 `└` 在标题里，样式只加左边距）。
+  rowChild: {
+    paddingLeft: theme.spacing[8],
+  },
+  // KI-4: 孤儿子组组头——无底边线，与成员贴成一个视觉块，块间分隔沿用上一行
+  // session 行的底边线。
+  orphanGroup: {
+    paddingHorizontal: theme.spacing[4],
+    paddingTop: theme.spacing[3],
+    paddingBottom: theme.spacing[1],
+  },
+  orphanGroupText: {
     color: theme.colors.foregroundMuted,
     fontSize: theme.fontSize.sm,
+    fontWeight: theme.fontWeight.medium,
   },
   rowActiveBadge: {
     color: theme.colors.statusWarning,
@@ -596,10 +639,6 @@ const styles = StyleSheet.create((theme) => ({
     fontWeight: theme.fontWeight.medium,
   },
   rowMeta: {
-    color: theme.colors.foregroundMuted,
-    fontSize: theme.fontSize.sm,
-  },
-  rowPreview: {
     color: theme.colors.foregroundMuted,
     fontSize: theme.fontSize.sm,
   },
