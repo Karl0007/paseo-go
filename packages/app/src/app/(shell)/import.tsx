@@ -1,5 +1,6 @@
-// 会话导入屏 (card C10, DESIGN §8): ＋菜单 →「导入会话」进入本屏。流程按卡的裁定：
-// 选 host（官方 useHostChooser，单 host 自动选中）→ 列可导入会话（标题/时间/项目，
+// 会话导入屏 (card C10, DESIGN §8): ＋菜单 →「导入会话」进入本屏。流程：
+// 选 host（KI-5：挂载单 host 自动选中免弹；顶栏主机 chip 点击恒弹
+// ShellHostPickerSheet，含「添加主机」行）→ 列可导入会话（标题/时间/项目，
 // 数据源 daemon `fetch_recent_provider_sessions`，已导入的由 daemon 过滤）→ 勾选
 // → 导入按钮（逐条进度 n/m）→ 成功 toast → 返回对话列表，新条目出现后点开即完整
 // timeline（C4 opener）。重复导入按 daemon 的「already imported」错误归类为幂等
@@ -33,12 +34,13 @@ import {
   resolveProvidersToFetch,
 } from "@/components/import-session-sheet-view-model";
 import { useProvidersSnapshot } from "@/hooks/use-providers-snapshot";
-import { useHostChooser } from "@/hosts/host-chooser";
+import { buildSettingsAddHostRoute } from "@/utils/host-routes";
 import { useHostProjects } from "@/projects/host-projects";
 import { useHostRuntimeClient, useHosts } from "@/runtime/host-runtime";
 import { useToast } from "@/contexts/toast-context";
 import { useDebouncedValue } from "@/hooks/use-debounced-value";
 import { useHostFeature } from "@/runtime/host-features";
+import { ShellHostPickerSheet } from "@/shell/components/host-picker-sheet";
 import { SearchModeBar } from "@/shell/components/search/search-mode-bar";
 import { normalizeSearchQuery } from "@/shell/search/query";
 import { SHELL_I18N_NAMESPACE } from "@/shell/i18n";
@@ -203,30 +205,36 @@ export default function ShellImportScreen() {
   const insets = useSafeAreaInsets();
   const toast = useToast();
   const hosts = useHosts();
-  const chooseHost = useHostChooser();
 
   const [serverId, setServerId] = useState<string | null>(null);
   const client = useHostRuntimeClient(serverId ?? "");
 
-  // 进屏即选 host：官方 chooser，单 host 自动选中、多 host 弹层。关掉弹层没选也不
-  // 重弹（deps 不变），顶栏主机 chip 随时可重开。
+  // KI-5: 挂载自动选（唯一 host 免弹直入）保留；chip 点击必弹 sheet——入口免弹与
+  // 点击必弹是两件事（裁定），不再走 useHostChooser 的单主机静默捷径。
+  const [hostSheetOpen, setHostSheetOpen] = useState(false);
+  const soleHostId = hosts.length === 1 ? hosts[0].serverId : null;
   useEffect(() => {
-    if (serverId || hosts.length === 0) return;
-    chooseHost({ title: t("import.chooseHost"), onChooseHost: (id) => setServerId(id) });
-  }, [chooseHost, hosts.length, serverId, t]);
+    if (serverId || !soleHostId) return;
+    setServerId(soleHostId);
+  }, [serverId, soleHostId]);
 
   const hostLabel = hosts.find((host) => host.serverId === serverId)?.label ?? "";
-  const openHostChooser = useCallback(
-    () => chooseHost({ title: t("import.chooseHost"), onChooseHost: (id) => setServerId(id) }),
-    [chooseHost, t],
-  );
   const handleHostChip = useCallback(() => {
     if (!serverId && hosts.length === 0) {
       router.push(OFFICIAL.welcome as Href);
     } else {
-      openHostChooser();
+      setHostSheetOpen(true);
     }
-  }, [hosts.length, openHostChooser, serverId]);
+  }, [hosts.length, serverId]);
+  const handleHostPick = useCallback((picked: string) => {
+    setServerId(picked);
+    setHostSheetOpen(false);
+  }, []);
+  const handleAddHost = useCallback(() => {
+    setHostSheetOpen(false);
+    router.push(buildSettingsAddHostRoute(Date.now()));
+  }, []);
+  const handleHostSheetClose = useCallback(() => setHostSheetOpen(false), []);
 
   // C23 搜索：bar morph 复用 chats/workspace 的 SearchModeBar。capability gate
   // `importSessionSearch`=false（旧 daemon）时 query 不进 RPC，改在已载条目上
@@ -524,6 +532,16 @@ export default function ShellImportScreen() {
             : t("import.submit", { count: selectedRows.length })}
         </Button>
       </View>
+
+      {/* KI-5: chip 点击恒弹；「添加主机」走官方加机路由（与 host-chooser 零主机分支同路径）。 */}
+      <ShellHostPickerSheet
+        open={hostSheetOpen}
+        hosts={hosts}
+        currentServerId={serverId}
+        onPick={handleHostPick}
+        onAddHost={handleAddHost}
+        onClose={handleHostSheetClose}
+      />
     </View>
   );
 }

@@ -11,6 +11,7 @@
     "title": "导入会话",
     "chooseHost": "从主机导入",
     "pickHost": "选择要导入的主机",
+    "addHost": "添加主机",
     "noHost": "未选择主机",
     "noHostsBody": "尚未配置任何主机，先连接一台 daemon。",
     "status": {

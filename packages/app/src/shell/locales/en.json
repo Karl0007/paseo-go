@@ -11,6 +11,7 @@
     "title": "Import sessions",
     "chooseHost": "Import from host",
     "pickHost": "Choose a host to import from",
+    "addHost": "Add host",
     "noHost": "No host selected",
     "noHostsBody": "No hosts configured yet — connect a daemon first.",
     "status": {
