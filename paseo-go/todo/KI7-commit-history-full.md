@@ -20,6 +20,28 @@ aheadOfOrigin / behindOfOrigin / hasRemote`（messages.ts:5190-5235）——文�
 每条提交带 ref 徽标（`HEAD → main`、`origin/main`），顶部一行同步态
 （`main ⇅ origin/main ↑2 ↓1`，无远端时只显分支名）；列表=HEAD 全史分页。
 
+## ⚠ 用户补充裁定（2026-09-29 第二轮，拍板照片=Git Graph，**覆盖上节**）
+
+用户实拍 VSCode Git Graph 效果并说「看一下我给你拍的 VSCode 的 git 效果」→
+**要的就是 DAG 泳道图**，不是线性列表：
+
+- 每提交一个圆点，**彩色泳道**（分支各占一列），分叉/合并用曲线连接；
+- ref 徽标行内显示（`HEAD → main`、`origin/main`、tag）；
+- 主行 subject + meta（短sha · 作者 · 相对时间）+ 右侧作者名（Git Graph 姿势）；
+- 顶部同步态头行保留（`main ⇅ origin/main ↑2 ↓1`）。
+
+**实现口径增量**：
+
+- server 解析 `git log --graph --date=iso --pretty=format:...`（含 parents[]），
+  把 ASCII graph 转结构化行：`{sha, lane, topology:"dot"|"merge"|"edge", edges:[{fromLane,toLane,kind}]}`
+  ——泳道布局算法在 **server 侧算好**下发（壳只画不算，保持壳薄；算法照 Git Graph 的
+  commit-lane 分配规则简化版：HEAD 主 lane=0，分支首见分配新 lane，合并画跨 lane 曲线）。
+- 壳 `src/shell/files/commit-history-list.tsx` 用 **react-native-svg（已在依赖 ^15.14.0）**
+  画左侧泳道列（固定宽 ~48dp）+ 右侧行；虚拟化与 FlatList 同构。
+- 分页 skip/limit 语义=按提交数；graph 行与提交行一一对应下发。
+- 验收第 3 项加一条：IdleGame 仓（有合并历史）真机截图里**能看到分叉/合并曲线**，
+  与用户照片信息密度对齐（不要求像素级一致）。
+
 ## 实现口径
 
 ### 协议（messages.ts 纯增 + COMPAT + generate:validators）
