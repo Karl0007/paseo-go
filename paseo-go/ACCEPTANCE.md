@@ -134,5 +134,11 @@
 
 ## B5. 发布（v0.2.0）
 
-- ⏳ release APK（FIX-B+设备窗口二后，BUILD §3.5 一键链）+ 冒烟 + C34 release 轮
-- ⏳ 本表终笔 + 归档收口
+- ✅ release APK 105,465,012 B / sha256=`cb074aff…2aaa`（production prebuild 重跑修正坑⑥变体漂移；原生 hermesc 代 WSL 降级=坑⑦；BUILD §3.5 已记）；签名仍 debug keystore（上架 TODO 结转）
+- ✅ 冒烟：离线冷启 11s×16、三 tab、横屏分栏+占位、深链直落、关于页 0.2.0@db4fd334（`evidence/RELEASE-020/` 7 帧）
+- ✅ C34 release 轮 8/8（UI 断言口径，run-as 不可用如实记）；总判 debug 18/18 + release 8/8 → **c1 竞态未证实终笔，C34=观察误差（c4 定案）**
+- ✅ 触点#8 官方文件改动的测试 re-pin 三处（c28605c7 + tracks-panel 显式 wide 声明），套件回基线
+
+## B6. 批次二结论
+
+**Paseo Go v0.2.0 验收通过**。功能面 §14 十三项全 ✅（语音端到端=外部依赖挂起非缺陷）；review 轮 26 卡全处置（修毕/降级/驳回/转上游=UPSTREAM-ISSUES.md 8 条）；P1 全销卡含设备复验；门禁=基线零新增；发布物在档。开放项三条见 README 首屏（真人拖拽/语音端点/Q10 事后审），无口头债。
