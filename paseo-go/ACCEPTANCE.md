@@ -55,23 +55,24 @@
 
 ## 5. 审查轮与遗留（known issues 台账）
 
-| 编号                    | 内容                                                                                                                                        | 状态                                                      |
-| ----------------------- | ------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------- |
-| F1-F8+docs              | REVIEW-FIX 批 11 项（采纳 8/缓办 2/记录 1）                                                                                                 | ✅ 93ada40e，全部带回归测试                               |
-| F6b                     | 预览兜底 root 封堵（信任锚=favorites）                                                                                                      | ✅ 78850ca7，19 边界+真机四重验证                         |
-| C13-F1                  | 文件搜索"零命中"定性=百度输入法吞改 adb 注入文本（非代码回归）；探针实证单 store/活 memo/键正确；顺带加固：explorer 状态键契约单一化+4 单测 | ✅ 6d6b3cff；C13 冒烟勘误 FAIL→PASS（17/17）              |
-| KI2                     | 官方 FileExplorerPane 返回语义（壳侧 BackHandler 缓解）                                                                                     | 📝 C5 裁定                                                |
-| KI3                     | 暗色冷启动 tab bar 亮色快照（运行时切换正常）                                                                                               | 📝 todo/KI3（>半天，release note 建议项）                 |
-| 拖拽真人复验            | adb 注入两档速度均无法触发换位（历史注入伪影，C3 起知）；代码路径有单测+旧钩子注入实测                                                      | ⏳ **唯一人工项**：真人手指一次（5 秒）                   |
-| #4659                   | 内容全文搜索上游 RPC 不存在                                                                                                                 | 📝 known_issue 卡                                         |
-| 后台推送                | EAS/FCM 凭据缺失，前台本地通知裁定                                                                                                          | 📝 NOTIFY.md §4                                           |
-| 冷启动通知 700ms 竞态   | confidence 0.45 未复现                                                                                                                      | 📝 缓办观察                                               |
-| 官方 pane 40dp/上游样式 | 上游基线不动                                                                                                                                | 📝 C12 裁定                                               |
-| 正式签名                | debug keystore 装机可用；上架需替换 keystore                                                                                                | 📝 RELEASE.md TODO                                        |
-| KI-4                    | 导入屏父子会话无法辨认：父无 title→副标题退化成时间戳+UUID；且只加副标题未分组（devd 实测 50/60 带 parentHandleId、父仅 2 个）              | 📝 `todo/KI4-import-parent-chain-missing.md` 待拍板       |
-| KI-5                    | 导入屏主机 chip 点击无反应：单主机走 `useHostChooser` 自动选中捷径（host-chooser.tsx:88-91），modal 永不打开，且「添加主机」不可达          | 📝 `todo/KI5-import-host-chip-noop.md` 待拍板             |
-| KI-10                   | 已回答的交互提问在时间线回放中复活为待答态（误提交=脏数据注入；临时口径=点关闭勿提交）                                                      | 📝 `todo/KI10-answered-ask-resurfaces.md` 待钉死归属      |
-| KI-11                   | 对话列表：长按应即时弹菜单/菜单开→拖动接力/下拖误触刷新/拖动置顶与按钮疑似冲突（四条已拍板成卡）                                            | 🚧 `todo/KI11-chat-longpress-drag-pin.md` 排队（KI-5 后） |
+| 编号                    | 内容                                                                                                                                        | 状态                                                        |
+| ----------------------- | ------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------- |
+| F1-F8+docs              | REVIEW-FIX 批 11 项（采纳 8/缓办 2/记录 1）                                                                                                 | ✅ 93ada40e，全部带回归测试                                 |
+| F6b                     | 预览兜底 root 封堵（信任锚=favorites）                                                                                                      | ✅ 78850ca7，19 边界+真机四重验证                           |
+| C13-F1                  | 文件搜索"零命中"定性=百度输入法吞改 adb 注入文本（非代码回归）；探针实证单 store/活 memo/键正确；顺带加固：explorer 状态键契约单一化+4 单测 | ✅ 6d6b3cff；C13 冒烟勘误 FAIL→PASS（17/17）                |
+| KI2                     | 官方 FileExplorerPane 返回语义（壳侧 BackHandler 缓解）                                                                                     | 📝 C5 裁定                                                  |
+| KI3                     | 暗色冷启动 tab bar 亮色快照（运行时切换正常）                                                                                               | 📝 todo/KI3（>半天，release note 建议项）                   |
+| 拖拽真人复验            | adb 注入两档速度均无法触发换位（历史注入伪影，C3 起知）；代码路径有单测+旧钩子注入实测                                                      | ⏳ **唯一人工项**：真人手指一次（5 秒）                     |
+| #4659                   | 内容全文搜索上游 RPC 不存在                                                                                                                 | 📝 known_issue 卡                                           |
+| 后台推送                | EAS/FCM 凭据缺失，前台本地通知裁定                                                                                                          | 📝 NOTIFY.md §4                                             |
+| 冷启动通知 700ms 竞态   | confidence 0.45 未复现                                                                                                                      | 📝 缓办观察                                                 |
+| 官方 pane 40dp/上游样式 | 上游基线不动                                                                                                                                | 📝 C12 裁定                                                 |
+| 正式签名                | debug keystore 装机可用；上架需替换 keystore                                                                                                | 📝 RELEASE.md TODO                                          |
+| KI-4                    | 导入屏父子会话无法辨认：父无 title→副标题退化成时间戳+UUID；且只加副标题未分组（devd 实测 50/60 带 parentHandleId、父仅 2 个）              | 📝 `todo/KI4-import-parent-chain-missing.md` 待拍板         |
+| KI-5                    | 导入屏主机 chip 点击无反应：单主机走 `useHostChooser` 自动选中捷径（host-chooser.tsx:88-91），modal 永不打开，且「添加主机」不可达          | 📝 `todo/KI5-import-host-chip-noop.md` 待拍板               |
+| KI-10                   | 已回答的交互提问在时间线回放中复活为待答态（误提交=脏数据注入；临时口径=点关闭勿提交）                                                      | 📝 `todo/KI10-answered-ask-resurfaces.md` 待钉死归属        |
+| KI-11                   | 对话列表：长按应即时弹菜单/菜单开→拖动接力/下拖误触刷新/拖动置顶与按钮疑似冲突（四条已拍板成卡）                                            | 🚧 `todo/KI11-chat-longpress-drag-pin.md` 排队（KI-5 后）   |
+| KI-12                   | 三 tab 顶栏逻辑/高度不统一且随滚动移动：抽 shell-tab-header 等高固定容器，逐屏搬出滚动区（已拍板成卡）                                      | 🚧 `todo/KI12-tab-header-unify.md` 排队（KI-11 后 KI-9 前） |
 
 ## 6. 证据契约总核（§11）
 
