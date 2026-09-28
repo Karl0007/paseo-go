@@ -80,6 +80,23 @@ describe("local actions", () => {
     expect(deps.haptic).toHaveBeenCalledTimes(3);
   });
 
+  // KI-11 ruling ④: the drag's 拖入置顶 goes through THIS action with the drop
+  // slot — one action, one store write (`togglePin`), one set of side effects.
+  it("pin(target, index) places at the group slot; the button shape appends", () => {
+    usePaseoGoPinsStore.setState({ pinnedIds: ["s1:b1", "s1:b2"] });
+    const { deps } = makeDeps(null);
+    const actions = createShellAgentActions(deps);
+    actions.pin(target, 1);
+    expect(usePaseoGoPinsStore.getState().pinnedIds).toEqual(["s1:b1", "s1:a1", "s1:b2"]);
+    actions.pin({ key: "s1:c1", serverId: "s1", agentId: "c1" });
+    expect(usePaseoGoPinsStore.getState().pinnedIds).toEqual(["s1:b1", "s1:a1", "s1:b2", "s1:c1"]);
+    expect(deps.notify.mock.calls.map(([message]) => message)).toEqual([
+      "chats.toast.pinned",
+      "chats.toast.pinned",
+    ]);
+    expect(deps.haptic).toHaveBeenCalledTimes(2);
+  });
+
   it("rename trims into an alias; blank clears it back to the daemon title", () => {
     // R2-22: clearAlias 死导出已删——「空提交=清除」是唯一的清除路径。
     const { deps } = makeDeps(null);

@@ -50,7 +50,13 @@ export interface ShellAgentActionDeps {
 }
 
 export interface ShellAgentActions {
-  pin: (target: ShellChatTarget) => void;
+  /**
+   * KI-11 ruling ④: the ONE pin path. The menu button calls `pin(target)`
+   * (append to the 置顶 tail); the drag's cross-zone drop calls the SAME action
+   * with the drop slot as `index` (group-relative, clamped). Both land on
+   * `pins.togglePin(key, true, index?)` — haptic + toast included, zero forks.
+   */
+  pin: (target: ShellChatTarget, index?: number) => void;
   unpin: (target: ShellChatTarget) => void;
   /** Shell-local alias; blank input clears it back to the daemon title. */
   rename: (target: ShellChatTarget, alias: string) => void;
@@ -93,9 +99,9 @@ export function createShellAgentActions(deps: ShellAgentActionDeps): ShellAgentA
   };
 
   return {
-    pin: (target) => {
+    pin: (target, index) => {
       haptic();
-      usePaseoGoPinsStore.getState().togglePin(target.key, true);
+      usePaseoGoPinsStore.getState().togglePin(target.key, true, index);
       notify(t("chats.toast.pinned"));
     },
     unpin: (target) => {

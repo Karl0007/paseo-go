@@ -12,22 +12,32 @@
 // (shell)/rename screen, so the engine's "input pages stay sheets" rule no longer
 // applies here.
 // C20 (DESIGN §14.4): on the live filter EVERY row rides the DraggableFlatList
-// through this arbitration hook — long-press decides the anchored window (shown
-// on release), and sliding past the relay slop dismisses it and lifts the row in
-// touch stream (menu→drag relay). Unpinned rows dropped into the group pin
-// themselves at the drop slot (the screen owns that semantics). Rows fade
-// in/out individually — keys are stable, so nothing ever re-mounts the whole
-// table.
-import { memo, useCallback, useMemo } from "react";
-import { Pressable, Text, View } from "react-native";
+// through this arbitration hook — long-press decides the anchored window, and
+// sliding past the relay slop dismisses it and lifts the row in ONE touch
+// stream. Unpinned rows dropped into the group pin themselves at the drop slot
+// (the screen owns that semantics). Rows fade in/out individually — keys are
+// stable, so nothing ever re-mounts the whole table.
+// KI-11 (rulings ①+②): the window OPENS at the 500ms threshold with the finger
+// still down, and the relay fires from that VISIBLE menu. Both are only
+// possible because the row menu's surface is no longer the engine's Modal —
+// every chat-row menu (long press, ⋯, archived/search rows) renders through the
+// shell-hosted `ShellRowMenuHost` (chat-row-menu.tsx). The engine's
+// ContextMenu/ContextMenuTrigger stay as the press primitive + context provider
+// only: no ChatRowMenuContent is mounted here anymore, so the engine's Modal
+// never materialises for chat rows.
+import { memo, useCallback, useMemo, useRef } from "react";
+import { Pressable, Text, View, type GestureResponderEvent } from "react-native";
 import { router } from "expo-router";
 import { StyleSheet } from "react-native-unistyles";
 import { useTranslation } from "react-i18next";
 import { MoreHorizontal } from "lucide-react-native";
 import * as Haptics from "expo-haptics";
 import Animated, { FadeIn, FadeOut } from "react-native-reanimated";
-import { ContextMenu, ContextMenuTrigger, useContextMenu } from "@/components/ui/context-menu";
-import { useShellRowDragMenu } from "@/shell/components/use-shell-row-drag-menu";
+import { ContextMenu, ContextMenuTrigger } from "@/components/ui/context-menu";
+import {
+  useShellRowDragMenu,
+  type RowMenuController,
+} from "@/shell/components/use-shell-row-drag-menu";
 import { getProviderIcon } from "@/components/provider-icons";
 import { joinSubtitleParts } from "@/command-center/results";
 import { useCompactTimeAgo } from "@/hooks/use-compact-time-ago";
@@ -36,7 +46,8 @@ import { showsUnreadDot, type ChatRow } from "@/shell/chats/derive";
 import { SHELL_I18N_NAMESPACE } from "@/shell/i18n";
 import { shellRenameHref } from "@/shell/routes";
 import { ChatStatusLight } from "@/shell/components/chat-status-light";
-import { ChatRowMenuContent } from "@/shell/components/chat-row-menu";
+import { useShellRowMenuStore } from "@/shell/components/chat-row-menu";
+import type { Rect } from "@/components/ui/menu";
 import { usePaseoGoArchiveStore } from "@/shell/stores/archive";
 import { usePaseoGoPinsStore } from "@/shell/stores/pins";
 import type { ShellAgentActions, ShellChatTarget } from "@/shell/shellAgentActions";
@@ -174,10 +185,9 @@ export const ChatListRow = memo(function ChatListRow({
     </Animated.View>
   );
 });
-
-// Lives under the ContextMenu provider so it can hold the menu controller: draggable
-// rows (every row on the live filter, C20) open the window through the arbitration
-// hook (which anchors at the touch point), the rest through the trigger's own long press.
+// Lives under the ContextMenu provider because ContextMenuTrigger reads its
+// context — the provider is all the engine is used for on chat rows now
+// (KI-11): the menu itself renders through the shell-hosted `ShellRowMenuHost`.
 function ChatRowInner({
   row,
   actions,
@@ -200,7 +210,6 @@ function ChatRowInner({
   selected: boolean;
 }) {
   const { t } = useTranslation(SHELL_I18N_NAMESPACE);
-  const menu = useContextMenu();
   const { agent, unread, dimmed } = row;
 
   const alias = usePaseoGoPinsStore((state) => state.aliases[agent.key]);
@@ -215,39 +224,12 @@ function ChatRowInner({
     },
     [agent.key, onDragStart],
   );
-  const interaction = useShellRowDragMenu({
-    drag,
-    menuController: menu,
-    onDragStart: handleDragStart,
-    onGestureLockChange,
-  });
-
-  const handlePress = useCallback(() => {
-    // A finished long press (menu or drag) swallows the press that follows it —
-    // the official sidebar idiom for rows that both navigate and arm gestures.
-    if (interaction.didLongPressRef.current) {
-      interaction.didLongPressRef.current = false;
-      return;
-    }
-    onOpen(agent);
-  }, [agent, interaction.didLongPressRef, onOpen]);
-  const handleMore = useCallback(() => menu.setOpen(true), [menu]);
 
   const target = useMemo<ShellChatTarget>(
     () => ({ key: agent.key, serverId: agent.serverId, agentId: agent.agent.id }),
     [agent.key, agent.serverId, agent.agent.id],
   );
   const displayTitle = alias ?? agent.agent.title ?? t("chats.untitled");
-  // C12 无障碍: rows carry purely-visual info (未读角标/状态灯/置灰) — announce it.
-  const activityLabelKey = ACTIVITY_LABEL_KEY[agent.bucket];
-  const rowLabel = [
-    displayTitle,
-    unread ? t("chats.a11yUnread") : null,
-    activityLabelKey ? t(activityLabelKey) : null,
-    dimmed ? t("chats.hostStatus.offline") : null,
-  ]
-    .filter(Boolean)
-    .join(" · ");
   // 停止 only acts on an abortable turn: running, or blocked on an approval.
   const stoppable = agent.bucket === "running" || agent.bucket === "needs_input";
   const imported = isImportedProviderSession(agent.agent);
@@ -261,6 +243,93 @@ function ChatRowInner({
     [],
   );
 
+  // KI-11: every open path lands on the shell-hosted single-instance menu.
+  // The payload is the snapshot the host renders; the controller is the
+  // hook's actuator (open at the threshold, close only this row's request).
+  const menuPayload = useMemo(
+    () => ({ target, state: menuState, actions, displayTitle, openRename }),
+    [target, menuState, actions, displayTitle, openRename],
+  );
+  const openMenuAt = useCallback(
+    (anchor: Rect) => {
+      useShellRowMenuStore.getState().open({ ...menuPayload, anchor });
+    },
+    [menuPayload],
+  );
+  const menuController = useMemo<RowMenuController>(
+    () => ({
+      openMenu: (point) => openMenuAt({ x: point.x, y: point.y, width: 0, height: 0 }),
+      closeMenu: () => useShellRowMenuStore.getState().closeFor(agent.key),
+    }),
+    [openMenuAt, agent.key],
+  );
+  const interaction = useShellRowDragMenu({
+    drag,
+    menuController,
+    onDragStart: handleDragStart,
+    onGestureLockChange,
+  });
+
+  const handlePress = useCallback(() => {
+    // A finished long press (menu or drag) swallows the press that follows it —
+    // the official sidebar idiom for rows that both navigate and arm gestures.
+    if (interaction.didLongPressRef.current) {
+      interaction.didLongPressRef.current = false;
+      return;
+    }
+    onOpen(agent);
+  }, [agent, interaction.didLongPressRef, onOpen]);
+
+  // C12 无障碍: the ⋯ opens the same host menu, anchored on the button's own
+  // rect (measureInWindow reads in the same space the host positions in).
+  const moreRef = useRef<View>(null);
+  const handleMore = useCallback(() => {
+    moreRef.current?.measureInWindow((x, y, width, height) => {
+      openMenuAt({ x, y, width, height });
+    });
+  }, [openMenuAt]);
+
+  // Archived/search rows keep the plain Pressable long press (no drag layer,
+  // so no arbitration): the trigger's own 500ms tick opens the host menu at
+  // the touch point — the same threshold ruling ① gives the live rows.
+  const handleLongPress = useCallback(
+    (event: GestureResponderEvent) => {
+      selectionHaptic();
+      const { pageX, pageY } = event.nativeEvent;
+      if (typeof pageX === "number" && typeof pageY === "number") {
+        openMenuAt({ x: pageX, y: pageY, width: 0, height: 0 });
+      }
+    },
+    [openMenuAt],
+  );
+  // Web right-click (the engine trigger forwards it; native never fires it).
+  const handleContextMenu = useCallback(
+    (event: unknown) => {
+      const source = event as {
+        nativeEvent?: { pageX?: number; pageY?: number };
+        pageX?: number;
+        pageY?: number;
+      } | null;
+      const point = source?.nativeEvent ?? source;
+      const x = point?.pageX;
+      const y = point?.pageY;
+      if (typeof x === "number" && typeof y === "number") {
+        openMenuAt({ x, y, width: 0, height: 0 });
+      }
+    },
+    [openMenuAt],
+  );
+
+  const activityLabelKey = ACTIVITY_LABEL_KEY[agent.bucket];
+  const rowLabel = [
+    displayTitle,
+    unread ? t("chats.a11yUnread") : null,
+    activityLabelKey ? t(activityLabelKey) : null,
+    dimmed ? t("chats.hostStatus.offline") : null,
+  ]
+    .filter(Boolean)
+    .join(" · ");
+
   const triggerStyle = useCallback(
     ({ pressed }: { pressed: boolean }) => [styles.row, pressed && styles.rowPressed],
     [],
@@ -269,70 +338,65 @@ function ChatRowInner({
   const pendingCount = agent.agent.pendingPermissionCount ?? 0;
 
   return (
-    <>
-      <View
-        style={[
-          styles.rowShell,
-          selected && styles.rowSelected,
-          isActive && styles.rowDragging,
-          dimmed && styles.rowDimmed,
-        ]}
-        testID={`shell-chat-row-shell-${agent.key}`}
+    <View
+      style={[
+        styles.rowShell,
+        selected && styles.rowSelected,
+        isActive && styles.rowDragging,
+        dimmed && styles.rowDimmed,
+      ]}
+      testID={`shell-chat-row-shell-${agent.key}`}
+    >
+      <ContextMenuTrigger
+        testID={`shell-chat-row-${agent.key}`}
+        accessibilityRole="button"
+        accessibilityLabel={rowLabel}
+        onPress={handlePress}
+        // KI-11: the engine's native Modal-open path is retired for chat rows
+        // (enabledOnMobile=false keeps the trigger as a press primitive only).
+        // Draggable rows (every live-filter row since C20) hand the long press
+        // to the arbitration hook, which opens the host menu at its own tick;
+        // archived/search rows open the same host menu from the plain 500ms
+        // Pressable long press below.
+        enabledOnMobile={false}
+        onLongPress={draggable ? undefined : handleLongPress}
+        onContextMenu={handleContextMenu}
+        onPressIn={draggable ? interaction.handlePressIn : undefined}
+        onTouchMove={draggable ? interaction.handleTouchMove : undefined}
+        onPressOut={draggable ? interaction.handlePressOut : undefined}
+        style={triggerStyle}
       >
-        <ContextMenuTrigger
-          testID={`shell-chat-row-${agent.key}`}
-          accessibilityRole="button"
-          accessibilityLabel={rowLabel}
-          onPress={handlePress}
-          // Draggable rows (every live-filter row since C20) hand long press to the
-          // arbitration hook — the hook fires its own tick when the window opens, so
-          // the engine's native mobile trigger stays disabled and onLongPress unset.
-          // Archived/search-view rows keep the engine's own native long press.
-          enabledOnMobile={!draggable}
-          onLongPress={draggable ? undefined : selectionHaptic}
-          onPressIn={draggable ? interaction.handlePressIn : undefined}
-          onTouchMove={draggable ? interaction.handleTouchMove : undefined}
-          onPressOut={draggable ? interaction.handlePressOut : undefined}
-          style={triggerStyle}
-        >
-          <View style={styles.iconSlot}>
-            <ProviderIcon size={18} color={styles.providerIcon.color} />
+        <View style={styles.iconSlot}>
+          <ProviderIcon size={18} color={styles.providerIcon.color} />
+        </View>
+        <View style={styles.body}>
+          <View style={styles.titleRow}>
+            <Text style={[styles.title, unread && styles.titleUnread]} numberOfLines={1}>
+              {displayTitle}
+            </Text>
+            <ChatBadge
+              bucket={agent.bucket}
+              count={pendingCount}
+              unread={unread}
+              rowKey={agent.key}
+            />
           </View>
-          <View style={styles.body}>
-            <View style={styles.titleRow}>
-              <Text style={[styles.title, unread && styles.titleUnread]} numberOfLines={1}>
-                {displayTitle}
-              </Text>
-              <ChatBadge
-                bucket={agent.bucket}
-                count={pendingCount}
-                unread={unread}
-                rowKey={agent.key}
-              />
-            </View>
-            <ChatSubtitle agent={agent.agent} bucket={agent.bucket} />
-          </View>
-          <ChatStatusLight agent={agent.agent} bucket={agent.bucket} />
-        </ContextMenuTrigger>
-        <Pressable
-          onPress={handleMore}
-          accessibilityRole="button"
-          accessibilityLabel={t("chats.menu.more")}
-          hitSlop={8}
-          testID={`shell-chat-more-${agent.key}`}
-          style={styles.moreButton}
-        >
-          <MoreHorizontal size={16} color={styles.moreIcon.color} />
-        </Pressable>
-      </View>
-      <ChatRowMenuContent
-        target={target}
-        state={menuState}
-        actions={actions}
-        displayTitle={displayTitle}
-        openRename={openRename}
-      />
-    </>
+          <ChatSubtitle agent={agent.agent} bucket={agent.bucket} />
+        </View>
+        <ChatStatusLight agent={agent.agent} bucket={agent.bucket} />
+      </ContextMenuTrigger>
+      <Pressable
+        ref={moreRef}
+        onPress={handleMore}
+        accessibilityRole="button"
+        accessibilityLabel={t("chats.menu.more")}
+        hitSlop={8}
+        testID={`shell-chat-more-${agent.key}`}
+        style={styles.moreButton}
+      >
+        <MoreHorizontal size={16} color={styles.moreIcon.color} />
+      </Pressable>
+    </View>
   );
 }
 

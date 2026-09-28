@@ -1,23 +1,24 @@
 // @vitest-environment jsdom
-// C20 hook-level contract: the pure machine's effects must reach the real
-// actuators the way the card + the MatePad Modal finding demand — the 500ms
-// window DECISION arms a pending open (showing the Modal mid-gesture would
-// cancel the row's touch stream), release materialises it at the anchor, and a
-// slide past the 8px relay after the decision dismisses the pending window and
-// fires drag() in the same synchronous pass. Drag never fires twice per touch.
+// KI-11 hook-level contract: the pure machine's effects reach the real
+// actuators the rulings demand — the 500ms stationary hold OPENS the shell-hosted
+// window menu immediately (finger still down; the surface lives in the app window,
+// so the touch stream survives — the C20 Modal finding that forced the old
+// pending-release actuator is retired), a slide past the 8px relay dismisses the
+// VISIBLE menu and fires drag() in the same synchronous pass, and release neither
+// opens nor closes anything. Drag never fires twice per touch.
 import { act, renderHook } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { GestureResponderEvent } from "react-native";
 import * as Haptics from "expo-haptics";
-import type { MenuContextValue } from "@/components/ui/menu";
 import {
   createDragLockHandoff,
   useShellRowDragMenu,
+  type RowMenuController,
 } from "@/shell/components/use-shell-row-drag-menu";
 
 vi.mock("expo-haptics", () => ({
-  selectionAsync: vi.fn(() => Promise.resolve()),
-  impactAsync: vi.fn(() => Promise.resolve()),
+  selectionAsync: vi.fn(async () => {}),
+  impactAsync: vi.fn(async () => {}),
   ImpactFeedbackStyle: { Light: "light", Medium: "medium", Heavy: "heavy" },
 }));
 
@@ -29,10 +30,12 @@ function touch(x: number, y: number): GestureResponderEvent {
 
 function setup() {
   const calls: string[] = [];
-  const menuController = {
-    setOpen: vi.fn((open: boolean) => calls.push(`setOpen:${open}`)),
-    setAnchorRect: vi.fn(),
-  } as unknown as MenuContextValue;
+  const menuController: RowMenuController = {
+    openMenu: vi.fn((anchor: { x: number; y: number }) =>
+      calls.push(`openMenu:${anchor.x},${anchor.y}`),
+    ),
+    closeMenu: vi.fn(() => calls.push("closeMenu")),
+  };
   const drag = vi.fn(() => calls.push("drag"));
   const onDragStart = vi.fn(() => calls.push("onDragStart"));
   const { result } = renderHook(() => useShellRowDragMenu({ drag, menuController, onDragStart }));
@@ -64,34 +67,31 @@ beforeEach(() => {
   vi.clearAllMocks();
 });
 
-describe("useShellRowDragMenu timer ladder", () => {
-  it("stationary hold: 180ms arms (tick), 500ms decides the window WITHOUT showing it mid-gesture", () => {
-    const { result, menuController } = setup();
+describe("useShellRowDragMenu timer ladder (KI-11 ruling ①)", () => {
+  it("stationary hold: 180ms arms (tick), 500ms OPENS the menu mid-hold at the anchor", () => {
+    const { result, menuController, calls } = setup();
     pressInAt(result);
     advance(179);
     expect(Haptics.selectionAsync).not.toHaveBeenCalled();
     advance(1);
     expect(Haptics.selectionAsync).toHaveBeenCalledTimes(1); // arm tick
+    expect(menuController.openMenu).not.toHaveBeenCalled(); // pressing/armed opens nothing
     advance(320); // t = 500ms — the window decision
     expect(Haptics.selectionAsync).toHaveBeenCalledTimes(2);
-    // C20 device finding: no Modal may open while the finger is still down.
-    expect(menuController.setOpen).not.toHaveBeenCalled();
-    expect(menuController.setAnchorRect).not.toHaveBeenCalled();
+    // Ruling ①: the window is VISIBLE now, finger still down — responder-space
+    // anchor, no status-bar shift (the surface shares the list's window).
+    expect(calls).toEqual([`openMenu:${ANCHOR.x},${ANCHOR.y}`]);
+    expect(menuController.closeMenu).not.toHaveBeenCalled();
   });
 
-  it("release after the decision surfaces the window at the anchor and keeps it for the tap", () => {
+  it("release after the decision neither re-opens nor closes; the tap is swallowed", () => {
     const { result, menuController, calls } = setup();
     pressInAt(result);
     advance(500);
     calls.length = 0;
     pressOut(result);
-    expect(menuController.setAnchorRect).toHaveBeenCalledWith({
-      x: ANCHOR.x,
-      y: ANCHOR.y, // react-native-web Platform.OS !== "android" → no status-bar offset
-      width: 0,
-      height: 0,
-    });
-    expect(calls).toEqual(["setOpen:true"]);
+    expect(calls).toEqual([]); // nothing materialises on release anymore
+    expect(menuController.openMenu).toHaveBeenCalledTimes(1); // still the 500ms open
     expect(result.current.didLongPressRef.current).toBe(true);
   });
 
@@ -100,7 +100,7 @@ describe("useShellRowDragMenu timer ladder", () => {
     pressInAt(result);
     advance(400);
     pressOut(result);
-    expect(menuController.setOpen).not.toHaveBeenCalled();
+    expect(menuController.openMenu).not.toHaveBeenCalled();
     expect(result.current.didLongPressRef.current).toBe(false);
   });
 
@@ -112,11 +112,11 @@ describe("useShellRowDragMenu timer ladder", () => {
     advance(1_000);
     pressOut(result);
     expect(drag).not.toHaveBeenCalled();
-    expect(menuController.setOpen).not.toHaveBeenCalled();
+    expect(menuController.openMenu).not.toHaveBeenCalled();
     expect(result.current.didLongPressRef.current).toBe(true);
   });
 
-  it("armed + clear move drags without ever deciding a window", () => {
+  it("armed + clear move drags without ever opening a window", () => {
     const { result, menuController, drag, calls } = setup();
     pressInAt(result);
     advance(180);
@@ -124,53 +124,56 @@ describe("useShellRowDragMenu timer ladder", () => {
     expect(calls).toEqual(["drag", "onDragStart"]);
     advance(1_000);
     pressOut(result);
-    expect(menuController.setOpen).not.toHaveBeenCalled(); // menu timer retired
+    expect(menuController.openMenu).not.toHaveBeenCalled(); // menu timer retired
     expect(drag).toHaveBeenCalledTimes(1);
   });
 });
 
-describe("useShellRowDragMenu C20 relay", () => {
-  it("decision + >8px move: window dismissed and drag() lifted in ONE synchronous pass", () => {
+describe("useShellRowDragMenu KI-11 relay (ruling ②)", () => {
+  it("visible menu + >8px move: menu closed and drag() lifted in ONE synchronous pass", () => {
     const { result, drag, calls } = setup();
     pressInAt(result);
-    advance(500); // window decision (pending)
+    advance(500); // the menu opened mid-hold
+    expect(calls).toEqual([`openMenu:${ANCHOR.x},${ANCHOR.y}`]);
     calls.length = 0;
     moveBy(result, 11);
     // The relay step runs close_menu → haptic_drag → start_drag without any
-    // await: the window is dismissed and the row lifts in the same frame —
-    // the card's literal setOpen(false)+drag() seam.
-    expect(calls).toEqual(["setOpen:false", "drag", "onDragStart"]);
+    // await: the visible menu is dismissed and the row lifts in the same frame
+    // — no gap where "the menu closed but the drag never connected".
+    expect(calls).toEqual(["closeMenu", "drag", "onDragStart"]);
     expect(Haptics.impactAsync).toHaveBeenCalledWith(Haptics.ImpactFeedbackStyle.Medium);
     expect(result.current.didLongPressRef.current).toBe(true);
     expect(drag).toHaveBeenCalledTimes(1);
-    // And the release that follows must NOT resurrect the dismissed window.
+    // And the release that follows must NOT resurrect anything.
     calls.length = 0;
     pressOut(result);
     expect(calls).toEqual([]);
   });
 
-  it("a window shown by an earlier gesture is really dismissed by a later relay", () => {
+  it("a menu left open by an earlier touch is replaced by the next hold and then relayed", () => {
     const { result, menuController, calls } = setup();
     pressInAt(result);
     advance(500);
-    pressOut(result); // window shown
-    expect(menuController.setOpen).toHaveBeenLastCalledWith(true);
+    pressOut(result); // finger lifts; the menu stays open (backdrop owns it now)
+    expect(menuController.closeMenu).not.toHaveBeenCalled();
     pressInAt(result); // a new touch reaching the row again
-    advance(500);
+    advance(500); // re-opens at the (same) anchor — the store replaces the request
+    expect(menuController.openMenu).toHaveBeenCalledTimes(2);
     calls.length = 0;
     moveBy(result, 12); // relay
-    expect(calls).toEqual(["setOpen:false", "drag", "onDragStart"]);
+    expect(calls).toEqual(["closeMenu", "drag", "onDragStart"]);
   });
 
-  it("movement up to the 8px relay keeps the decision; later relay drags exactly once", () => {
+  it("movement up to the 8px relay keeps the menu open; later relay drags exactly once", () => {
     const { result, drag, calls } = setup();
     pressInAt(result);
     advance(500);
     calls.length = 0;
     moveBy(result, 4, 6); // 7.2px — not past the relay slop
-    expect(calls).toEqual([]);
+    expect(calls).toEqual([]); // the visible menu survives the drift
     moveBy(result, 10, 1);
     expect(calls.filter((c) => c === "drag")).toHaveLength(1);
+    expect(calls).toContain("closeMenu");
     moveBy(result, 40);
     moveBy(result, -80, 20);
     expect(drag).toHaveBeenCalledTimes(1); // never a second drag() this touch
@@ -189,18 +192,19 @@ describe("useShellRowDragMenu C20 relay", () => {
     expect(result.current.didLongPressRef.current).toBe(false);
   });
 
-  it("unmount mid-hold retires both timers and the pending window", () => {
+  it("unmount mid-hold retires both timers and closes this row's menu", () => {
     const drag = vi.fn();
-    const menuController = {
-      setOpen: vi.fn(),
-      setAnchorRect: vi.fn(),
-    } as unknown as MenuContextValue;
+    const menuController: RowMenuController = {
+      openMenu: vi.fn(),
+      closeMenu: vi.fn(),
+    };
     const { result, unmount } = renderHook(() => useShellRowDragMenu({ drag, menuController }));
     act(() => result.current.handlePressIn(touch(ANCHOR.x, ANCHOR.y)));
-    advance(500); // decision armed
+    advance(500); // the menu is visible
+    expect(menuController.openMenu).toHaveBeenCalledTimes(1);
     unmount();
-    advance(1_000);
-    expect(menuController.setOpen).not.toHaveBeenCalled();
+    // A row that vanishes (data churn) must not leave its menu hosted.
+    expect(menuController.closeMenu).toHaveBeenCalledTimes(1);
     expect(drag).not.toHaveBeenCalled();
   });
 });
@@ -208,10 +212,10 @@ describe("useShellRowDragMenu C20 relay", () => {
 describe("useShellRowDragMenu scroll-lock guard (C20 device finding #2)", () => {
   function lockSetup() {
     const onGestureLockChange = vi.fn();
-    const menuController = {
-      setOpen: vi.fn(),
-      setAnchorRect: vi.fn(),
-    } as unknown as MenuContextValue;
+    const menuController: RowMenuController = {
+      openMenu: vi.fn(),
+      closeMenu: vi.fn(),
+    };
     const { result, unmount } = renderHook(() =>
       useShellRowDragMenu({
         drag: vi.fn(),
@@ -233,10 +237,10 @@ describe("useShellRowDragMenu scroll-lock guard (C20 device finding #2)", () => 
     expect(onGestureLockChange).toHaveBeenCalledTimes(2);
   });
 
-  it("keeps the lock across the menu decision and the relay into dragging", () => {
+  it("keeps the lock across the menu open and the relay into dragging", () => {
     const { result, onGestureLockChange } = lockSetup();
     pressInAt(result);
-    advance(500); // armed + menu decision, still locked, no second call
+    advance(500); // armed + menu visible, still locked, no second call
     expect(onGestureLockChange).toHaveBeenCalledTimes(1);
     expect(onGestureLockChange).toHaveBeenCalledWith(true);
     moveBy(result, 11); // relay → dragging, still locked
@@ -274,10 +278,10 @@ describe("useShellRowDragMenu scroll-lock guard (C20 device finding #2)", () => 
 describe("useShellRowDragMenu R2-01 out-of-band drag release", () => {
   function releaseSetup() {
     const onGestureLockChange = vi.fn();
-    const menuController = {
-      setOpen: vi.fn(),
-      setAnchorRect: vi.fn(),
-    } as unknown as MenuContextValue;
+    const menuController: RowMenuController = {
+      openMenu: vi.fn(),
+      closeMenu: vi.fn(),
+    };
     let release: (() => void) | null = null;
     const { result } = renderHook(() =>
       useShellRowDragMenu({

@@ -23,6 +23,7 @@
 import React, { type ReactNode } from "react";
 import { View } from "react-native";
 import { StyleSheet } from "react-native-unistyles";
+import { ShellRowMenuHost } from "@/shell/components/chat-row-menu";
 import { TabletListColumn } from "./list-column";
 import { TABLET_DETAIL_MIN_WIDTH } from "./metrics";
 import { TabletNavRail } from "./nav-rail";
@@ -38,6 +39,12 @@ export default function ShellTabletSplitHost({ children }: { children: ReactNode
       {split.active ? <TabletNavRail section={split.section} /> : null}
       {split.active ? <TabletListColumn section={split.section} /> : null}
       <View style={split.active ? styles.detail : styles.passthrough}>{children}</View>
+      {/* KI-11 ruling ①: the chat-row menu's window-hosted surface (the engine
+          Modal cannot open mid-gesture without killing the row's touch stream).
+          Mounted here — above the rail, the list columns and the navigator —
+          so its backdrop owns the whole window exactly like the Modal did.
+          Always rendered (null while idle): the C31-F1 stable-chain contract. */}
+      <ShellRowMenuHost />
     </View>
   );
 }

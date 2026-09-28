@@ -92,6 +92,12 @@ vi.mock("@/shell/components/workspace-screen-body", () => ({
 vi.mock("@/shell/components/me-screen-body", () => ({
   MeScreenBody: () => <Text testID="body-me">me</Text>,
 }));
+// KI-11: the window-hosted row menu is a leaf overlay of this tree (its own
+// contract lives in chat-row-menu-host.test.tsx); the engine surface chain it
+// imports needs the full theme, out of scope for the structural contract here.
+vi.mock("@/shell/components/chat-row-menu", () => ({
+  ShellRowMenuHost: () => null,
+}));
 vi.mock("./use-tablet-selection", () => ({
   useTabletSelectedAgentKey: () => env.state.selectedAgentKey,
 }));

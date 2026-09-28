@@ -4,11 +4,12 @@
 // closes/withholds the window and hands over to the row drag — one continuous
 // gesture stream, never a second long press.
 // The machine speaks in DECISIONS, not pixels: `menu_open` means "the window
-// decision is made". Whether it is literally visible at that instant is the
-// actuator's business — the engine's Modal-hosted sheet cannot be shown
-// mid-gesture without cancelling the row's touch stream (C20 device finding),
-// so the hook arms it pending and shows it on release. The relay edge is
-// identical either way: decision + past-relay-slop = drag, same stream.
+// decision is made". Since KI-11 the actuator shows the window AT that instant
+// — the surface moved into the app window (the shell-hosted popover in
+// chat-row-menu.tsx), so the row's touch stream survives the open and the
+// relay edge fires from a VISIBLE menu: decision + past-relay-slop = close +
+// drag, same stream, no dead zone. (Pre-KI-11 the engine's Modal-hosted sheet
+// forced a pending-release actuator — see the hook's header for the finding.)
 //
 // Phases and their timings are the on-device-validated values (C3):
 //   pressing → armed      at DRAG_ARM_DELAY_MS (180ms) if within
@@ -68,8 +69,8 @@ export type RowGesturePhase =
   | "pressing"
   /** 180ms stationary: a clear move now starts the drag. */
   | "armed"
-  /** The menu window decision is made (visible, or pending-release under the
-   * Modal-safe actuator); the finger may still be holding. */
+  /** The menu is open — since KI-11 literally visible at the threshold (the
+   * actuator's surface lives in the app window); the finger may still hold. */
   | "menu_open"
   /** drag() has fired for this touch — it must never fire again. */
   | "dragging"

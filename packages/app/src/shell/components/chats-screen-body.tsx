@@ -34,10 +34,14 @@
 // pin order (handleDragEnd only sees visible rows).
 // C20 (DESIGN §14.4): every live-filter row rides the drag layer through the
 // arbitration hook (long-press → anchored window → sliding past the relay slop
-// closes it and lifts the row in ONE touch stream). Drop semantics branch on what
-// was dragged: a pinned row re-orders inside the 置顶 group (C3, reorderPinned);
-// an unpinned row PINS itself and inserts at the drop slot (pins.pinAt with the
-// pinnedDropIndex group-offset conversion, clamped to the group).
+// closes it and lifts the row in ONE touch stream). KI-11 ruling ④ rewrites the
+// drop semantics on the zone boundary: a pinned row dragged OUT of 置顶 unpins
+// through the SAME actions.unpin the menu button uses; an unpinned row dragged
+// INTO the group pins at the drop slot through actions.pin(target, index); an
+// in-group move reorders (C3); a move inside the time-derived zone persists
+// nothing (`decidePinDrop` + `dispatchPinDrop`, chats/drag-drop.ts). KI-11
+// ruling ③ gates the refresh control off for the whole row-gesture band, so a
+// long-pressed downward drag at the list top sorts instead of refreshing.
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Text, View } from "react-native";
 import { router, type Href } from "expo-router";
@@ -45,7 +49,6 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useTranslation } from "react-i18next";
 import { StyleSheet } from "react-native-unistyles";
 import { Archive, MessageCircle, SearchX, WifiOff } from "lucide-react-native";
-import * as Haptics from "expo-haptics";
 import { SidebarAgentListSkeleton } from "@/components/sidebar-agent-list-skeleton";
 import { Button } from "@/components/ui/button";
 import { DraggableList } from "@/components/draggable-list";
@@ -64,6 +67,7 @@ import {
   type ChatSectionKind,
 } from "@/shell/chats/derive";
 import { createChatOpener } from "@/shell/chats/open-agent";
+import { chatRefreshGateProps, decidePinDrop, dispatchPinDrop } from "@/shell/chats/drag-drop";
 import {
   ACTIVITY_LABEL_KEY,
   ChatListRow,
@@ -82,9 +86,9 @@ import { normalizeSearchQuery } from "@/shell/search/query";
 import { resolveProjectPlacement } from "@/utils/project-placement";
 import { OFFICIAL, SHELL } from "@/shell/routes";
 import { usePaseoGoArchiveStore } from "@/shell/stores/archive";
-import { pinnedDropIndex, usePaseoGoPinsStore } from "@/shell/stores/pins";
+import { usePaseoGoPinsStore } from "@/shell/stores/pins";
 import { usePaseoGoReadStateStore } from "@/shell/stores/readState";
-import { useShellAgentActions } from "@/shell/shellAgentActions";
+import { useShellAgentActions, type ShellChatTarget } from "@/shell/shellAgentActions";
 import { deriveSidebarStateBucket } from "@/utils/sidebar-agent-state";
 import { useShellHostStatuses } from "@/shell/runtime/use-shell-host-statuses";
 import { isImportedProviderSession } from "@getpaseo/protocol/agent-labels";
@@ -343,7 +347,6 @@ export function ChatsScreenBody({ selectedAgentKey = null }: ShellScreenBodyProp
     [hosts],
   );
   const archivedSet = useMemo(() => new Set(archivedIds), [archivedIds]);
-  const pinnedSet = useMemo(() => new Set(pinnedIds), [pinnedIds]);
 
   // One pass over the directory into derivation inputs; grouping/sorting/unread are
   // the pure derive module's job (and its unit tests' subject). The archived filter
@@ -439,8 +442,12 @@ export function ChatsScreenBody({ selectedAgentKey = null }: ShellScreenBodyProp
   // native drag layer took the stream (no press_out will ever arrive).
   const [gestureLock, setGestureLock] = useState(false);
 
-  // The library hands back the whole list reordered; only the pinned rows' relative
-  // order is its opinion we keep — headers and unpinned rows are re-derived anyway.
+  // KI-11 ruling ④: the library hands back the whole list reordered; what the
+  // drop MEANS is decided on the zone boundary by `decidePinDrop` and run by
+  // `dispatchPinDrop` through the SAME action-layer calls the menu buttons
+  // make — 拖入置顶 = actions.pin(target, slot), 拖出置顶 = actions.unpin(target),
+  // 组内换位 = actions.reorderPinned, 非置顶区内移动 = nothing (the time-derived
+  // order re-asserts itself). Headers carry no zone opinion and are dropped.
   const handleDragEnd = useCallback(
     (nextItems: ChatListItem<ShellChatAgent>[]) => {
       // R2-01: release the scroll lock FIRST — above the search-mode early
@@ -454,25 +461,37 @@ export function ChatsScreenBody({ selectedAgentKey = null }: ShellScreenBodyProp
       const droppedKey = draggedKeyRef.current;
       draggedKeyRef.current = null;
       const visibleRowKeys: string[] = [];
+      const targetByKey = new Map<string, ShellChatTarget>();
       for (const item of nextItems) {
-        if (item.type === "row") visibleRowKeys.push(item.row.agent.key);
+        if (item.type !== "row") continue;
+        const key = item.row.agent.key;
+        visibleRowKeys.push(key);
+        targetByKey.set(key, {
+          key,
+          serverId: item.row.agent.serverId,
+          agentId: item.row.agent.agent.id,
+        });
       }
-      if (droppedKey !== null && !pinnedSet.has(droppedKey)) {
-        // C20: an unpinned row dropped anywhere pins itself and inserts at the
-        // drop slot; a drop past either group edge clamps to that edge.
-        const index = pinnedDropIndex({ droppedKey, visibleRowKeys, pinnedIds });
-        usePaseoGoPinsStore.getState().pinAt(droppedKey, index);
-        void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => {});
-        toast.show(t("chats.toast.pinned"));
-        return;
-      }
-      // C3 in-group reorder, unchanged — and the belt for a drag-end that ever
-      // arrives without a recorded drag-start: the visible pinned rows in their
-      // new relative order.
-      actions.reorderPinned(visibleRowKeys.filter((key) => pinnedSet.has(key)));
+      dispatchPinDrop(decidePinDrop({ droppedKey, visibleRowKeys, pinnedIds }), {
+        actions,
+        targetOf: (key) => targetByKey.get(key) ?? null,
+      });
     },
-    [actions, dragLockHandoff, pinnedSet, pinnedIds, normalizedQuery, toast, t],
+    [actions, dragLockHandoff, pinnedIds, normalizedQuery],
   );
+
+  // KI-11 ruling ③: while a row gesture is live (armed → menu → drag — the
+  // exact band `gestureLock` mirrors) the pull-to-refresh control is REMOVED
+  // and `refreshing` forced false. Android's SwipeRefreshLayout intercepts a
+  // downward pull at the scroll top even with scrollEnabled=false, and the
+  // official wrapper only hides it once the native drag has begun — too late
+  // for the 顶部向下拖 case ruling ③ names. A plain (never long-pressed)
+  // pull-down never arms, so refresh stays exactly where users expect it.
+  const refreshGate = chatRefreshGateProps({
+    gestureLive: gestureLock,
+    refreshing,
+    onRefresh: handleRefresh,
+  });
 
   const handleRetryHost = useCallback(
     (serverId: string) => {
@@ -627,8 +646,8 @@ export function ChatsScreenBody({ selectedAgentKey = null }: ShellScreenBodyProp
           onDragEnd={handleDragEnd}
           scrollEnabled={!gestureLock}
           contentContainerStyle={styles.listContent}
-          refreshing={refreshing}
-          onRefresh={handleRefresh}
+          refreshing={refreshGate.refreshing}
+          onRefresh={refreshGate.onRefresh}
           ListEmptyComponent={listEmpty}
           extraData={selectedAgentKey}
           testID="shell-chats-list"

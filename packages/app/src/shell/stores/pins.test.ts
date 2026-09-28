@@ -144,22 +144,22 @@ describe("archive store", () => {
   });
 });
 
-// C20 (DESIGN §14.4): an unpinned row dragged into the 置顶 group pins itself
-// and inserts at the drop slot; the slot arrives group-relative because the
-// flat list interleaves headers and other groups — pinnedDropIndex is that
-// conversion, pinAt is the clamped write.
-describe("pins store: C20 pinAt (drop into 置顶)", () => {
-  it("pins an unpinned row and inserts it at the drop slot", () => {
+// KI-11 ruling ④: the drop-into-置顶 write unified onto `togglePin`'s optional
+// placement — the SAME store action the menu button calls (the button just never
+// passes an index). `pinnedDropIndex` remains the flat-list → group-slot
+// conversion; the placement write is clamped and idempotent.
+describe("pins store: KI-11 togglePin placement (drop into 置顶)", () => {
+  it("pins an unpinned row at the drop slot", () => {
     usePaseoGoPinsStore.getState().setOrder(["s1:a1", "s1:a2", "s1:a3"]);
-    usePaseoGoPinsStore.getState().pinAt("s1:x", 1);
+    usePaseoGoPinsStore.getState().togglePin("s1:x", true, 1);
     expect(usePaseoGoPinsStore.getState().pinnedIds).toEqual(["s1:a1", "s1:x", "s1:a2", "s1:a3"]);
   });
 
   it("clamps out-of-range slots to the group edges", () => {
     usePaseoGoPinsStore.getState().setOrder(["s1:a1", "s1:a2"]);
-    usePaseoGoPinsStore.getState().pinAt("s1:top", -5);
+    usePaseoGoPinsStore.getState().togglePin("s1:top", true, -5);
     expect(usePaseoGoPinsStore.getState().pinnedIds).toEqual(["s1:top", "s1:a1", "s1:a2"]);
-    usePaseoGoPinsStore.getState().pinAt("s1:tail", 99);
+    usePaseoGoPinsStore.getState().togglePin("s1:tail", true, 99);
     expect(usePaseoGoPinsStore.getState().pinnedIds).toEqual([
       "s1:top",
       "s1:a1",
@@ -168,15 +168,23 @@ describe("pins store: C20 pinAt (drop into 置顶)", () => {
     ]);
   });
 
-  it("an already-pinned drop moves within the group and never duplicates", () => {
+  it("an already-pinned placement moves within the group and never duplicates", () => {
     usePaseoGoPinsStore.getState().setOrder(["s1:a1", "s1:a2", "s1:a3"]);
-    usePaseoGoPinsStore.getState().pinAt("s1:a1", 2);
+    usePaseoGoPinsStore.getState().togglePin("s1:a1", true, 2);
     expect(usePaseoGoPinsStore.getState().pinnedIds).toEqual(["s1:a2", "s1:a3", "s1:a1"]);
   });
 
-  it("pinAt persists and survives a simulated restart", async () => {
+  it("the button shape (no index) keeps append-to-tail and stays a no-op when pinned", () => {
+    usePaseoGoPinsStore.getState().setOrder(["s1:a1", "s1:a2"]);
+    usePaseoGoPinsStore.getState().togglePin("s1:a1", true); // already pinned: inert
+    expect(usePaseoGoPinsStore.getState().pinnedIds).toEqual(["s1:a1", "s1:a2"]);
+    usePaseoGoPinsStore.getState().togglePin("s1:x", true);
+    expect(usePaseoGoPinsStore.getState().pinnedIds).toEqual(["s1:a1", "s1:a2", "s1:x"]);
+  });
+
+  it("placement persists and survives a simulated restart", async () => {
     usePaseoGoPinsStore.getState().setOrder(["s1:a1"]);
-    usePaseoGoPinsStore.getState().pinAt("s1:x", 0);
+    usePaseoGoPinsStore.getState().togglePin("s1:x", true, 0);
     await vi.waitFor(async () => {
       const saved = (await persisted(PINS_KEY)) as { state: { pinnedIds: string[] } } | null;
       expect(saved?.state.pinnedIds).toEqual(["s1:x", "s1:a1"]);
