@@ -18,9 +18,12 @@
 5. **Linux**：deb/tar.gz 保活（用户另一台 Linux 机按 DEPLOY-NOTES 同规范消费）。
 6. **触发**：tag `v0.10.1-go.N` 驱动；latest 指针文件齐全。
 
-## 前置决策（用户侧，卡内待办）
+## 前置决策（已解决 2026-09-30）
 
-- fork 目前**只在本地**——推到 GitHub 远端（私有仓）是本卡第一动作，需用户建仓/授权。
+- ~~fork 目前只在本地，需用户建仓~~ → **`github.com/Karl0007/paseo-go` 已存在**（public，
+  gh 建仓+推送+无证据历史验证完毕）。CI 落点=该 public 仓：dev → `make-public-mirror.sh`
+  重放 → push tag → Actions 出包。注意：public 仓放 keystore secret 需开
+  Actions 权限收紧（仅 owner 推送可触发；不开 fork 工作流）。
 
 ## 验收
 
