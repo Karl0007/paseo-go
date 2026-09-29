@@ -212,3 +212,83 @@ describe("useImportList query pass-through", () => {
     expect(fetchA).toHaveBeenCalledTimes(1);
   });
 });
+
+// KI-13: 切换即清空——serverId 变更瞬间 entries/alreadyImportedCount/providerErrors
+// 全部复位进 loading 空态（状态条与列表同一台主机判定），新响应到达才再渲染。
+// 与 F1 竞态守卫互补：守卫拦「迟到的旧响应落地」，清空防「已落地的旧数据残留」。
+describe("useImportList host-switch clear (KI-13)", () => {
+  it("switching hosts clears entries/count/errors before the new response arrives", async () => {
+    const pendingB = deferred<{ entries: FetchRecentProviderSessionEntry[] }>();
+    const fetchA = vi.fn(async () => ({
+      entries: [ENTRY_A],
+      filteredAlreadyImportedCount: 3,
+      providerErrors: [{ provider: "claude", message: "boom" }],
+    }));
+    const fetchB = vi.fn(() => pendingB.promise);
+    const clientA = { fetchRecentProviderSessions: fetchA } as unknown as ImportListClient;
+    const clientB = { fetchRecentProviderSessions: fetchB } as unknown as ImportListClient;
+    const { result, rerender } = renderHook(
+      ({ serverId, client }) => useImportList(60, serverId, client, ""),
+      { initialProps: { serverId: "A", client: clientA } },
+    );
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    expect(result.current.listState.entries).toEqual([ENTRY_A]);
+    expect(result.current.listState.alreadyImportedCount).toBe(3);
+    expect(result.current.listState.providerErrors).toEqual([
+      { provider: "claude", message: "boom" },
+    ]);
+
+    rerender({ serverId: "B", client: clientB });
+    // 切换立即可见：render-phase 复位与切换同帧提交，旧主机数据零残留。
+    expect(result.current.listState.status).toBe("loading");
+    expect(result.current.listState.entries).toEqual([]);
+    expect(result.current.listState.alreadyImportedCount).toBe(0);
+    expect(result.current.listState.providerErrors).toEqual([]);
+    expect(result.current.listState.error).toBeNull();
+
+    // 新响应到达才再渲染。
+    pendingB.resolve({ entries: [ENTRY_B] });
+    await act(async () => {
+      await pendingB.promise;
+    });
+    expect(result.current.listState.status).toBe("ready");
+    expect(result.current.listState.entries).toEqual([ENTRY_B]);
+  });
+
+  it("an in-flight old-host response cannot repopulate the cleared list", async () => {
+    const pendingA = deferred<{ entries: FetchRecentProviderSessionEntry[] }>();
+    const pendingB = deferred<{ entries: FetchRecentProviderSessionEntry[] }>();
+    const clientA = {
+      fetchRecentProviderSessions: vi.fn(() => pendingA.promise),
+    } as unknown as ImportListClient;
+    const clientB = {
+      fetchRecentProviderSessions: vi.fn(() => pendingB.promise),
+    } as unknown as ImportListClient;
+    const { result, rerender } = renderHook(
+      ({ serverId, client }) => useImportList(60, serverId, client, ""),
+      { initialProps: { serverId: "A", client: clientA } },
+    );
+    await act(async () => {
+      await Promise.resolve();
+    });
+    // A 的请求已发出（过了身份守卫、await 中）；此刻用户切到 B。
+    rerender({ serverId: "B", client: clientB });
+    expect(result.current.listState.entries).toEqual([]);
+    // A 的响应在切换之后才到：复位已推进 requestSeq，它必须被丢弃，
+    // 列表保持空 loading 直到 B 的响应落地。
+    await act(async () => {
+      pendingA.resolve({ entries: [ENTRY_A] });
+      await pendingA.promise;
+    });
+    expect(result.current.listState.entries).toEqual([]);
+    expect(result.current.listState.status).toBe("loading");
+    pendingB.resolve({ entries: [ENTRY_B] });
+    await act(async () => {
+      await pendingB.promise;
+    });
+    expect(result.current.listState.entries).toEqual([ENTRY_B]);
+  });
+});

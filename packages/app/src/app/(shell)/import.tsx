@@ -54,13 +54,13 @@ import {
   importRowTimeLabel,
   mapEntriesToImportRows,
   summarizeImportAttempts,
-  toggleRowSelection,
   type ImportAttempt,
   type ImportParentLabel,
   type ImportRow,
   type ImportTreeItem,
 } from "@/shell/import/rows";
 import { useImportList } from "@/shell/import/use-import-list";
+import { useImportSelection } from "@/shell/import/use-import-selection";
 
 const IMPORT_LIST_LIMIT = 60;
 // C23: 搜索防抖（对齐官方 import-session-sheet 姿势，卡口径 ~300ms）。
@@ -296,15 +296,12 @@ export default function ShellImportScreen() {
   // 被过滤掉的父自然让子成为孤儿组。
   const treeItems = useMemo(() => buildImportTree(rows), [rows]);
 
-  const [selectedKeys, setSelectedKeys] = useState<string[]>([]);
-  const selectedSet = useMemo(() => new Set(selectedKeys), [selectedKeys]);
+  // KI-13: 勾选集生命周期（含切主机复位）在 useImportSelection；rows 由
+  // useImportList 切换同拍清空——列表与勾选两侧都进新态，旧主机零残留。
+  const { selectedSet, toggle: handleToggle, clear: clearSelection } = useImportSelection(serverId);
   const selectedRows = useMemo(
     () => rows.filter((row) => selectedSet.has(row.key)),
     [rows, selectedSet],
-  );
-  const handleToggle = useCallback(
-    (key: string) => setSelectedKeys((prev) => toggleRowSelection(prev, key)),
-    [],
   );
 
   const [progress, setProgress] = useState<{ current: number; total: number } | null>(null);
@@ -338,11 +335,11 @@ export default function ShellImportScreen() {
     if (message) toast.show(message);
     if (summary.imported > 0) {
       // 回对话列表：新 agent 经订阅出现，点开走 C4 opener（timeline 完整）。
-      setSelectedKeys([]);
+      clearSelection();
       navigation.navigate({ name: SHELL_TAB.chats } as never);
     }
     void load();
-  }, [client, load, navigation, progress, selectedRows, t, toast]);
+  }, [clearSelection, client, load, navigation, progress, selectedRows, t, toast]);
   const handleImportPress = useCallback(() => {
     void runImport();
   }, [runImport]);
