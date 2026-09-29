@@ -28,7 +28,16 @@ import { FlatList, Pressable, RefreshControl, Text, View } from "react-native";
 import { router, type Href } from "expo-router";
 import { useTranslation } from "react-i18next";
 import { StyleSheet } from "react-native-unistyles";
-import { FolderTree, Plus, Search, SearchX, Star, Zap, type LucideIcon } from "lucide-react-native";
+import {
+  AlertTriangle,
+  FolderTree,
+  Plus,
+  Search,
+  SearchX,
+  Star,
+  Zap,
+  type LucideIcon,
+} from "lucide-react-native";
 import { SidebarAgentListSkeleton } from "@/components/sidebar-agent-list-skeleton";
 import { Button } from "@/components/ui/button";
 import { useToast } from "@/contexts/toast-context";
@@ -81,6 +90,12 @@ import {
   type ShellWorktreeRow,
   type WorkspaceTreeSession,
 } from "@/shell/workspace/derive";
+import {
+  pickWorkspaceBodyBranch,
+  shouldShowWorkspaceSkeleton,
+  WORKSPACE_SKELETON_TIMEOUT_MS,
+} from "@/shell/workspace/skeleton-gate";
+import { useAnyHostEverLoadedAgentDirectory } from "@/shell/workspace/use-any-host-ever-loaded";
 import { subscribeSectionFocus } from "@/shell/section-focus";
 import { subscribeRailRetap } from "@/shell/tablet/rail-events";
 import type { ShellScreenBodyProps } from "./shell-screen-body-props";
@@ -154,6 +169,27 @@ function WorkspaceEmptyState({ onConnectHost }: { onConnectHost: () => void }) {
       <Text style={styles.emptyHint}>{t("workspace.emptyHint")}</Text>
       <Button onPress={onConnectHost} testID="shell-empty-connect-host">
         {t("workspace.connectHost")}
+      </Button>
+    </View>
+  );
+}
+
+// KI-15 兑底: the skeleton has a hard budget. Whatever upstream state machine failed
+// to settle (host stuck connecting, daemon wedged, registry never hydrating), after
+// WORKSPACE_SKELETON_TIMEOUT_MS the user gets an honest error + retry instead of an
+// unbounded shimmer — retry re-pulls agents + directories and probes the hosts that
+// are not online (the same beats pull-to-refresh and the offline row's 重试 fire).
+function SkeletonTimeoutState({ onRetry }: { onRetry: () => void }) {
+  const { t } = useTranslation(SHELL_I18N_NAMESPACE);
+  return (
+    <View style={styles.empty} testID="shell-workspace-skeleton-timeout">
+      <View style={styles.emptyIconWrap}>
+        <AlertTriangle size={28} color={styles.emptyIcon.color} />
+      </View>
+      <Text style={styles.emptyTitle}>{t("workspace.skeletonTimeoutTitle")}</Text>
+      <Text style={styles.emptyHint}>{t("workspace.skeletonTimeoutHint")}</Text>
+      <Button onPress={onRetry} testID="shell-workspace-skeleton-timeout-retry">
+        {t("workspace.retry")}
       </Button>
     </View>
   );
@@ -751,19 +787,61 @@ export function WorkspaceScreenBody({ selectedAgentKey = null }: ShellScreenBody
     [refreshing, handleRefresh],
   );
 
-  // C12: mask until BOTH the project list and the first agent-directory wave land —
-  // otherwise a fast projects response flashes 「暂无项目」 under still-arriving agents.
-  const showSkeleton =
-    hostRegistryStatus === "loading" || (hosts.length > 0 && (projectsLoading || isInitialLoad));
+  // C12 masked the cold-start gap; KI-15 bounds it twice over. The gate releases once
+  // ANY host has completed its first directory wave (a sibling stuck in `connecting`
+  // pinned projectsLoading via .some() and hid the ready hosts' tree for 40+ minutes —
+  // see shell/workspace/skeleton-gate.ts), and the timeout below catches every other
+  // unsettled state. The read goes through the version-subscribed hook, not an inline
+  // store get (R1 trap: the compiler would memoise it on `hosts` alone and pin the
+  // gate false after the first wave lands).
+  const anyHostEverLoaded = useAnyHostEverLoadedAgentDirectory(hostIds);
+  const showSkeleton = shouldShowWorkspaceSkeleton({
+    hostRegistryStatus,
+    hostCount: hosts.length,
+    projectsLoading,
+    isInitialLoad,
+    anyHostEverLoaded,
+  });
   const hasHosts = hosts.length > 0;
+  const [skeletonTimedOut, setSkeletonTimedOut] = useState(false);
+  useEffect(() => {
+    if (!showSkeleton) {
+      setSkeletonTimedOut(false);
+      return;
+    }
+    // skeletonTimedOut is a dep on purpose: the retry button clears it while
+    // showSkeleton stays true, and only a dep change re-runs this effect — without it
+    // the budget arms exactly once and a retried skeleton shimmer is unbounded
+    // (device-caught on the KI-15 lane).
+    if (skeletonTimedOut) return;
+    const timer = setTimeout(() => setSkeletonTimedOut(true), WORKSPACE_SKELETON_TIMEOUT_MS);
+    return () => clearTimeout(timer);
+  }, [showSkeleton, skeletonTimedOut]);
+  const handleSkeletonRetry = useCallback(() => {
+    // Re-arm the budget, then re-pull everything the skeleton was waiting on.
+    setSkeletonTimedOut(false);
+    refreshAll();
+    refetch();
+    for (const host of hosts) {
+      if (statuses.get(host.serverId) !== "online") {
+        void getHostRuntimeStore().runProbeCycleNow(host.serverId);
+      }
+    }
+  }, [hosts, refreshAll, refetch, statuses]);
   // Stable element identity for FlatList (the chats tab's listEmpty idiom).
   const searchListEmpty = useMemo(
     () => <FileSearchEmptyState searching={searching} onClear={handleSearchClose} />,
     [searching, handleSearchClose],
   );
 
+  const bodyBranch = pickWorkspaceBodyBranch({
+    searchActive,
+    showSkeleton,
+    skeletonTimedOut,
+    hasHosts,
+  });
   let body: ReactNode;
-  if (searchActive) {
+  if (bodyBranch === "search") {
     // 结果替换列表区 (C9 ruling): the tree is fully swapped for the hit list.
     body = (
       <FlatList
@@ -775,13 +853,19 @@ export function WorkspaceScreenBody({ selectedAgentKey = null }: ShellScreenBody
         testID="shell-workspace-search-results"
       />
     );
-  } else if (showSkeleton) {
+  } else if (bodyBranch === "skeleton") {
     body = (
       <View style={styles.skeletonWrap} testID="shell-workspace-skeleton">
         <SidebarAgentListSkeleton />
       </View>
     );
-  } else if (hasHosts) {
+  } else if (bodyBranch === "skeletonTimeout") {
+    body = (
+      <View style={styles.emptyWrap}>
+        <SkeletonTimeoutState onRetry={handleSkeletonRetry} />
+      </View>
+    );
+  } else if (bodyBranch === "tree") {
     body = (
       <FlatList
         ref={treeListRef}

@@ -150,6 +150,8 @@
     "a11yActiveAgents_one": "{{count}} active chat",
     "a11yActiveAgents_other": "{{count}} active chats",
     "retry": "Retry",
+    "skeletonTimeoutTitle": "Workspace took too long to load",
+    "skeletonTimeoutHint": "Host data wasn't ready within 10s — a host may be unreachable or its daemon unresponsive. Tap retry to pull again, or use pull-to-refresh.",
     "hostEmpty": "No projects yet — add one with New project below.",
     "hostEmptyOffline": "Host offline — projects appear once it reconnects.",
     "newProject": "New project",

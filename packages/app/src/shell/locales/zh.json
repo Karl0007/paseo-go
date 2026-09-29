@@ -150,6 +150,8 @@
     "a11yActiveAgents_one": "{{count}} 个活跃对话",
     "a11yActiveAgents_other": "{{count}} 个活跃对话",
     "retry": "重试",
+    "skeletonTimeoutTitle": "工作区加载超时",
+    "skeletonTimeoutHint": "主机数据超过 10 秒仍未就绪（可能有主机连不上或 daemon 未响应）。点重试重新拉取，或稍后下拉刷新。",
     "hostEmpty": "暂无项目，点下方「新建项目」添加。",
     "hostEmptyOffline": "主机离线，重连后显示项目。",
     "newProject": "新建项目",
