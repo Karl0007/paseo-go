@@ -88,12 +88,14 @@
 | KI-11                   | 对话列表长按/拖动/置顶四条：代码+单测+①帧已验收（cf305d19，置顶冲突实锤已统一同 action）；②③④设备帧=blocked-device-env 待墙充补证轮         | 🔶 代码毕，补证待设备（BUILD 坑6d）                                                                                |
 | KI-12                   | 三 tab 顶栏逻辑/高度不统一且随滚动移动：抽 shell-tab-header 等高固定容器，逐屏搬出滚动区（已拍板成卡）                                      | ✅ 代码+真机帧毕（等高 300-303px 三 tab 一致、滚动中顶栏像素全等、宽屏同 dp）                                      |
 | KI-6                    | 文件屏搜索只覆盖已浏览目录：升级两层=全仓模糊文件名（directory_suggestions）+ 内容兜底（workspace.content_search，KI-6S server 层已落）     | ✅ 代码+真机帧毕（Tier1/Tier2 真机命中帧在案，无兜底 banner）                                                      |
-| KI-7                    | git 记录段只显 ahead-of-base：升全量历史+分支/远端关系+Git Graph 式 DAG 泳道（用户二轮拍板）                                                | 🔶 代码毕（55d864fe，探针实证 DAG）；真机帧待补（当时 daemon 未载新 RPC=崩溃循环，已修 pid23232）                  |
+| KI-7                    | git 记录段只显 ahead-of-base：升全量历史+分支/远端关系+Git Graph 式 DAG 泳道（用户二轮拍板）                                                | ✅ 代码毕（55d864fe 探针实证 DAG；devd 已重启载新 RPC）；帧归新包轮                                                |
 | KI-8                    | 会话屏顶栏信息密度：双行化（分支/远端同步态进第二行，与文件屏头行同构）                                                                     | 📝 `todo/KI8-session-header-compact.md` 排队（KI-7 后）                                                            |
 | KI-9                    | 二级屏 hidden-tab 无转场/返回语义混乱：四屏迁 (detail) 根栈真 push+淡入动画+会话菜单收敛两项带 tab 参                                       | 🔶 代码毕（591463b2，grep 残留=0）；push/back/菜单落点帧在案；滑入中间态帧=ROM 无 screenrecord 不可拍（anomaly#4） |
 | KI-13                   | 导入屏切主机后列表残留旧主机数据：切换即清空（render-phase 复位+seq 守卫）                                                                  | ✅ 代码+真机帧毕（切换首帧零残留，6 帧在案）                                                                       |
-| KI-14                   | 会话屏顶部官方 chrome（header 带+tab 行）在壳态隐藏：workspace-screen.tsx +3~4 行 shellMode 门触点，带真塌矮+退役盖条 hack（用户拍板）      | 📝 `todo/KI14-hide-official-session-chrome.md` 排队（KI-8 后）                                                     |
+| KI-14                   | 会话屏顶部官方 chrome（header 带+tab 行）在壳态隐藏：workspace-screen.tsx +3~4 行 shellMode 门触点，带真塌矮+退役盖条 hack（用户拍板）      | ✅ 代码毕（6ffe067a 触点 4 seam 隐藏官方 chrome；宽屏扩面+inset+无头屏=KI-17 76e32e63）；帧归新包轮                |
 | KI-15                   | 工作区 tab 骨架屏卡死 >40min（补证轮实锤；刷新/切tab/重启无效）：KI-12 重构回归嫌疑>daemon 状态机>R1 变体，修复含壳侧骨架超时兜底           | ✅ 修复毕（e331e514，单台离线主机不再钉死骨架+10s 兜底）；帧随新包重拍                                             |
+| KI-16                   | 会话页三条：下拉刷新(在)/长按弹层阈值 500→**250ms**(用户砍半,双路径同源)/弹窗后拖动接力改序+置顶区语义(普通不误钉·拖出解钉)                 | ✅ 代码毕（d75c51d8，59 定向绿含 249/250 边界）；帧归新包轮                                                        |
+| KI-17                   | KI-14 后果收尾三件：会话内容顶 inset(胶囊不遮首条)/宽屏门扩至 shellActive(藏 wide 带+fallback tab 行)/冷深链无头屏→胶囊无条件可见+返回兑底  | ✅ 代码毕（76e32e63，162 scoped 绿，触点净+2 行）；帧归新包轮                                                      |
 
 ## 6. 证据契约总核（§11）
 
