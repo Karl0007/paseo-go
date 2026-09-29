@@ -22,3 +22,11 @@
 
 merge commit + 解缝修正 commit 允许成对（merge 类工作豁免"恰一次"，报告列明）。
 前置：无（但排在全部 KI 卡之后，用户 2026-09-29 拍板顺序）。
+
+---
+
+## 侦察记录（2026-09-30，编排者）
+
+- `git fetch upstream`（HTTPS）=连接重置；Clash 7890 未开；SSH fetch=**"pack has 340 unresolved deltas"**——dev 仓是 blobless partial clone，新 pack 的 delta 基缺失（SPIKE.md 老问题）。
+- **可行路径=tarball 种子合并**：codeload 拉 0.10.1 tarball（镜像脚本已验证该通道）→ 物化为 commit（消息记真实 upstream sha，参照 make-public-mirror.sh 根提交做法）→ `git merge` 该 commit 进 fork 分支 → 缝隙文件按 DESIGN §2.7 重新贴缝 → 全门禁。
+- **时序纪律**：M1 在 v0.3.0 设备验证交付**之后**执行（交付前树冻结）。
