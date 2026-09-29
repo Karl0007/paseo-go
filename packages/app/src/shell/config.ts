@@ -9,7 +9,7 @@
 export const SHELL_UPSTREAM_REF = process.env.EXPO_PUBLIC_PASEO_GO_UPSTREAM ?? "db4fd334";
 
 /** Shell display version; bumped by release cards (C13). */
-export const SHELL_VERSION = "0.2.0";
+export const SHELL_VERSION = "0.3.0";
 
 /**
  * Bundle-time default for shell mode. Metro inlines `EXPO_PUBLIC_*` vars at bundle
