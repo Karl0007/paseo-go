@@ -233,3 +233,9 @@ intake 原话与取证=`todo/NEXT-requirements.md`（Q1-Q10）；执行细节=�
    dump-based 取证）；「恰一次 commit + 全部门禁 + WS 探针/单测」先行成立，设备帧是增项非豁免项。
 4. **无线 adb 主车道**：`192.168.31.14:5555`（tcpip 模式，重启失效需 USB 重配）；
    reverse `8081→8081`、`6767→6768` 随连接重建。
+5. **会话屏官方顶栏隐藏触点**（§2.1 再扩容，用户拍板 2026-09-29）：批准上游触点
+   `packages/app/src/screens/workspace/workspace-screen.tsx` +3~4 行——壳态+compact 下
+   `hideOfficialSessionChrome = usePaseoGoShellActive() && isMobile` 同时门 header 带(:4040)、
+   tab 行(:4042)、gate 态头(:1296)，官方模式零变化（门在 shellMode 非宽度）。动机：顶部带真塌矮
+   - 关 tab→归档原生不可达（替代 Portal 盖条 hack，`shell/session-header/tab-row-cover.*` 退役）。
+     卡=`todo/KI14-hide-official-session-chrome.md`；解缝=重新贴缝（保留上游正文重贴条件）。

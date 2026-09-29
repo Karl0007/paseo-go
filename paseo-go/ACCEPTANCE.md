@@ -78,6 +78,7 @@
 | KI-8                    | 会话屏顶栏信息密度：双行化（分支/远端同步态进第二行，与文件屏头行同构）                                                                     | 📝 `todo/KI8-session-header-compact.md` 排队（KI-7 后）             |
 | KI-9                    | 二级屏 hidden-tab 无转场/返回语义混乱：四屏迁 (detail) 根栈真 push+淡入动画+会话菜单收敛两项带 tab 参                                       | 🔶 代码毕（591463b2，grep 残留=0），帧待补证轮                      |
 | KI-13                   | 导入屏切主机后列表残留旧主机数据：切换即清空（render-phase 复位+seq 守卫）                                                                  | 🔶 代码毕（96196756），帧待补证轮                                   |
+| KI-14                   | 会话屏顶部官方 chrome（header 带+tab 行）在壳态隐藏：workspace-screen.tsx +3~4 行 shellMode 门触点，带真塌矮+退役盖条 hack（用户拍板）      | 📝 `todo/KI14-hide-official-session-chrome.md` 排队（KI-8 后）      |
 
 ## 6. 证据契约总核（§11）
 
