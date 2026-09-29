@@ -79,7 +79,7 @@
 | KI-9                    | 二级屏 hidden-tab 无转场/返回语义混乱：四屏迁 (detail) 根栈真 push+淡入动画+会话菜单收敛两项带 tab 参                                       | 🔶 代码毕（591463b2，grep 残留=0）；push/back/菜单落点帧在案；滑入中间态帧=ROM 无 screenrecord 不可拍（anomaly#4） |
 | KI-13                   | 导入屏切主机后列表残留旧主机数据：切换即清空（render-phase 复位+seq 守卫）                                                                  | ✅ 代码+真机帧毕（切换首帧零残留，6 帧在案）                                                                       |
 | KI-14                   | 会话屏顶部官方 chrome（header 带+tab 行）在壳态隐藏：workspace-screen.tsx +3~4 行 shellMode 门触点，带真塌矮+退役盖条 hack（用户拍板）      | 📝 `todo/KI14-hide-official-session-chrome.md` 排队（KI-8 后）                                                     |
-| KI-15                   | 工作区 tab 骨架屏卡死 >40min（补证轮实锤；刷新/切tab/重启无效）：KI-12 重构回归嫌疑>daemon 状态机>R1 变体，修复含壳侧骨架超时兜底           | 🔧 `todo/KI15-workspace-tab-skeleton-stuck.md` 在途                                                                |
+| KI-15                   | 工作区 tab 骨架屏卡死 >40min（补证轮实锤；刷新/切tab/重启无效）：KI-12 重构回归嫌疑>daemon 状态机>R1 变体，修复含壳侧骨架超时兜底           | ✅ 修复毕（e331e514，单台离线主机不再钉死骨架+10s 兜底）；帧随新包重拍                                             |
 
 ## 6. 证据契约总核（§11）
 

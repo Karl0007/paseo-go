@@ -33,3 +33,10 @@
 2. 真机：工作区 tab 出列表；若走超时兜底路径，注入慢响应能看到错误态+重试。
 3. 读图 ≥2（修复后列表帧 + 根因证据帧）存 evidence/KI15/。
 4. 报告 JSON：{commit, root_cause, fix, regression_source: KI12|daemon|R1|other, frames, gates}。
+
+---
+
+## 收卡记录（2026-09-30）
+
+- 修复=e331e514（anyHostEverLoaded 放行+10s 超时兜底+R1-safe 版本订阅 hook；15 定向绿+app 全量零新增）。
+- 帧勘误：agent 把帧写进仓根 `evidence/`（非卡定 `paseo-go/evidence/`），编排者清碎片时误删无副本——KI-15 真机帧随新包端到端轮重拍（已在队列）。
