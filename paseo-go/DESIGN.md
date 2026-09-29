@@ -215,3 +215,21 @@ intake 原话与取证=`todo/NEXT-requirements.md`（Q1-Q10）；执行细节=�
 - **§14.8 修订（R2-09）**：worktree 物理合并的 cwd 规范化在"保守比较"基础上增 **Windows 形折叠**——仅盘符/UNC/`\\?\` 前缀 casefold（真值=服务端 `utils/path.ts` looksLikeDefiniteWindowsPath+normalizePathForComparison；`workspace-identity.ts` 镜像并注明折法差异：壳身份值兼作显示，只折 locator 段）。POSIX 路径逐字节不动，原"大小写敏感主机不误合并"裁定保持。
 - **R2-04 裁定（2a）**：官方 `useIsCompactFormFactor` 改 `useWindowDimensions()<720`（触点#8；COMPAT(shellFormFactorRotation) 注释在册）；rt.breakpoint 其余消费者不动。壳侧 form-factor 与官方 hook 自此同一订阅面，转屏半更新态消除。
 - **R2-08 裁定（3a 全修）**：壳归档扩面（通知静音+L3 隐藏+概览不计）；L2 归档先过官方同款风险闸；壳内官方 tab 行经胶囊盖高扩展不可达（零新触点）。"关 root agent tab=归档"语义自此在壳内不可触发。
+
+## 16. 批次三（KI 批）增补裁定（2026-09-29；只增不改上文）
+
+1. **协议/server 微缝纯增扩面**（§2.1 再修订，覆盖 KI-6S/KI-7）：批准新上游触点——
+   `packages/protocol/src/messages.ts`（request/response 类型纯增 + COMPAT 注释，generated 由
+   `generate:validators` 再生成，禁手改）；`packages/server` 侧 `session.ts` +case 一行、
+   `operation-permissions.ts` +2 行、新模块文件（content-search.ts / commit-history.ts）；
+   `packages/client/src/daemon-client.ts` 纯增发送方法。**纪律**：只增不改、不动任何既有签名、
+   壳侧一律配能力闸（旧 daemon `rpc_error{requestType}` 静默降级），探针实证代替真机帧先行。
+2. **证据本地档案制 + 公开镜像**：证据树 `paseo-go/evidence/` gitignore 不入库（历史已于
+   2026-09-29 从公开面剥离）；公开镜像 `github.com/Karl0007/paseo-go` 单向重放
+   （`release/make-public-mirror.sh`：tarball 根 + 排除证据的 patch replay），merge upstream 只在
+   dev 仓做，永不反向 push。
+3. **代码优先模式 + 补证轮**（设备供电事故应急裁定）：平板 PC USB 协商仅 2.5W 喂不动常亮测试
+   负载（BUILD 坑 6d），KI 批各卡真机帧统一 deferred，墙充 ≥30% 后一次补证轮（脚本化
+   dump-based 取证）；「恰一次 commit + 全部门禁 + WS 探针/单测」先行成立，设备帧是增项非豁免项。
+4. **无线 adb 主车道**：`192.168.31.14:5555`（tcpip 模式，重启失效需 USB 重配）；
+   reverse `8081→8081`、`6767→6768` 随连接重建。
