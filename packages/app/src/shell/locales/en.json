@@ -239,6 +239,9 @@
     "searchContentTitle": "File content · {{count}}",
     "searchContentTruncated": "Results truncated",
     "searchContentPending": "Searching file contents…",
+    "searchTimeoutTitle": "Content search timed out — tap retry",
+    "searchTimeoutAction": "Retry",
+    "searchTimeoutHint": "The first scan of a large repository can exceed the daemon's 5s search budget; a retry usually lands fast on the warm cache.",
     "history": {
       "empty": "No commits in this repository yet.",
       "allLoaded": "All commit history loaded",

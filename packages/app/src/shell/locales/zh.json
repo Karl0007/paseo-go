@@ -239,6 +239,9 @@
     "searchContentTitle": "文件内容 · {{count}}",
     "searchContentTruncated": "结果已截断",
     "searchContentPending": "正在搜索文件内容…",
+    "searchTimeoutTitle": "内容搜索超时，点击重试",
+    "searchTimeoutAction": "重试",
+    "searchTimeoutHint": "大仓首次内容扫描可能超出守护进程 5s 搜索预算；重试一次通常借助热缓存很快出结果。",
     "history": {
       "empty": "该仓库还没有提交。",
       "allLoaded": "已加载全部提交历史",

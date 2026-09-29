@@ -13,7 +13,14 @@
 //    to the C9 browsed-directory index (file-search.ts) and the UI says so.
 // Race discipline (use-import-list idiom): every effect run grabs a fresh
 // requestSeq; a superseded response (query edit / leave search) never commits.
-import { useEffect, useRef, useState } from "react";
+// KI-18 (冷路径 5014ms→空态 实锤): the daemon's own scan deadline is 5s and it
+// answers a deadline-cut scan with `truncated: true` + whatever it found — on a
+// cold big-repo walk that is ZERO matches, which used to render as 「没有匹配」.
+// Tier-2 now runs behind an explicit client wait window (CONTENT_SEARCH_WAIT_MS)
+// and a deadline-truncated zero-hit answer is reported as a retryable timeout
+// state (contentTimedOut), UI-distinct from a true miss and from the KI-6S
+// capability-gate silence. 重试 re-fires the SAME pipeline through a fresh seq.
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useDebouncedValue } from "@/hooks/use-debounced-value";
 import {
   FILE_SEARCH_LIMIT,
@@ -31,6 +38,17 @@ export const NAME_SEARCH_LIMIT = 100;
 /** workspace.content_search.request caps at limit≤60 (protocol schema). */
 export const CONTENT_SEARCH_LIMIT = 60;
 export const CONTENT_SEARCH_REQUEST_TYPE = "workspace.content_search.request";
+/**
+ * KI-18 client wait window for Tier-2. The daemon caps its own scan at 5s
+ * (server workspace/content-search.ts SCAN_TIMEOUT_MS, deadline covering even
+ * the git-ignore lookup) and answers at that point with a truncated partial —
+ * so a response is expected within ~5s + event-loop lag + transport RTT. A
+ * window equal to the daemon budget is a coin-flip race (observed cold path:
+ * 5014ms). 8s = 5s budget + 3s slack: the daemon serves terminals/agent
+ * streams on the same loop and the device rides Wi-Fi; still short enough that
+ * a genuinely dead link surfaces the retryable timeout state quickly.
+ */
+export const CONTENT_SEARCH_WAIT_MS = 8_000;
 
 /** Structural slice of the official directory_suggestions entry. */
 export interface DirectorySuggestionEntry {
@@ -143,6 +161,39 @@ export function isContentSearchUnsupportedError(error: unknown): boolean {
   return (error as Error & { requestType?: unknown }).requestType === CONTENT_SEARCH_REQUEST_TYPE;
 }
 
+/** Sentinel for the KI-18 wait window elapsing — NOT an RPC error, so it never
+ * trips the capability gate and never latches the host unsupported. */
+class ContentSearchWaitExpiredError extends Error {
+  constructor() {
+    super("workspace content search exceeded the client wait window");
+    this.name = "ContentSearchWaitExpiredError";
+  }
+}
+
+/**
+ * Rejects with ContentSearchWaitExpiredError once CONTENT_SEARCH_WAIT_MS passes
+ * without the RPC settling. The RPC is not cancelled (no client-side cancel
+ * contract); its late result is simply dropped by this wrapper.
+ */
+function withinWaitWindow<T>(promise: Promise<T>): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    const timer = setTimeout(
+      () => reject(new ContentSearchWaitExpiredError()),
+      CONTENT_SEARCH_WAIT_MS,
+    );
+    promise.then(
+      (value) => {
+        clearTimeout(timer);
+        return resolve(value);
+      },
+      (error: unknown) => {
+        clearTimeout(timer);
+        return reject(error);
+      },
+    );
+  });
+}
+
 export interface WorkspaceSearchResult {
   /** Tier-1 rows: repo-wide fuzzy hits, or browsed-index hits while `fallback`. */
   nameHits: FileSearchHit[];
@@ -151,19 +202,30 @@ export interface WorkspaceSearchResult {
   contentTruncated: boolean;
   /** Tier-2 request in flight (the 「正在搜索文件内容…」 line). */
   contentPending: boolean;
+  /** KI-18: Tier-2 did not answer completely — the client wait window expired,
+   * or the daemon returned a deadline-truncated scan with ZERO hits. The UI
+   * shows 「搜索超时，点击重试」 — never the 没有匹配 empty state, and never the
+   * KI-6S capability-gate silence (an unsupported host never sets this). */
+  contentTimedOut: boolean;
   /** True while the name layer is served by the browsed-directory fallback. */
   fallback: boolean;
   /** Any layer in flight — the empty state shows 搜索中 instead of 无命中. */
   pending: boolean;
+  /** Re-run the current query through the same seq-guarded pipeline (重试). */
+  retry: () => void;
 }
+
+const NOOP_RETRY = () => {};
 
 const EMPTY_RESULT: WorkspaceSearchResult = {
   nameHits: [],
   contentHits: [],
   contentTruncated: false,
   contentPending: false,
+  contentTimedOut: false,
   fallback: false,
   pending: false,
+  retry: NOOP_RETRY,
 };
 
 /**
@@ -190,6 +252,11 @@ export function useWorkspaceSearch(input: {
   // serverId of a host whose content_search rpc_error'd once — gate stays shut.
   const unsupportedHostRef = useRef<string | null>(null);
   const [result, setResult] = useState<WorkspaceSearchResult>(EMPTY_RESULT);
+  // KI-18 重试: bumping the nonce re-runs the whole effect — a fresh seq is
+  // grabbed at the top, so the abandoned attempt's late response dies at the
+  // existing requestSeq guard (no second guard invented).
+  const [retryNonce, setRetryNonce] = useState(0);
+  const retry = useCallback(() => setRetryNonce((nonce) => nonce + 1), []);
 
   useEffect(() => {
     const seq = ++requestSeq.current;
@@ -242,40 +309,62 @@ export function useWorkspaceSearch(input: {
       // ---- Tier 2: content fallback, only on a zero-hit name layer ----------
       const wantContent = nameHits.length === 0 && unsupportedHostRef.current !== serverId;
       setResult({
+        ...EMPTY_RESULT,
         nameHits,
-        contentHits: [],
-        contentTruncated: false,
-        contentPending: wantContent,
         fallback,
+        contentPending: wantContent,
         pending: wantContent,
       });
       if (!wantContent) return;
       try {
-        const payload = await client.searchWorkspaceContent({
-          cwd: workspaceRoot,
-          query,
-          limit: CONTENT_SEARCH_LIMIT,
-        });
+        const payload = await withinWaitWindow(
+          client.searchWorkspaceContent({
+            cwd: workspaceRoot,
+            query,
+            limit: CONTENT_SEARCH_LIMIT,
+          }),
+        );
         if (disposed || seq !== requestSeq.current) return;
+        // KI-18: a truncated scan with ZERO hits is the daemon saying "my 5s
+        // deadline cut me off before I found anything" — an incomplete answer,
+        // never a truthful 没有匹配. With hits on hand, truncation stays the
+        // existing 「结果已截断」 hint (contentTruncated).
         setResult((prev) => ({
           ...prev,
           contentHits: mapContentHits(payload.matches),
           contentTruncated: payload.truncated,
+          contentTimedOut: payload.truncated && payload.matches.length === 0,
           contentPending: false,
           pending: false,
         }));
       } catch (error) {
+        // The capability latch is seq-independent (KI-6S): an rpc_error is a
+        // verdict about the HOST, even if this exact request was superseded.
         if (isContentSearchUnsupportedError(error)) unsupportedHostRef.current = serverId;
-        // Silent either way (capability gate OR transient failure): the name
-        // layer already reported; a content miss never blocks or toasts.
         if (disposed || seq !== requestSeq.current) return;
+        if (error instanceof ContentSearchWaitExpiredError) {
+          // Wait window expired — retryable timeout state, NOT the miss empty
+          // state. The still-pending RPC's late result is dropped by the
+          // wrapper; 重试 re-fires warm and lands fast.
+          setResult((prev) => ({
+            ...prev,
+            contentTimedOut: true,
+            contentPending: false,
+            pending: false,
+          }));
+          return;
+        }
+        // Transient failure (link drop etc.): silent as before — the name
+        // layer already reported; a content miss never blocks or toasts.
         setResult((prev) => ({ ...prev, contentPending: false, pending: false }));
       }
     })();
     return () => {
       disposed = true;
     };
-  }, [active, client, ctx, query, serverId, workspaceRoot]);
+  }, [active, client, ctx, query, retryNonce, serverId, workspaceRoot]);
 
-  return result;
+  // The state object carries NOOP_RETRY (it lives in EMPTY_RESULT spreads);
+  // the real callback is merged in at the boundary, stable across commits.
+  return { ...result, retry };
 }

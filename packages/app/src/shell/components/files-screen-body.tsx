@@ -25,7 +25,16 @@ import { router, type Href } from "expo-router";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useTranslation } from "react-i18next";
 import { StyleSheet } from "react-native-unistyles";
-import { ChevronLeft, FileQuestion, Search, SearchX, Star, StarOff, X } from "lucide-react-native";
+import {
+  AlertTriangle,
+  ChevronLeft,
+  FileQuestion,
+  Search,
+  SearchX,
+  Star,
+  StarOff,
+  X,
+} from "lucide-react-native";
 import * as Clipboard from "expo-clipboard";
 import { ChangesSurface } from "@/git/diff-pane";
 import { CommitsSection } from "@/git/commits-section/commits-section";
@@ -196,26 +205,47 @@ function FilesHeader({
   );
 }
 
-// 页内搜索空态 (KI-6 改写): the main 口径 is repo-wide (fuzzy file names, then
-// content fallback), so the old 「只覆盖浏览过的目录」 note退位为 fallback 态说明 —
-// it only shows while the Tier-1 RPC failed / the daemon is old. The miss line
-// waits for `pending` (「没有匹配」 must never flash before the RPC lands). With
-// an empty query the note leads alone.
+// 页内搜索空态 (KI-6 改写; KI-18 三态分离): the main 口径 is repo-wide (fuzzy file
+// names, then content fallback), so the old 「只覆盖浏览过的目录」 note退位为
+// fallback 态说明 — it only shows while the Tier-1 RPC failed / the daemon is old.
+// The miss line waits for `pending` (「没有匹配」 must never flash before the RPC
+// lands). KI-18: a Tier-2 scan that never answered completely (wait window or a
+// deadline-truncated zero-hit scan) is its OWN state — 「搜索超时」 + 重试 button —
+// UI-distinct from a true miss and from the capability-gate silence (an
+// unsupported host never sets contentTimedOut, it just stops asking). With an
+// empty query the note leads alone.
 function FilesSearchEmptyState({
   pending,
   fallback,
+  timedOut,
+  onRetry,
   onClear,
 }: {
   pending: boolean;
   fallback: boolean;
+  timedOut: boolean;
+  onRetry: () => void;
   onClear: () => void;
 }) {
   const { t } = useTranslation(SHELL_I18N_NAMESPACE);
+  let hint = t("files.searchEmptyHint");
+  if (fallback) hint = t("files.searchFallbackHint");
+  else if (timedOut) hint = t("files.searchTimeoutHint");
   return (
     <View style={styles.searchEmpty} testID="shell-files-search-empty">
-      {pending ? (
-        <LoadingSpinner size="small" color={styles.chipIcon.color} />
-      ) : (
+      {pending ? <LoadingSpinner size="small" color={styles.chipIcon.color} /> : null}
+      {timedOut && !pending ? (
+        <>
+          <AlertTriangle size={28} color={styles.chipIcon.color} />
+          <Text style={styles.searchEmptyTitle} testID="shell-files-search-timeout">
+            {t("files.searchTimeoutTitle")}
+          </Text>
+          <Button variant="secondary" size="sm" onPress={onRetry} testID="shell-files-search-retry">
+            {t("files.searchTimeoutAction")}
+          </Button>
+        </>
+      ) : null}
+      {!timedOut && !pending ? (
         <>
           <SearchX size={28} color={styles.chipIcon.color} />
           <Text style={styles.searchEmptyTitle}>{t("files.searchEmptyTitle")}</Text>
@@ -223,10 +253,8 @@ function FilesSearchEmptyState({
             {t("files.searchEmptyAction")}
           </Button>
         </>
-      )}
-      <Text style={styles.missing}>
-        {fallback ? t("files.searchFallbackHint") : t("files.searchEmptyHint")}
-      </Text>
+      ) : null}
+      <Text style={styles.missing}>{hint}</Text>
     </View>
   );
 }
@@ -563,7 +591,7 @@ function useFilesWorkspaceSearch(input: {
 // tap); the 内容 section rides the footer with its 「文件内容 · N」 title, the
 // truncated/pending hints, and the fallback banner above both when the name
 // layer degraded to the browsed index. The empty state only speaks when BOTH
-// layers came up empty.
+// layers came up empty — and it speaks the right line: 搜索中 / 搜索超时+重试 / 没有匹配.
 function FilesSearchBody({
   result,
   onClear,
@@ -618,10 +646,12 @@ function FilesSearchBody({
         <FilesSearchEmptyState
           pending={result.pending}
           fallback={result.fallback}
+          timedOut={result.contentTimedOut}
+          onRetry={result.retry}
           onClear={onClear}
         />
       ) : null,
-    [bothEmpty, result.pending, result.fallback, onClear],
+    [bothEmpty, result.pending, result.fallback, result.contentTimedOut, result.retry, onClear],
   );
   return (
     <FlatList

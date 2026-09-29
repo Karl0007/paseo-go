@@ -7,6 +7,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { FileSearchSource } from "./file-search";
 import {
   CONTENT_SEARCH_LIMIT,
+  CONTENT_SEARCH_WAIT_MS,
   NAME_SEARCH_LIMIT,
   WORKSPACE_SEARCH_DEBOUNCE_MS,
   isContentSearchUnsupportedError,
@@ -273,6 +274,8 @@ describe("useWorkspaceSearch two-tier pipeline", () => {
     expect(view.result.current).toMatchObject({
       contentHits: [],
       contentPending: false,
+      // KI-18 三态分离: capability-gate silence is NOT a timeout state.
+      contentTimedOut: false,
       pending: false,
     });
     // Next query: name layer still runs, content layer never asks again.
@@ -335,5 +338,101 @@ describe("useWorkspaceSearch two-tier pipeline", () => {
     await runDebounce();
     expect(view.result.current).toMatchObject({ fallback: true, pending: false });
     expect(view.result.current.nameHits.map((hit) => hit.path)).toEqual(["tools/keystore.jks"]);
+  });
+
+  // ---- KI-18: 冷路径超时态 ≠ 空态 ≠ 能力闸静默 --------------------------------
+
+  async function runWaitWindow() {
+    await act(async () => {
+      vi.advanceTimersByTime(CONTENT_SEARCH_WAIT_MS);
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+  }
+
+  it("KI-18: deadline-truncated zero-hit scan commits timeout state, not an empty miss", async () => {
+    // The daemon's own 5s deadline answer for a cold big-repo walk: truncated
+    // with nothing found. Must surface as retryable timeout, never 没有匹配.
+    const { view, nameCalls, contentCalls } = render();
+    act(() => view.rerender({ active: true, query: "apk" }));
+    await runDebounce();
+    await act(async () => {
+      nameCalls[0]?.resolve({ entries: [], error: null });
+    });
+    await act(async () => {
+      contentCalls[0]?.resolve({ matches: [], truncated: true });
+    });
+    expect(view.result.current).toMatchObject({
+      contentHits: [],
+      contentTruncated: true,
+      contentTimedOut: true,
+      contentPending: false,
+      pending: false,
+    });
+  });
+
+  it("KI-18: wait window expiry shows timeout; 重试 re-fires under the seq guard and lands", async () => {
+    const { view, nameCalls, contentCalls } = render();
+    act(() => view.rerender({ active: true, query: "idlecoin" }));
+    await runDebounce();
+    await act(async () => {
+      nameCalls[0]?.resolve({ entries: [], error: null });
+    });
+    expect(view.result.current).toMatchObject({ contentPending: true, contentTimedOut: false });
+    await runWaitWindow();
+    expect(view.result.current).toMatchObject({
+      contentTimedOut: true,
+      contentPending: false,
+      pending: false,
+    });
+    // 重试: same pipeline, fresh seq — timeout state clears immediately.
+    act(() => view.result.current.retry());
+    await act(async () => {
+      await Promise.resolve();
+    });
+    expect(nameCalls).toHaveLength(2);
+    expect(view.result.current).toMatchObject({ pending: true, contentTimedOut: false });
+    await act(async () => {
+      nameCalls[1]?.resolve({ entries: [], error: null });
+    });
+    expect(contentCalls).toHaveLength(2);
+    // The abandoned first attempt can never land (its seq is superseded).
+    await act(async () => {
+      contentCalls[0]?.resolve({
+        matches: [{ path: "stale.ts", line: 1, preview: "stale" }],
+        truncated: false,
+      });
+    });
+    expect(view.result.current.contentHits).toEqual([]);
+    await act(async () => {
+      contentCalls[1]?.resolve({
+        matches: [{ path: "src/coins.ts", line: 3, preview: "const idlecoin = 42" }],
+        truncated: false,
+      });
+    });
+    expect(view.result.current).toMatchObject({
+      contentHits: [{ key: "src/coins.ts:3" }],
+      contentTimedOut: false,
+      contentPending: false,
+      pending: false,
+    });
+  });
+
+  it("KI-18: transient content RPC failure stays silent — timeout is reserved for the wait window", async () => {
+    const { view, nameCalls, contentCalls } = render();
+    act(() => view.rerender({ active: true, query: "apk" }));
+    await runDebounce();
+    await act(async () => {
+      nameCalls[0]?.resolve({ entries: [], error: null });
+    });
+    await act(async () => {
+      contentCalls[0]?.reject(new Error("connection reset"));
+    });
+    expect(view.result.current).toMatchObject({
+      contentHits: [],
+      contentTimedOut: false,
+      contentPending: false,
+      pending: false,
+    });
   });
 });
