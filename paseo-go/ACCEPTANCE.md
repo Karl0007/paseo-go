@@ -75,7 +75,7 @@
 | KI-12                   | 三 tab 顶栏逻辑/高度不统一且随滚动移动：抽 shell-tab-header 等高固定容器，逐屏搬出滚动区（已拍板成卡）                                      | 🔶 代码毕（5c3b1e12，96dp 等高容器+我的标题搬出滚动区），帧待补证轮 |
 | KI-6                    | 文件屏搜索只覆盖已浏览目录：升级两层=全仓模糊文件名（directory_suggestions）+ 内容兜底（workspace.content_search，KI-6S server 层已落）     | 🔶 代码毕（46d20907，WS 探针实证两层），帧待补证轮                  |
 | KI-7                    | git 记录段只显 ahead-of-base：升全量历史+分支/远端关系+Git Graph 式 DAG 泳道（用户二轮拍板）                                                | 🚧 在途（KI7GitGraph）                                              |
-| KI-8                    | 会话屏顶栏信息密度：双行化（分支/远端同步态进第二行，与文件屏头行同构）                                                                     | 📝 `todo/KI8-session-header-two-line.md` 排队（KI-7 后）            |
+| KI-8                    | 会话屏顶栏信息密度：双行化（分支/远端同步态进第二行，与文件屏头行同构）                                                                     | 📝 `todo/KI8-session-header-compact.md` 排队（KI-7 后）             |
 | KI-9                    | 二级屏 hidden-tab 无转场/返回语义混乱：四屏迁 (detail) 根栈真 push+淡入动画+会话菜单收敛两项带 tab 参                                       | 🔶 代码毕（591463b2，grep 残留=0），帧待补证轮                      |
 | KI-13                   | 导入屏切主机后列表残留旧主机数据：切换即清空（render-phase 复位+seq 守卫）                                                                  | 🔶 代码毕（96196756），帧待补证轮                                   |
 
