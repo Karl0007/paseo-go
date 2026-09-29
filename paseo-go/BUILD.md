@@ -33,6 +33,13 @@ ADB="$LOCALAPPDATA/Android/platform-tools/adb.exe"
 "$ADB" -s AHPEBB1826005071 shell dumpsys deviceidle whitelist +sh.paseo.debug   # 装完 APK 后才有意义
 ```
 
+> ⚠ **`stay_on_while_plugged_in 7` = 插电即常亮，是耗电主因（2026-09-29 实锤）**：平板插 PC USB 口
+> 协商输入仅 **2.5W（500mA×5V，dumpsys `Max charging current: 500000`）**，喂不动常亮屏+测试负载
+> （MatePad 亮屏整机 3~5W）→ 连续两天常亮累计净放电，第三次重测当天从 21% 砸到 4%、两次内核 wedge。
+> **纪律**：只在主动测试的时段开常亮，**测完/离开即关**：
+> `adb shell settings put global stay_on_while_plugged_in 0`。长测/挂机一律挂**墙充**（起步 5V2A=10W，
+> 数倍于 PC 口）；`dumpsys battery` 里 `Max charging current` 是判断"这个口到底喂多少瓦"的唯一硬证据。
+
 ## 1. 依赖安装（仓根，一次性）
 
 ```powershell
