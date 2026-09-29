@@ -3,9 +3,11 @@
 // C14 proved the official compact header has no injection point and is ALWAYS
 // visible (shouldShowWorkspaceScreenHeader = !focusMode || isMobile); the C14
 // bottom-coexistence branch was overturned by the C21 ruling — the bar now sits
-// at the very top, height = official compact header (inner 56 + top pad 8 on
-// compact, inner 36 on wide) + status-bar inset, opaque surface0 with the same
-// bottom-border token, so it paints the official header out and its controls
+// at the very top, height = official compact header (KI-8: the inner box is
+// the two-line metric 44/34 + a cover compensation, the bottom edge still
+// pinned at the official header bottom + tab-row cover) + status-bar inset,
+// opaque surface0 with the same bottom-border token, so it paints the official
+// header out and its controls
 // (hamburger drawer, official ⋯, scripts button, explorer toggle) are
 // unreachable BY DESIGN. The official ⋯'s useful half is aggregated into the
 // capsule menu (see session-header/visibility for the matrix): 查看项目文件 /
@@ -13,6 +15,12 @@
 // (detail) files screen with the initial tab (files|diff), the C21 打开文件浏览器
 // row is deleted (same engine, redundant container); the scripts page rides the
 // official startWorkspaceScript/killTerminal RPCs.
+//
+// KI-8 (用户拍板 2026-09-29): the bar is TWO lines — 首行（主字重）`<项目> · <分支>`
+// (项目=壳内既有 workspace label 链；分支=既有 checkout_status 查询，非 git/未回
+// 只显项目名，零占位零骨架), 次行（muted 小字）=会话真标题; 状态点跟首行对齐，
+// 返回/⋯ 位置与命中区不动。内容与高度数学全是纯函数（session-header/
+// compact-rows + compact-rows.test.ts 钉值）。
 //
 // Edge gestures are re-routed for the capsule's whole visible span: the
 // provider's symbol-keyed open-gesture blocker parks the official left-open
@@ -63,11 +71,10 @@ import { useAggregatedAgents, type AggregatedAgent } from "@/hooks/use-aggregate
 import { useSessionStore } from "@/stores/session-store";
 import { useWorkspace } from "@/stores/session-store-hooks";
 import { selectIsCompactFileExplorerOpen, usePanelStore } from "@/stores/panel-store";
-import { deriveSidebarStateBucket } from "@/utils/sidebar-agent-state";
+import { deriveSidebarStateBucket, type SidebarStateBucket } from "@/utils/sidebar-agent-state";
 import { isImportedProviderSession } from "@getpaseo/protocol/agent-labels";
+import { useCheckoutStatusQuery } from "@/git/use-status-query";
 import {
-  HEADER_INNER_HEIGHT,
-  HEADER_INNER_HEIGHT_MOBILE,
   HEADER_TOP_PADDING_MOBILE,
   supportsDesktopPaneSplits,
   WORKSPACE_SECONDARY_HEADER_HEIGHT,
@@ -92,7 +99,19 @@ import {
 import { SessionHeaderScriptsPage } from "@/shell/session-header/scripts-submenu";
 import { SHELL_EDGE_BAND_WIDTH_DP } from "@/shell/session-header/edge-swipe";
 import { useShellEdgeBackGesture } from "@/shell/session-header/use-shell-edge-back-gesture";
-import { tabRowCoverHeightDp } from "@/shell/session-header/tab-row-cover";
+import {
+  TEXT_LINE_HEIGHT_CEILING,
+  tabRowCoverHeightDp,
+} from "@/shell/session-header/tab-row-cover";
+import {
+  SESSION_HEADER_CONTROL_HEIGHT_DP,
+  resolveSessionHeaderBranch,
+  resolveSessionHeaderProjectLabel,
+  resolveSessionHeaderRows,
+  sessionHeaderCoverCompensationDp,
+  sessionHeaderInnerHeightDp,
+  type SessionHeaderRows,
+} from "@/shell/session-header/compact-rows";
 
 /** Stable portal slot: one header capsule app-wide. */
 const SESSION_HEADER_PORTAL_NAME = "paseoGo-session-header";
@@ -275,6 +294,27 @@ function CapsuleInner({
   const stoppable = bucket === "running" || bucket === "needs_input";
   const displayTitle = alias ?? agent.title ?? t("chats.untitled");
 
+  // KI-8 首行数据：项目=壳内既有 workspace label 链（workspace-command-row/
+  // workspace-favorite-row 同源）；分支=既有 checkout_status 查询（文件屏同款，
+  // 零新 RPC、push-driven 缓存；descriptor 未回时 cwd="" → 查询 disabled，
+  // status 恒 null → 只显项目名，不显占位符、不闪骨架）。
+  const checkoutCwd = descriptor?.workspaceDirectory ?? "";
+  const checkoutStatus = useCheckoutStatusQuery({
+    serverId: workspace.serverId,
+    cwd: checkoutCwd,
+  });
+  const headerBranch = resolveSessionHeaderBranch(checkoutStatus.status);
+  const headerProjectLabel = resolveSessionHeaderProjectLabel(descriptor);
+  const headerRows = useMemo(
+    () =>
+      resolveSessionHeaderRows({
+        projectLabel: headerProjectLabel,
+        branch: headerBranch,
+        title: displayTitle,
+      }),
+    [headerProjectLabel, headerBranch, displayTitle],
+  );
+
   const target = useMemo<ShellChatTarget>(
     () => ({ key, serverId: workspace.serverId, agentId: agent.id }),
     [key, workspace.serverId, agent.id],
@@ -313,15 +353,22 @@ function CapsuleInner({
   });
   // The bar IS the header: top-anchored full width, official height + status
   // bar inset + the tab-row cover, opaque surface0 with the shared bottom-border
-  // token.
+  // token. KI-8 裁定②: the inner box really shrinks to the two-line metric
+  // (56→44 / 36→34); the shortfall vs the official header height rides in the
+  // cover padding, so the bar's BOTTOM EDGE stays pinned at the official tab
+  // row's bottom — the opaque span keeps painting header+tab行 out (R2-08③,
+  // FixB4 sliver). paddingBottom keeps the controls + two lines centered in
+  // the inner box, not in the whole bar.
   const barStyle = useMemo(() => {
     const topPad = isCompact ? HEADER_TOP_PADDING_MOBILE : 0;
-    const inner = isCompact ? HEADER_INNER_HEIGHT_MOBILE : HEADER_INNER_HEIGHT;
+    const inner = sessionHeaderInnerHeightDp(isCompact);
+    const underPad = tabRowCover + sessionHeaderCoverCompensationDp(isCompact);
     return [
       styles.bar,
       {
-        height: insets.top + topPad + inner + tabRowCover,
+        height: insets.top + topPad + inner + underPad,
         paddingTop: insets.top + topPad,
+        paddingBottom: underPad,
       },
     ];
   }, [insets.top, isCompact, tabRowCover]);
@@ -428,10 +475,7 @@ function CapsuleInner({
             >
               <ThemedChevronLeft size={20} />
             </Pressable>
-            <Text style={styles.title} numberOfLines={1} testID={`shell-session-title-${key}`}>
-              {displayTitle}
-            </Text>
-            <ChatStatusLight agent={agent} bucket={bucket} />
+            <HeaderRowsText rows={headerRows} agent={agent} bucket={bucket} targetKey={key} />
             <Pressable
               // C33 popover form needs an anchor: the engine measures this button
               // through its trigger ref (the row menus get it from ContextMenuTrigger).
@@ -487,6 +531,50 @@ function CapsuleInner({
   );
 }
 
+// KI-8 双行文本列（自 CapsuleInner 抽出：行态/testID 落点的三元在这里，宿主
+// 组件复杂度留在闸内）。首行=项目·分支（主字重，状态点跟首行对齐——横向仍是
+// 原标题列右缘），次行=会话真标题（muted 小字）单行截断；无项目名（descriptor
+// 未回）时退化为单行=标题，shell-session-title testID 恒落标题文本。
+function HeaderRowsText({
+  rows,
+  agent,
+  bucket,
+  targetKey,
+}: {
+  rows: SessionHeaderRows;
+  agent: AggregatedAgent;
+  bucket: SidebarStateBucket;
+  targetKey: string;
+}) {
+  return (
+    <View style={styles.textColumn}>
+      <View style={styles.primaryRow}>
+        <Text
+          style={styles.primary}
+          numberOfLines={1}
+          testID={
+            rows.secondary !== null
+              ? `shell-session-project-${targetKey}`
+              : `shell-session-title-${targetKey}`
+          }
+        >
+          {rows.primary}
+        </Text>
+        <ChatStatusLight agent={agent} bucket={bucket} />
+      </View>
+      {rows.secondary !== null ? (
+        <Text
+          style={styles.secondary}
+          numberOfLines={1}
+          testID={`shell-session-title-${targetKey}`}
+        >
+          {rows.secondary}
+        </Text>
+      ) : null}
+    </View>
+  );
+}
+
 const styles = StyleSheet.create((theme) => ({
   layer: {
     position: "absolute",
@@ -516,18 +604,36 @@ const styles = StyleSheet.create((theme) => ({
     borderBottomWidth: theme.borderWidth[1],
     borderBottomColor: theme.colors.border,
   },
-  title: {
+  // KI-8 双行文本列：显式 lineHeight（tab-row-cover 同款 1.2 上限）让
+  // base+sm 两行块（17+15=32dp）装得进最紧的 wide inner=34，且不随 Android
+  // fontScale 漂移——compact-rows.test.ts 钉这块算术。
+  textColumn: {
+    flex: 1,
+    minWidth: 0,
+  },
+  primaryRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: theme.spacing[2],
+  },
+  primary: {
     flex: 1,
     fontSize: theme.fontSize.base,
+    lineHeight: Math.ceil(theme.fontSize.base * TEXT_LINE_HEIGHT_CEILING),
     fontWeight: "600",
     color: theme.colors.foreground,
   },
+  secondary: {
+    fontSize: theme.fontSize.sm,
+    lineHeight: Math.ceil(theme.fontSize.sm * TEXT_LINE_HEIGHT_CEILING),
+    color: theme.colors.foregroundMuted,
+  },
   iconButton: {
-    width: 34,
-    height: 34,
+    width: SESSION_HEADER_CONTROL_HEIGHT_DP,
+    height: SESSION_HEADER_CONTROL_HEIGHT_DP,
     alignItems: "center",
     justifyContent: "center",
-    borderRadius: 17,
+    borderRadius: SESSION_HEADER_CONTROL_HEIGHT_DP / 2,
     flexShrink: 0,
   },
   iconButtonPressed: {
