@@ -1,11 +1,11 @@
-// 工作区文件名搜索 (card C9, DESIGN §5/§8): the protocol has NO filename-search RPC —
-// `file_explorer_request` only serves mode list|file (protocol messages.ts), and live
-// probes against both dev daemons (v0.9.2) answer mode:"search" with
-// `unknown_schema` (see card report). Per the C9 ruling the shell therefore filters
-// the ALREADY-LOADED directory tree client-side: everything the session-store
-// explorer cache holds (directories browsed in this app run via the 文件浏览屏).
-// Known limitation, surfaced in the UI hint: 只覆盖已浏览目录 — no repo-wide scan,
-// and none may be invented (content search awaits upstream PR #4659).
+// 浏览目录本地索引 (card C9, DESIGN §5/§8; demoted to FALLBACK by KI-6): since
+// KI-6 the files screen searches the WHOLE repository through the existing
+// `directory_suggestions_request` RPC (see workspace-search.ts Tier 1). This
+// module keeps two jobs: (a) the shared FileSearchHit/row shape + the browsed
+// index (session-store explorer cache = directories opened in this app run),
+// which now serves ONLY the Tier-1-RPC-failure / old-daemon fallback; (b) the
+// pure matcher the fallback filters with. The UI hint states the narrower
+// scope whenever `fallback` is on.
 import { WORKSPACE_EXPLORER_STATE_PREFIX } from "@/file-explorer/state-keys";
 import { normalizeSearchQuery } from "./query";
 
@@ -73,7 +73,8 @@ export function collectBrowsedWorkspaces(
   return out;
 }
 
-function parentDirectoryOf(path: string): string {
+/** Shared with the KI-6 repo-wide search mapping (workspace-search.ts). */
+export function parentDirectoryOf(path: string): string {
   const slash = Math.max(path.lastIndexOf("/"), path.lastIndexOf("\\"));
   if (slash < 0) return ".";
   return slash === 0 ? path.slice(0, 1) : path.slice(0, slash);

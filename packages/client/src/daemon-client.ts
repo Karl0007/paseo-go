@@ -72,6 +72,7 @@ import type {
   GitHubSearchResponse,
   GitHubSearchRequest,
   DirectorySuggestionsResponse,
+  WorkspaceContentSearchResponse,
   PaseoWorktreeListResponse,
   PaseoWorktreeArchiveResponse,
   ProjectIconSource,
@@ -455,6 +456,7 @@ type BranchSuggestionsPayload = BranchSuggestionsResponse["payload"];
 type ForgeSearchPayload = ForgeSearchResponse["payload"];
 type GitHubSearchPayload = GitHubSearchResponse["payload"];
 type DirectorySuggestionsPayload = DirectorySuggestionsResponse["payload"];
+type WorkspaceContentSearchPayload = WorkspaceContentSearchResponse["payload"];
 type PaseoWorktreeListPayload = PaseoWorktreeListResponse["payload"];
 type PaseoWorktreeArchivePayload = PaseoWorktreeArchiveResponse["payload"];
 type CreatePaseoWorktreePayload = Extract<
@@ -4582,6 +4584,29 @@ export class DaemonClient {
       responseType: "directory_suggestions_response",
       // Home-tree scans on large home dirs can take several seconds; don't cut
       // the suggestion request off early (it would surface as an empty list).
+    });
+  }
+
+  // COMPAT(Paseo Go KI-6): pure-add method for workspace.content_search.request
+  // (protocol added 2026-09-29, Paseo Go KI-6S). Daemons older than that answer
+  // rpc_error{requestType:"workspace.content_search.request"}; callers treat that
+  // as "host has no content search" and degrade silently (Paseo Go shell
+  // workspace-search.ts capability gate). Server-side scan caps itself at ~5s;
+  // the 15s client timeout leaves headroom past the deadline + transport.
+  async searchWorkspaceContent(
+    options: { cwd: string; query: string; limit?: number },
+    requestId?: string,
+  ): Promise<WorkspaceContentSearchPayload> {
+    return this.sendCorrelatedSessionRequest({
+      requestId,
+      message: {
+        type: "workspace.content_search.request",
+        cwd: options.cwd,
+        query: options.query,
+        limit: options.limit,
+      },
+      responseType: "workspace.content_search.response",
+      timeout: 15_000,
     });
   }
 

@@ -8,8 +8,8 @@
 // (KI-9 菜单收敛) — an INITIAL value only: tab state stays in-screen (裁定 4:
 // 不入 persist、不进后续 URL 状态).
 // C27 (DESIGN §14.9): the header is a single project-path line (the host › project
-// › workspace breadcrumb was 拍板没有意义), with a 放大镜 morphing into the C9 search
-// bar scoped to THIS workspace's browsed directories; below it a three-segment tab
+// › workspace breadcrumb was 拍板没有意义), with a 放大镜 morphing into the KI-6
+// two-tier search bar (全仓文件名 fuzzy + 内容兜底); below it a three-segment tab
 // row 文件 | diff | git 记录 embeds the official ChangesSurface (the same component
 // the official changes tab mounts, same queries/panel-store data path) and
 // CommitsSection (checkout commits ahead of base). Tab/search state is in-screen
@@ -37,7 +37,7 @@ import { RetainedPanel } from "@/components/retained-panel";
 import { SegmentedControl } from "@/components/ui/segmented-control";
 import { Button } from "@/components/ui/button";
 import { useToast } from "@/contexts/toast-context";
-import { useHosts } from "@/runtime/host-runtime";
+import { useHostRuntimeClient, useHosts } from "@/runtime/host-runtime";
 import { useSessionStore, type ExplorerEntry } from "@/stores/session-store";
 import { useFileExplorerActions } from "@/hooks/use-file-explorer-actions";
 import { buildWorkspaceExplorerStateKey } from "@/file-explorer/state-keys";
@@ -57,12 +57,13 @@ import {
 } from "@/shell/files/files-tabs";
 import { SearchModeBar } from "@/shell/components/search/search-mode-bar";
 import { FileSearchRow } from "@/shell/components/search/file-search-row";
+import { ContentSearchRow } from "@/shell/components/search/content-search-row";
+import { collectBrowsedWorkspaces, type FileSearchHit } from "@/shell/search/file-search";
 import {
-  collectBrowsedWorkspaces,
-  searchFileNames,
-  type FileSearchHit,
-} from "@/shell/search/file-search";
-import { normalizeSearchQuery } from "@/shell/search/query";
+  useWorkspaceSearch,
+  type ContentSearchHit,
+  type WorkspaceSearchResult,
+} from "@/shell/search/workspace-search";
 
 // The official rows set selectedEntryPath on press AND long-press; the chip turns
 // that selection into the shell's 收藏 affordance for the explorer surface.
@@ -193,21 +194,26 @@ function FilesHeader({
   );
 }
 
-// 页内搜索空态 (C27, C9 idiom): miss line + the honest scope note + 清除搜索. The
-// filter only sees directories this app run has browsed IN THIS WORKSPACE (no
-// filename-search RPC upstream — C9 probed it dead). With an empty query the note
-// leads alone.
+// 页内搜索空态 (KI-6 改写): the main 口径 is repo-wide (fuzzy file names, then
+// content fallback), so the old 「只覆盖浏览过的目录」 note退位为 fallback 态说明 —
+// it only shows while the Tier-1 RPC failed / the daemon is old. The miss line
+// waits for `pending` (「没有匹配」 must never flash before the RPC lands). With
+// an empty query the note leads alone.
 function FilesSearchEmptyState({
-  searching,
+  pending,
+  fallback,
   onClear,
 }: {
-  searching: boolean;
+  pending: boolean;
+  fallback: boolean;
   onClear: () => void;
 }) {
   const { t } = useTranslation(SHELL_I18N_NAMESPACE);
   return (
     <View style={styles.searchEmpty} testID="shell-files-search-empty">
-      {searching ? (
+      {pending ? (
+        <LoadingSpinner size="small" color={styles.chipIcon.color} />
+      ) : (
         <>
           <SearchX size={28} color={styles.chipIcon.color} />
           <Text style={styles.searchEmptyTitle}>{t("files.searchEmptyTitle")}</Text>
@@ -215,8 +221,10 @@ function FilesSearchEmptyState({
             {t("files.searchEmptyAction")}
           </Button>
         </>
-      ) : null}
-      <Text style={styles.missing}>{t("files.searchEmptyHint")}</Text>
+      )}
+      <Text style={styles.missing}>
+        {fallback ? t("files.searchFallbackHint") : t("files.searchEmptyHint")}
+      </Text>
     </View>
   );
 }
@@ -337,7 +345,7 @@ export function FilesScreenBody({
     [t, gitDisabled],
   );
 
-  // ---- 页内搜索 (本工作区已浏览目录, C9 姿势) ----------------------------------
+  // ---- 页内搜索 (KI-6 两层: 全仓文件名 fuzzy + 内容兜底) ------------------------
   const search = useFilesWorkspaceSearch({
     serverId,
     hostLabel,
@@ -385,6 +393,13 @@ export function FilesScreenBody({
   );
   const handleOpenHit = useCallback(
     (hit: FileSearchHit) => handleOpenFile(hit.path),
+    [handleOpenFile],
+  );
+  // KI-6 Tier-2: matches.path is workspace-relative "/"-separated — the same
+  // preview contract as an explorer hit. 行定位 is NOT wired (FilePane takes no
+  // line param; known_issue KI-6-line-target): the file opens at its top.
+  const handleOpenContentHit = useCallback(
+    (hit: ContentSearchHit) => handleOpenFile(hit.path),
     [handleOpenFile],
   );
   const addToChat = useShellAddToChat();
@@ -454,10 +469,10 @@ export function FilesScreenBody({
           // 结果替换内容区 (C9 ruling): the retained panels go display:none (state
           // survives), the hit list takes over the body.
           <FilesSearchBody
-            hits={search.hits}
-            searching={search.searching}
+            result={search.result}
             onClear={search.cancel}
             onOpenHit={handleOpenHit}
+            onOpenContentHit={handleOpenContentHit}
           />
         ) : null}
         <FilesTabPanels
@@ -483,10 +498,13 @@ export function FilesScreenBody({
   );
 }
 
-// 页内搜索 state + 索引 (C27 裁定 3): in-screen only (不入 persist). The index is
-// rebuilt from the session-store explorer cache while the bar is open (the
-// C9/C13-F1 writer↔reader contract) and filtered to THIS workspace by the pure
-// builder — the honest scope is 「本工作区已浏览目录」, stated in the empty state.
+// 页内搜索 state (KI-6 两层, in-screen only 不入 persist): Tier-1 = repo-wide
+// fuzzy file names via the existing directory_suggestions RPC (cwd = workspace
+// root, gitignore-aware, entries relative to cwd); Tier-2 = the workspace
+// content_search RPC, auto-fired only on a zero-hit name layer and gated on its
+// rpc_error; the C9/C13-F1 browsed-directory index (rebuilt from the session-
+// store explorer cache while the bar is open) is the Tier-1-failure fallback.
+// The RPC pipeline + seq guard live in useWorkspaceSearch (unit-tested).
 function useFilesWorkspaceSearch(input: {
   serverId: string;
   hostLabel: string;
@@ -500,7 +518,7 @@ function useFilesWorkspaceSearch(input: {
   const fileExplorer = useSessionStore((state) =>
     serverId ? state.sessions[serverId]?.fileExplorer : undefined,
   );
-  const source = useMemo(
+  const fallbackSource = useMemo(
     () =>
       active && fileExplorer
         ? buildWorkspaceFileSearchSource({
@@ -514,47 +532,93 @@ function useFilesWorkspaceSearch(input: {
         : null,
     [active, fileExplorer, serverId, hostLabel, workspaceId, workspaceName, workspaceRoot],
   );
-  const hits = useMemo(
-    () => (active && source ? searchFileNames([source], query) : []),
-    [active, source, query],
+  const client = useHostRuntimeClient(serverId);
+  const ctx = useMemo(
+    () => ({ serverId, hostLabel, workspaceId, workspaceName, workspaceRoot }),
+    [serverId, hostLabel, workspaceId, workspaceName, workspaceRoot],
   );
-  const searching = active && normalizeSearchQuery(query).length > 0;
+  const result = useWorkspaceSearch({ active, query, client, fallbackSource, ctx });
   const open = useCallback(() => setActive(true), []);
   const cancel = useCallback(() => {
     setActive(false);
     setQuery("");
   }, []);
-  return { active, query, setQuery, open, cancel, hits, searching };
+  return { active, query, setQuery, open, cancel, result };
 }
 
-// 命中列表 (C9 ruling): takes over the body area while search is open; a hit
-// pushes the C6 preview (same route as an explorer tap).
+// 命中列表 (KI-6): takes over the body area while search is open. 文件名 hits are
+// the FlatList itself (a hit pushes the C6 preview, same route as an explorer
+// tap); the 内容 section rides the footer with its 「文件内容 · N」 title, the
+// truncated/pending hints, and the fallback banner above both when the name
+// layer degraded to the browsed index. The empty state only speaks when BOTH
+// layers came up empty.
 function FilesSearchBody({
-  hits,
-  searching,
+  result,
   onClear,
   onOpenHit,
+  onOpenContentHit,
 }: {
-  hits: FileSearchHit[];
-  searching: boolean;
+  result: WorkspaceSearchResult;
   onClear: () => void;
   onOpenHit: (hit: FileSearchHit) => void;
+  onOpenContentHit: (hit: ContentSearchHit) => void;
 }) {
+  const { t } = useTranslation(SHELL_I18N_NAMESPACE);
   const renderRow = useCallback(
     ({ item }: { item: FileSearchHit }) => <FileSearchRow hit={item} onOpen={onOpenHit} />,
     [onOpenHit],
   );
   const keyExtractor = useCallback((hit: FileSearchHit) => hit.key, []);
+  const listHeader = useMemo(
+    () =>
+      result.fallback ? (
+        <Text style={styles.searchFallbackBanner} testID="shell-files-search-fallback">
+          {t("files.searchFallbackHint")}
+        </Text>
+      ) : null,
+    [result.fallback, t],
+  );
+  const contentSection = useMemo(
+    () =>
+      result.contentPending || result.contentHits.length > 0 ? (
+        <View testID="shell-files-search-content">
+          <Text style={styles.searchSectionTitle}>
+            {t("files.searchContentTitle", { count: result.contentHits.length })}
+          </Text>
+          {result.contentTruncated ? (
+            <Text style={styles.searchSectionHint}>{t("files.searchContentTruncated")}</Text>
+          ) : null}
+          {result.contentPending ? (
+            <Text style={styles.searchSectionHint}>{t("files.searchContentPending")}</Text>
+          ) : null}
+          {result.contentHits.map((hit) => (
+            <ContentSearchRow key={hit.key} hit={hit} onOpen={onOpenContentHit} />
+          ))}
+        </View>
+      ) : null,
+    [result.contentHits, result.contentPending, result.contentTruncated, onOpenContentHit, t],
+  );
+  const bothEmpty =
+    result.nameHits.length === 0 && result.contentHits.length === 0 && !result.contentPending;
   const listEmpty = useMemo(
-    () => <FilesSearchEmptyState searching={searching} onClear={onClear} />,
-    [searching, onClear],
+    () =>
+      bothEmpty ? (
+        <FilesSearchEmptyState
+          pending={result.pending}
+          fallback={result.fallback}
+          onClear={onClear}
+        />
+      ) : null,
+    [bothEmpty, result.pending, result.fallback, onClear],
   );
   return (
     <FlatList
-      data={hits}
+      data={result.nameHits}
       keyExtractor={keyExtractor}
       renderItem={renderRow}
       contentContainerStyle={styles.searchListContent}
+      ListHeaderComponent={listHeader}
+      ListFooterComponent={contentSection}
       ListEmptyComponent={listEmpty}
       testID="shell-files-search-results"
     />
@@ -806,6 +870,27 @@ const styles = StyleSheet.create((theme) => ({
   },
   searchListContent: {
     paddingBottom: theme.spacing[6],
+  },
+  searchFallbackBanner: {
+    paddingHorizontal: theme.spacing[4],
+    paddingTop: theme.spacing[3],
+    paddingBottom: theme.spacing[1],
+    fontSize: theme.fontSize.sm,
+    color: theme.colors.statusWarning,
+  },
+  searchSectionTitle: {
+    paddingHorizontal: theme.spacing[4],
+    paddingTop: theme.spacing[4],
+    paddingBottom: theme.spacing[1],
+    fontSize: theme.fontSize.sm,
+    fontWeight: theme.fontWeight.semibold,
+    color: theme.colors.foregroundMuted,
+  },
+  searchSectionHint: {
+    paddingHorizontal: theme.spacing[4],
+    paddingBottom: theme.spacing[1],
+    fontSize: theme.fontSize.sm,
+    color: theme.colors.foregroundMuted,
   },
   searchEmpty: {
     alignItems: "center",
