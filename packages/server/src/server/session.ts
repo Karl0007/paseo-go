@@ -29,6 +29,7 @@ import {
   type WorkspaceScriptStopRequest,
   type CloseItemsRequest,
   type DirectorySuggestionsRequest,
+  type WorkspaceContentSearchRequest,
   type ProjectPlacementPayload,
   type WorkspaceSetupSnapshot,
   type WorkspaceDescriptorPayload,
@@ -213,6 +214,7 @@ import {
   searchDirectoryEntries,
   WORKSPACE_SEARCH_HIDDEN_DIRECTORIES,
 } from "../utils/directory-suggestions.js";
+import { searchWorkspaceContent } from "./workspace/content-search.js";
 import type { CheckoutDiffManager } from "./checkout-diff-manager.js";
 import type { Resolvable } from "./speech/provider-resolver.js";
 import type { SpeechReadinessSnapshot } from "./speech/speech-runtime.js";
@@ -2956,6 +2958,8 @@ export class Session {
         return this.handleProjectIconGetRequest(msg.projectId, msg.requestId);
       case "file_download_token_request":
         return this.workspaceFilesSession.handleFileDownloadTokenRequest(msg);
+      case "workspace.content_search.request":
+        return this.handleWorkspaceContentSearchRequest(msg);
       case "file.upload.request":
         this.workspaceFilesSession.handleFileUploadRequest(msg, this.delivery);
         return undefined;
@@ -5076,6 +5080,25 @@ export class Session {
         },
       });
     }
+  }
+
+  private async handleWorkspaceContentSearchRequest(
+    msg: WorkspaceContentSearchRequest,
+  ): Promise<void> {
+    const result = await searchWorkspaceContent({
+      root: expandTilde(msg.cwd),
+      query: msg.query,
+      limit: msg.limit,
+    });
+    this.emit({
+      type: "workspace.content_search.response",
+      payload: {
+        matches: result.matches,
+        truncated: result.truncated,
+        elapsedMs: result.elapsedMs,
+        requestId: msg.requestId,
+      },
+    });
   }
 
   private async handlePaseoWorktreeListRequest(

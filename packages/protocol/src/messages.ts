@@ -2486,6 +2486,19 @@ export const DirectorySuggestionsRequestSchema = z.object({
   requestId: z.string(),
 });
 
+// COMPAT(workspaceContentSearch): added 2026-09-29 (Paseo Go KI-6S). Pure-add
+// RPC pair; daemons older than the Paseo Go content-search build reject this
+// type at inbound validation, so clients must gate the request (rpc_error on
+// older hosts is expected and non-fatal). Searches file contents under `cwd`
+// for a case-insensitive substring; `limit` caps returned matches.
+export const WorkspaceContentSearchRequestSchema = z.object({
+  type: z.literal("workspace.content_search.request"),
+  cwd: z.string(),
+  query: z.string(),
+  limit: z.number().int().min(1).max(60).optional(),
+  requestId: z.string(),
+});
+
 export const PaseoWorktreeListRequestSchema = z.object({
   type: z.literal("paseo_worktree_list_request"),
   cwd: z.string().optional(),
@@ -3316,6 +3329,7 @@ export const SessionInboundMessageSchema = z.discriminatedUnion("type", [
   ForgeSearchRequestSchema,
   GitHubSearchRequestSchema,
   DirectorySuggestionsRequestSchema,
+  WorkspaceContentSearchRequestSchema,
   PaseoWorktreeListRequestSchema,
   PaseoWorktreeArchiveRequestSchema,
   CreatePaseoWorktreeRequestSchema,
@@ -5916,6 +5930,27 @@ export const DirectorySuggestionsResponseSchema = z.object({
   }),
 });
 
+export const WorkspaceContentSearchMatchSchema = z.object({
+  // Path relative to the request cwd, "/"-separated.
+  path: z.string(),
+  // 1-based line number of the match.
+  line: z.number().int().positive(),
+  // Matched line, trimmed, at most 120 characters.
+  preview: z.string(),
+});
+
+export const WorkspaceContentSearchResponseSchema = z.object({
+  type: z.literal("workspace.content_search.response"),
+  payload: z.object({
+    matches: z.array(WorkspaceContentSearchMatchSchema),
+    // True when the scan stopped early (match limit, byte budget, or
+    // deadline); the result set is then incomplete, never a total.
+    truncated: z.boolean(),
+    elapsedMs: z.number(),
+    requestId: z.string(),
+  }),
+});
+
 const PaseoWorktreeSchema = z.object({
   worktreePath: z.string(),
   createdAt: z.string(),
@@ -6918,6 +6953,7 @@ export const SessionOutboundMessageSchema = z.discriminatedUnion("type", [
   ForgeSearchResponseSchema,
   GitHubSearchResponseSchema,
   DirectorySuggestionsResponseSchema,
+  WorkspaceContentSearchResponseSchema,
   PaseoWorktreeListResponseSchema,
   PaseoWorktreeArchiveResponseSchema,
   CreatePaseoWorktreeResponseSchema,
@@ -7331,6 +7367,9 @@ export type ChangeRequestCheckoutSource = z.infer<typeof ChangeRequestCheckoutSo
 export type CreatePaseoWorktreeRequest = z.infer<typeof CreatePaseoWorktreeRequestSchema>;
 export type DirectorySuggestionsRequest = z.infer<typeof DirectorySuggestionsRequestSchema>;
 export type DirectorySuggestionsResponse = z.infer<typeof DirectorySuggestionsResponseSchema>;
+export type WorkspaceContentSearchRequest = z.infer<typeof WorkspaceContentSearchRequestSchema>;
+export type WorkspaceContentSearchMatch = z.infer<typeof WorkspaceContentSearchMatchSchema>;
+export type WorkspaceContentSearchResponse = z.infer<typeof WorkspaceContentSearchResponseSchema>;
 export type PaseoWorktreeListRequest = z.infer<typeof PaseoWorktreeListRequestSchema>;
 export type PaseoWorktreeListResponse = z.infer<typeof PaseoWorktreeListResponseSchema>;
 export type PaseoWorktreeArchiveRequest = z.infer<typeof PaseoWorktreeArchiveRequestSchema>;
