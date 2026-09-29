@@ -2311,6 +2311,64 @@ export const CheckoutCommitsListRequestSchema = z.object({
   requestId: z.string(),
 });
 
+// COMPAT(checkoutHistoryList): added 2026-09-29 (Paseo Go KI-7). Pure-add
+// RPC pair; daemons older than the Paseo Go commit-history build reject this
+// type at inbound validation, so clients must gate the request (rpc_error on
+// older hosts is expected and non-fatal). Lists the full commit history
+// reachable from HEAD in topological order, paged by commit count. Each entry
+// carries Git-Graph-style lane geometry computed server-side so the shell
+// draws the DAG without running any layout algorithm of its own.
+export const CheckoutHistoryRefSchema = z.object({
+  name: z.string(),
+  // "head": the ref HEAD points at — name is the branch name (prefix stripped),
+  // or the literal "HEAD" when detached. "local"/"remote"/"tag": the other
+  // decorate tokens with refs/heads/, refs/remotes/, refs/tags/ stripped.
+  kind: z.enum(["head", "local", "remote", "tag"]),
+});
+
+export const CheckoutHistoryEdgeSchema = z.object({
+  // Lanes are 0-based. "fork": a curve leaving THIS entry's dot and arriving
+  // at column toLane on the next row (a second parent continuing down its own
+  // lane). "merge": a curve descending in column fromLane and terminating on
+  // THIS entry's dot (a lane converging at its branch point).
+  fromLane: z.number().int().min(0),
+  toLane: z.number().int().min(0),
+  kind: z.enum(["fork", "merge"]),
+});
+
+export const CheckoutHistoryEntrySchema = z.object({
+  sha: z.string(),
+  shortSha: z.string(),
+  subject: z.string(),
+  authorName: z.string(),
+  // Author date, ISO 8601 with offset (git --date=iso-strict).
+  dateISO: z.string(),
+  refs: z.array(CheckoutHistoryRefSchema),
+  // Column of this commit's dot; lane 0 = HEAD's mainline. Allocation is a
+  // pure function of HEAD's history walked from the top, so lane numbers are
+  // stable across pages (the server re-walks the prefix for every page).
+  lane: z.number().int().min(0),
+  // "merge": >=2 parents (dot drawn as a merge marker; fork edges depart here).
+  // "edge": single-parent commit where another lane converges (branch point).
+  // "dot": plain commit with the lane continuing straight through.
+  topology: z.enum(["dot", "merge", "edge"]),
+  edges: z.array(CheckoutHistoryEdgeSchema),
+  // True when this commit's own lane terminates at this row (root commit).
+  // Lets the shell stop drawing the vertical segment without knowing parents.
+  laneEnds: z.boolean(),
+});
+
+export const CheckoutHistoryListRequestSchema = z.object({
+  type: z.literal("checkout.history.list.request"),
+  cwd: z.string(),
+  // Page window over the topological commit list. skip counts commits, not
+  // graph rows (rows and entries correspond 1:1). The server clamps limit to
+  // <=200 and defaults it to 50.
+  limit: z.number().int().min(1).max(200).optional(),
+  skip: z.number().int().min(0).optional(),
+  requestId: z.string(),
+});
+
 export const CheckoutCommitFileDiffRequestSchema = z.object({
   type: z.literal("checkout.commits.file_diff.request"),
   cwd: z.string(),
@@ -3314,6 +3372,7 @@ export const SessionInboundMessageSchema = z.discriminatedUnion("type", [
   CheckoutForgeSetAutoMergeRequestSchema,
   CheckoutGithubSetAutoMergeRequestSchema,
   CheckoutCommitsListRequestSchema,
+  CheckoutHistoryListRequestSchema,
   CheckoutCommitFileDiffRequestSchema,
   CheckoutForgeGetCheckDetailsRequestSchema,
   CheckoutGithubGetCheckDetailsRequestSchema,
@@ -5556,6 +5615,33 @@ export const CheckoutCommitsListResponseSchema = z.object({
   }),
 });
 
+export const CheckoutHistoryListResponseSchema = z.object({
+  type: z.literal("checkout.history.list.response"),
+  payload: z.object({
+    cwd: z.string(),
+    // False when cwd is not inside a git work tree. A git repo with no commits
+    // yet is isGit:true with an empty entries list — an empty repo is not
+    // "not git".
+    isGit: z.boolean(),
+    entries: z.array(CheckoutHistoryEntrySchema),
+    // True when commits remain after this page (the shell may request the next
+    // one). Walking is capped server-side; a capped walk reports false.
+    hasMore: z.boolean(),
+    // Branch/remote sync state, mirroring checkout_status so the history pane
+    // is self-describing. The Paseo Go shell header reads the EXISTING
+    // checkout_status query instead, keeping the wire at zero extra RPCs.
+    currentBranch: z.string().nullable(),
+    // Full upstream ref as checkout_status reports it ("refs/remotes/origin/
+    // main"); null when the branch has no upstream.
+    upstreamRef: z.string().nullable(),
+    aheadOfOrigin: z.number().nullable(),
+    behindOfOrigin: z.number().nullable(),
+    hasRemote: z.boolean(),
+    error: CheckoutErrorSchema.nullable(),
+    requestId: z.string(),
+  }),
+});
+
 export const CheckoutCommitFileDiffResponseSchema = z.object({
   type: z.literal("checkout.commits.file_diff.response"),
   payload: z.object({
@@ -6938,6 +7024,7 @@ export const SessionOutboundMessageSchema = z.discriminatedUnion("type", [
   CheckoutForgeSetAutoMergeResponseSchema,
   CheckoutGithubSetAutoMergeResponseSchema,
   CheckoutCommitsListResponseSchema,
+  CheckoutHistoryListResponseSchema,
   CheckoutCommitFileDiffResponseSchema,
   CheckoutForgeGetCheckDetailsResponseSchema,
   CheckoutGithubGetCheckDetailsResponseSchema,
@@ -7297,6 +7384,11 @@ export type CheckoutCommitFile = z.infer<typeof CheckoutCommitFileSchema>;
 export type CheckoutCommit = z.infer<typeof CheckoutCommitSchema>;
 export type CheckoutCommitsListRequest = z.infer<typeof CheckoutCommitsListRequestSchema>;
 export type CheckoutCommitsListResponse = z.infer<typeof CheckoutCommitsListResponseSchema>;
+export type CheckoutHistoryRef = z.infer<typeof CheckoutHistoryRefSchema>;
+export type CheckoutHistoryEdge = z.infer<typeof CheckoutHistoryEdgeSchema>;
+export type CheckoutHistoryEntry = z.infer<typeof CheckoutHistoryEntrySchema>;
+export type CheckoutHistoryListRequest = z.infer<typeof CheckoutHistoryListRequestSchema>;
+export type CheckoutHistoryListResponse = z.infer<typeof CheckoutHistoryListResponseSchema>;
 export type CheckoutCommitFileDiffRequest = z.infer<typeof CheckoutCommitFileDiffRequestSchema>;
 export type CheckoutCommitFileDiffResponse = z.infer<typeof CheckoutCommitFileDiffResponseSchema>;
 export type ParsedDiffFile = z.infer<typeof ParsedDiffFileSchema>;

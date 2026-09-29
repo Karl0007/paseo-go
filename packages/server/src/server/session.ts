@@ -215,6 +215,7 @@ import {
   WORKSPACE_SEARCH_HIDDEN_DIRECTORIES,
 } from "../utils/directory-suggestions.js";
 import { searchWorkspaceContent } from "./workspace/content-search.js";
+import { handleCheckoutHistoryListRequest } from "./workspace/commit-history.js";
 import type { CheckoutDiffManager } from "./checkout-diff-manager.js";
 import type { Resolvable } from "./speech/provider-resolver.js";
 import type { SpeechReadinessSnapshot } from "./speech/speech-runtime.js";
@@ -2802,6 +2803,8 @@ export class Session {
         return this.checkoutSession.handleStatusRequest(msg);
       case "checkout.commits.list.request":
         return this.checkoutSession.handleCommitsListRequest(msg);
+      case "checkout.history.list.request":
+        return handleCheckoutHistoryListRequest({ emit: (message) => this.emit(message) }, msg);
       case "checkout.commits.file_diff.request":
         return this.checkoutSession.handleCommitFileDiffRequest(msg);
       case "validate_branch_request":

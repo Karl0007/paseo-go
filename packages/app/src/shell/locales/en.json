@@ -237,6 +237,12 @@
     "searchContentTitle": "File content · {{count}}",
     "searchContentTruncated": "Results truncated",
     "searchContentPending": "Searching file contents…",
+    "history": {
+      "empty": "No commits in this repository yet.",
+      "allLoaded": "All commit history loaded",
+      "loadFailed": "Failed to load commit history",
+      "retry": "Retry"
+    },
     "menu": {
       "favorite": "Favorite",
       "unfavorite": "Remove favorite",

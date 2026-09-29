@@ -64,6 +64,8 @@ import {
   type ContentSearchHit,
   type WorkspaceSearchResult,
 } from "@/shell/search/workspace-search";
+import { useCommitHistory, type SyncStatusInput } from "@/shell/files/commit-history";
+import { CommitHistoryList } from "@/shell/files/commit-history-list";
 
 // The official rows set selectedEntryPath on press AND long-press; the chip turns
 // that selection into the shell's 收藏 affordance for the explorer surface.
@@ -229,47 +231,56 @@ function FilesSearchEmptyState({
   );
 }
 
-// git 记录段: the official CommitsSection (checkout history ahead of base, with
-// its own skeleton/error/noneAhead states). Its rows only expose onPress and the
-// body is off-limits to this card, so the commit-diff panel (which lives in the
-// official workspace-tab layout this screen has no handle on) is NOT wired —
-// pressing a row copies its full sha (C27 ruling's 降级, recorded in the card
-// report). The capability gate reads the SAME serverInfo.features flags
-// useCheckoutCommitsQuery gates on, so the section never renders as a blank pane.
+// git 记录段 (KI-7 二轮拍板 = Git Graph DAG): the shell-side CommitHistoryList —
+// full HEAD history over the pure-add checkout.history.list RPC, drawn with a
+// react-native-svg lane column (server-computed geometry), ref badges inline
+// and the sync header from the EXISTING checkout_status query (zero new RPCs).
+// Capability gate: an old daemon answers rpc_error{requestType:
+// checkout.history.list.request} → fall back to the untouched ahead-of-base
+// CommitsSection path below. Row press keeps the C27 depth (copy full sha; the
+// commit-diff panel lives in the official workspace-tab layout this screen has
+// no handle on — known_issue in the card report).
 function GitLogPane({
   serverId,
   cwd,
+  status,
   onCommitPress,
 }: {
   serverId: string;
   cwd: string;
+  status: SyncStatusInput | null;
   onCommitPress: (sha: string) => void;
 }) {
   const { t } = useTranslation(SHELL_I18N_NAMESPACE);
+  const client = useHostRuntimeClient(serverId);
+  const history = useCommitHistory({ serverId, client, cwd });
   const [collapsed, setCollapsed] = useState(false);
   const commitsSupported = useSessionStore(
     (state) =>
       state.sessions[serverId]?.serverInfo?.features?.commitsList === true &&
       state.sessions[serverId]?.serverInfo?.features?.commitBaseClassification === true,
   );
-  if (!commitsSupported) {
+  if (history.unsupported) {
+    if (!commitsSupported) {
+      return (
+        <View style={styles.missingWrap} testID="shell-files-commits-unsupported">
+          <Text style={styles.missing}>{t("files.commitsUnsupported")}</Text>
+        </View>
+      );
+    }
     return (
-      <View style={styles.missingWrap} testID="shell-files-commits-unsupported">
-        <Text style={styles.missing}>{t("files.commitsUnsupported")}</Text>
-      </View>
+      <ScrollView style={styles.gitScroll} testID="shell-files-git-pane">
+        <CommitsSection
+          serverId={serverId}
+          cwd={cwd}
+          onCommitPress={onCommitPress}
+          collapsed={collapsed}
+          onCollapsedChange={setCollapsed}
+        />
+      </ScrollView>
     );
   }
-  return (
-    <ScrollView style={styles.gitScroll} testID="shell-files-git-pane">
-      <CommitsSection
-        serverId={serverId}
-        cwd={cwd}
-        onCommitPress={onCommitPress}
-        collapsed={collapsed}
-        onCollapsedChange={setCollapsed}
-      />
-    </ScrollView>
-  );
+  return <CommitHistoryList history={history} status={status} onCommitPress={onCommitPress} />;
 }
 
 export function FilesScreenBody({
@@ -483,6 +494,7 @@ export function FilesScreenBody({
           workspaceId={workspaceId}
           rootPath={rootPath}
           hasWorkspace={hasWorkspace}
+          status={checkoutStatus.status}
           workspacesHydrated={workspacesHydrated}
           notFoundLabel={t("files.notFound")}
           selectedEntry={selectedEntry}
@@ -641,6 +653,7 @@ function FilesTabPanels({
   workspaceId,
   rootPath,
   hasWorkspace,
+  status,
   workspacesHydrated,
   notFoundLabel,
   selectedEntry,
@@ -657,6 +670,7 @@ function FilesTabPanels({
   serverId: string;
   workspaceId: string;
   rootPath: string;
+  status: SyncStatusInput | null;
   hasWorkspace: boolean;
   workspacesHydrated: boolean;
   notFoundLabel: string;
@@ -722,7 +736,12 @@ function FilesTabPanels({
       {visited.git ? (
         <RetainedPanel active={activeTab === "git" && !searchActive}>
           {hasWorkspace && serverId ? (
-            <GitLogPane serverId={serverId} cwd={rootPath} onCommitPress={onCommitPress} />
+            <GitLogPane
+              serverId={serverId}
+              cwd={rootPath}
+              status={status}
+              onCommitPress={onCommitPress}
+            />
           ) : (
             <FilesPaneState
               serverId={serverId}

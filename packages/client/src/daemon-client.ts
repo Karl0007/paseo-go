@@ -73,6 +73,7 @@ import type {
   GitHubSearchRequest,
   DirectorySuggestionsResponse,
   WorkspaceContentSearchResponse,
+  CheckoutHistoryListResponse,
   PaseoWorktreeListResponse,
   PaseoWorktreeArchiveResponse,
   ProjectIconSource,
@@ -457,6 +458,7 @@ type ForgeSearchPayload = ForgeSearchResponse["payload"];
 type GitHubSearchPayload = GitHubSearchResponse["payload"];
 type DirectorySuggestionsPayload = DirectorySuggestionsResponse["payload"];
 type WorkspaceContentSearchPayload = WorkspaceContentSearchResponse["payload"];
+type CheckoutHistoryListPayload = CheckoutHistoryListResponse["payload"];
 type PaseoWorktreeListPayload = PaseoWorktreeListResponse["payload"];
 type PaseoWorktreeArchivePayload = PaseoWorktreeArchiveResponse["payload"];
 type CreatePaseoWorktreePayload = Extract<
@@ -4165,6 +4167,34 @@ export class DaemonClient {
       throw new Error(payload.error.message);
     }
     return { file: payload.file };
+  }
+
+  // COMPAT(Paseo Go KI-7): pure-add method for checkout.history.list.request
+  // (protocol added 2026-09-29, Paseo Go KI-7). Daemons older than that answer
+  // rpc_error{requestType:"checkout.history.list.request"}; the Paseo Go shell
+  // treats that as "host has no full-history RPC" and falls back to the
+  // ahead-of-base CommitsSection (shell/files/commit-history.ts capability
+  // gate). The server caps its walk at 10k commits; 30s covers the 15s log
+  // budget plus the plumbing probes.
+  async listCheckoutHistory(
+    options: { cwd: string; limit?: number; skip?: number },
+    requestId?: string,
+  ): Promise<CheckoutHistoryListPayload> {
+    const payload =
+      await this.sendNamespacedCorrelatedSessionRequest<"checkout.history.list.response">({
+        requestId,
+        message: {
+          type: "checkout.history.list.request",
+          cwd: options.cwd,
+          limit: options.limit,
+          skip: options.skip,
+        },
+        timeout: 30_000,
+      });
+    if (payload.error) {
+      throw new Error(payload.error.message);
+    }
+    return payload;
   }
 
   async checkoutPrCreate(

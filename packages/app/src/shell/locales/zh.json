@@ -237,6 +237,12 @@
     "searchContentTitle": "文件内容 · {{count}}",
     "searchContentTruncated": "结果已截断",
     "searchContentPending": "正在搜索文件内容…",
+    "history": {
+      "empty": "该仓库还没有提交。",
+      "allLoaded": "已加载全部提交历史",
+      "loadFailed": "提交历史加载失败",
+      "retry": "重试"
+    },
     "menu": {
       "favorite": "收藏",
       "unfavorite": "取消收藏",
