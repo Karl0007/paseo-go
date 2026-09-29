@@ -3,6 +3,12 @@
 > 本机实测通过（2026-09-25，Windows 11 / Node v24.13.0 / 华为 MatePad BRT-W09）。
 > 后续所有卡按此闭环执行：改代码 → metro 热更或重打 APK → adb 装机 → adb 截图 → 读图。
 
+## 证据与发布镜像纪律（2026-09-29 起）
+
+- **证据（截图/帧/dump）= 本地档案**：仍存 `paseo-go/evidence/<卡号>/` 并在报告引用路径，但**不入库**（目录已 gitignore；历史里的证据已于同日从公开镜像剥离）。审计=本机磁盘 + 报告 JSON。
+- **公开镜像**：`github.com/Karl0007/paseo-go`（public）。**单向重放**：dev 仓 → `release/make-public-mirror.sh`（tarball 根 + `format-patch --binary -- . ':(exclude)paseo-go/evidence'` 重放）→ push。**永不反向 push 镜像**；merge upstream 只在 dev 仓做。发布前重跑脚本=镜像与 dev 同步且自动无证据。
+- 临时产物（`.tmp/`、`packages/app/.tmp/`、`packages/app/packages/`）已 gitignore，禁止再入库。
+
 ## 0. 本机环境事实（先读，省一半坑）
 
 | 项               | 值                                                                                                                                                                                                                                   |
