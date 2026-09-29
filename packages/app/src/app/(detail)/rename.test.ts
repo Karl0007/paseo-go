@@ -7,13 +7,10 @@
 import { describe, expect, it, vi } from "vitest";
 
 // The pure exports need no surface; mock what the screen module pulls in around
-// them (the global expo-router double from vitest.setup stays in place).
+// them (the global expo-router double from vitest.setup stays in place — KI-9's
+// detailBack runs through it, no @react-navigation surface left on this screen).
 vi.mock("@/components/ui/button", () => ({ Button: () => null }));
 vi.mock("@/components/ui/text-input", () => ({ EditingTextInput: () => null }));
-vi.mock("@react-navigation/native", () => ({
-  useFocusEffect: () => {},
-  useNavigation: () => ({ navigate: vi.fn() }),
-}));
 
 import { createRenameScreenHandlers, resolveRenameTarget } from "./rename";
 

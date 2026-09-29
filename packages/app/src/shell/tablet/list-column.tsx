@@ -22,14 +22,22 @@
 // Selection (DESIGN-tablet §3.2 「选中态单一真相」): the route-derived agent key is
 // computed ONCE here and fed to the chats/workspace bodies — rows and rail share the
 // same pathname-derived truth, no selection store.
-import React, { useState } from "react";
-import { View } from "react-native";
+// KI-9 切栏淡入: the pane opacity is no longer a 0/1 style flip — each visited
+// section owns an Animated.Value (created at 0; a first visit's mount timing to
+// 1 IS its fade-in) and a section switch runs the pure `paneFadeTargets` table
+// through Animated.timing(SECTION_FADE_MS), i.e. the outgoing pane crossfades
+// under the incoming one. Keep-alive is untouched: panes never unmount, only
+// opacity animates. pointerEvents flips synchronously, so a fading-out pane can
+// never eat touches.
+import React, { useEffect, useRef, useState } from "react";
+import { Animated, View } from "react-native";
 import { StyleSheet } from "react-native-unistyles";
 import { ChatsScreenBody } from "@/shell/components/chats-screen-body";
 import { MeScreenBody } from "@/shell/components/me-screen-body";
 import { WorkspaceScreenBody } from "@/shell/components/workspace-screen-body";
 import { useTabletColumns } from "./form-factor";
 import { TABLET_SECTIONS } from "./nav-rail";
+import { paneFadeTargets, SECTION_FADE_MS } from "./section-fade";
 import type { TabletSection } from "./split-predicates";
 import { useTabletSelectedAgentKey } from "./use-tablet-selection";
 
@@ -45,20 +53,42 @@ export function TabletListColumn({ section }: { section: TabletSection }) {
     // no effect round-trip, so a rail tap mounts the body in the SAME commit.
     setVisited((prev) => (prev.includes(section) ? prev : [...prev, section]));
   }
+  // One Animated.Value per section, created at 0 on first visit (ref-guarded, so
+  // the render below and the effect animate the SAME instance); the effect drives
+  // every visited pane toward the pure target table.
+  const fadeValues = useRef<Partial<Record<TabletSection, Animated.Value>>>({});
+  const fadeValueFor = (pane: TabletSection) => {
+    let value = fadeValues.current[pane];
+    if (!value) {
+      value = new Animated.Value(0);
+      fadeValues.current[pane] = value;
+    }
+    return value;
+  };
+  useEffect(() => {
+    const targets = paneFadeTargets(visited, section);
+    for (const visitedSection of visited) {
+      Animated.timing(fadeValueFor(visitedSection), {
+        toValue: targets[visitedSection],
+        duration: SECTION_FADE_MS,
+        useNativeDriver: true,
+      }).start();
+    }
+  }, [section, visited]);
   return (
     <View style={[styles.column, { width: list }]} testID="shell-tablet-list-column">
       {TABLET_SECTIONS.map((meta) => {
         if (!visited.includes(meta.section)) return null;
         const active = meta.section === section;
         return (
-          <View
+          <Animated.View
             key={meta.section}
             // Hidden panes must not eat touches (they sit under the active one).
             pointerEvents={active ? "auto" : "none"}
-            style={[styles.pane, active ? styles.paneActive : styles.paneHidden]}
+            style={[styles.pane, { opacity: fadeValueFor(meta.section) }]}
           >
             {renderSectionBody(meta.section, selectedAgentKey)}
-          </View>
+          </Animated.View>
         );
       })}
     </View>
@@ -79,19 +109,14 @@ const styles = StyleSheet.create((theme) => ({
     borderRightWidth: theme.borderWidth[1],
     borderRightColor: theme.colors.border,
   },
-  // Overlay panes: all visited sections fill the column; the inactive ones are
-  // transparent (never `display: "none"` — GONE resets list scroll offsets, see header).
+  // Overlay panes: all visited sections fill the column; opacity rides the
+  // section-fade Animated.Value (never `display: "none"` — GONE resets list
+  // scroll offsets, see header).
   pane: {
     position: "absolute",
     top: 0,
     right: 0,
     bottom: 0,
     left: 0,
-  },
-  paneActive: {
-    opacity: 1,
-  },
-  paneHidden: {
-    opacity: 0,
   },
 }));

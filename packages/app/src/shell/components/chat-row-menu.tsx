@@ -2,7 +2,7 @@
 // engine's item vocabulary + anchored surface, hosted by the SHELL (KI-11 ruling ①).
 // The visible plan comes from `chatMenuPlan` — the same pure matrix the report quotes
 // — so label, order and enablement live in exactly one place. 重命名 is no longer a
-// menu page (C33 moved the C19 MenuTextField sub-page out to the (shell)/rename
+// menu page (C33 moved the C19 MenuTextField sub-page out to the (detail)/rename
 // screen): the row closes the menu through the engine's own select path and hands the
 // target to the injected `openRename` callback, so this module never navigates itself
 // and the dispatch stays a pure, unit-tested table (`createChatMenuRunner`).
@@ -107,7 +107,7 @@ export interface ChatMenuRunnerDeps {
   actions: ShellAgentActions;
   target: ShellChatTarget;
   displayTitle: string;
-  /** C33: 重命名 leaves the menu — the screen opener pushes (shell)/rename. */
+  /** C33: 重命名 leaves the menu — the screen opener pushes (detail)/rename. */
   openRename: (target: ShellChatTarget) => void;
 }
 

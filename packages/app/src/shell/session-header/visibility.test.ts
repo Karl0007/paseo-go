@@ -165,7 +165,7 @@ describe("sessionHeaderMenuPlan", () => {
   // Order is the card's; every gate is present-but-disabled (the 停止 precedent),
   // never a hidden row, so the menu's shape is stable across states. C24's 刷新
   // is the one exception: imported-ONLY, appended last, never shown on native.
-  it("carries 查看项目文件/查看 diff/打开文件浏览器/运行脚本/停止/重命名 in card order", () => {
+  it("carries 查看项目文件/查看 diff/运行脚本/停止/重命名 in card order (KI-9: 打开文件浏览器 deleted)", () => {
     expect(
       sessionHeaderMenuPlan({
         stoppable: false,
@@ -174,7 +174,7 @@ describe("sessionHeaderMenuPlan", () => {
         hasCheckout: false,
         imported: false,
       }).map((item) => item.id),
-    ).toEqual(["files", "diff", "explorer", "scripts", "stop", "rename"]);
+    ).toEqual(["files", "diff", "scripts", "stop", "rename"]);
   });
 
   it("keeps 停止 present-but-disabled unless a turn is abortable (chatMenuPlan spirit)", () => {
@@ -196,7 +196,7 @@ describe("sessionHeaderMenuPlan", () => {
     expect(disabled.find((item) => item.id === "stop")?.enabled).toBe(false);
   });
 
-  it("gates the aggregated rows: diff needs git+checkout, explorer needs checkout, scripts needs scripts", () => {
+  it("gates the aggregated rows: diff needs git+checkout, scripts needs scripts", () => {
     const none = sessionHeaderMenuPlan({
       stoppable: false,
       hasScripts: false,
@@ -207,7 +207,6 @@ describe("sessionHeaderMenuPlan", () => {
     expect(none).toEqual([
       { id: "files", enabled: true },
       { id: "diff", enabled: false },
-      { id: "explorer", enabled: false },
       { id: "scripts", enabled: false },
       { id: "stop", enabled: false },
       { id: "rename", enabled: true },
@@ -231,7 +230,6 @@ describe("sessionHeaderMenuPlan", () => {
     expect(checkoutOnly).toEqual([
       { id: "files", enabled: true },
       { id: "diff", enabled: false }, // not a git checkout
-      { id: "explorer", enabled: true },
       { id: "scripts", enabled: false },
       { id: "stop", enabled: false },
       { id: "rename", enabled: true },
@@ -244,7 +242,7 @@ describe("sessionHeaderMenuPlan", () => {
       imported: false,
     });
     expect(scriptsOnly.find((item) => item.id === "scripts")?.enabled).toBe(true);
-    expect(scriptsOnly.find((item) => item.id === "explorer")?.enabled).toBe(false);
+    expect(scriptsOnly.find((item) => item.id === "diff")?.enabled).toBe(false);
   });
 
   it("pins the full 2×2×2×2 bucket matrix (imported off: no 刷新 row)", () => {
@@ -270,7 +268,6 @@ describe("sessionHeaderMenuPlan", () => {
       ).toEqual([
         ["files", true],
         ["diff", isGit && hasCheckout],
-        ["explorer", hasCheckout],
         ["scripts", hasScripts],
         ["stop", stoppable],
         ["rename", true],
@@ -293,7 +290,7 @@ describe("sessionHeaderMenuPlan", () => {
   });
 });
 
-describe("createSessionHeaderRunner (C33 dispatch, C21/C24 extension)", () => {
+describe("createSessionHeaderRunner (C33 dispatch, C21/C24 extension, KI-9 收敛)", () => {
   // The capsule menu's actionable rows all funnel their id through this table.
   // 重命名 is the row the menu never acts on itself (the C33 rename screen push
   // lives with the caller): it must reach the injected opener and nothing else.
@@ -303,7 +300,6 @@ describe("createSessionHeaderRunner (C33 dispatch, C21/C24 extension)", () => {
     return {
       openFiles: vi.fn(),
       openDiff: vi.fn(),
-      openExplorer: vi.fn(),
       stop: vi.fn(),
       openRename: vi.fn(),
       refresh: vi.fn(),
@@ -316,7 +312,6 @@ describe("createSessionHeaderRunner (C33 dispatch, C21/C24 extension)", () => {
     expect(deps.openRename).toHaveBeenCalledTimes(1);
     expect(deps.openFiles).not.toHaveBeenCalled();
     expect(deps.openDiff).not.toHaveBeenCalled();
-    expect(deps.openExplorer).not.toHaveBeenCalled();
     expect(deps.stop).not.toHaveBeenCalled();
   });
 
@@ -330,13 +325,10 @@ describe("createSessionHeaderRunner (C33 dispatch, C21/C24 extension)", () => {
     expect(deps.openRename).not.toHaveBeenCalled();
   });
 
-  it("routes 查看 diff/打开文件浏览器 to the injected official-opener wrappers, each once", () => {
+  it("routes 查看 diff to its own files-tab wrapper only (KI-9: no explorer row)", () => {
     const deps = makeDeps();
-    const run = createSessionHeaderRunner(deps);
-    run("diff");
-    run("explorer");
+    createSessionHeaderRunner(deps)("diff");
     expect(deps.openDiff).toHaveBeenCalledTimes(1);
-    expect(deps.openExplorer).toHaveBeenCalledTimes(1);
     expect(deps.openFiles).not.toHaveBeenCalled();
     expect(deps.openRename).not.toHaveBeenCalled();
     expect(deps.stop).not.toHaveBeenCalled();
@@ -348,7 +340,6 @@ describe("createSessionHeaderRunner (C33 dispatch, C21/C24 extension)", () => {
     expect(deps.refresh).toHaveBeenCalledTimes(1);
     expect(deps.openFiles).not.toHaveBeenCalled();
     expect(deps.openDiff).not.toHaveBeenCalled();
-    expect(deps.openExplorer).not.toHaveBeenCalled();
     expect(deps.stop).not.toHaveBeenCalled();
     expect(deps.openRename).not.toHaveBeenCalled();
   });

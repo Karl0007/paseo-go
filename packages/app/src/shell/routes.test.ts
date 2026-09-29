@@ -19,7 +19,7 @@ import {
   SHELL,
   SHELL_ROOT_ROUTE,
   SHELL_TAB,
-  shellFilesDetailHref,
+  shellFilesHref,
   shellPreviewHref,
   shellRenameHref,
 } from "./routes";
@@ -111,37 +111,72 @@ describe("shellPreviewHref", () => {
   });
 });
 
-describe("shellFilesDetailHref", () => {
-  // C16: the capsule must push the (detail) files instance, not the (shell)
-  // hidden-tab route — the two pathnames being distinct IS the fix (a push of a
-  // route whose group entry is absent from the root stack is a real push; a
-  // push resolving into the mounted (shell) entry is the C14 navigate-reuse).
-  it("targets the (detail) files route, distinct from the (shell) one", () => {
+describe("shellFilesHref", () => {
+  // KI-9: ONE files instance on the (detail) root stack (the (shell) hidden-tab
+  // twin is gone) — 工作区 tree rows and the session capsule push the same route,
+  // a real push whose back pops onto the opener. `tab` is the optional INITIAL
+  // page tab (菜单收敛: 查看项目文件=files / 查看 diff=diff); omitted means the
+  // builder adds no key at all (the screen's own default stays 文件, and the URL
+  // never carries a tab the user did not pick).
+  it("targets the (detail) files route — the group-stripped global pathname is unchanged", () => {
     expect(DETAIL.files).toBe("/(detail)/files/[serverId]/[workspaceId]");
-    expect(DETAIL.files).not.toBe(SHELL.files);
+    expect(DETAIL.files.split("/").filter((s) => !s.startsWith("("))).toContain("files");
+    expect("files" in SHELL).toBe(false);
   });
 
   it("passes opaque ids through as raw params (expo-router owns the encoding)", () => {
     const serverId = "host 9:80/#%&";
     const workspaceId = "C:/work/项目 dir";
-    expect(shellFilesDetailHref(serverId, workspaceId)).toEqual({
+    expect(shellFilesHref(serverId, workspaceId)).toEqual({
       pathname: DETAIL.files,
       params: { serverId, workspaceId },
+    });
+  });
+
+  it("carries the initial tab only when given", () => {
+    expect(shellFilesHref("s1", "w1", "diff")).toEqual({
+      pathname: DETAIL.files,
+      params: { serverId: "s1", workspaceId: "w1", tab: "diff" },
+    });
+    expect(shellFilesHref("s1", "w1", "files")).toEqual({
+      pathname: DETAIL.files,
+      params: { serverId: "s1", workspaceId: "w1", tab: "files" },
     });
   });
 });
 
 describe("shellRenameHref", () => {
-  // C33: rename moved out of the menu pages into a hidden-tab screen. The target
-  // goes through the object form (host ids carry `/` and `:` in the live .dev
-  // setup); a builder that hand-assembled a query string would fail below.
-  it("targets the (shell) rename route with raw serverId/agentId params", () => {
+  // C33: rename moved out of the menu pages into its own screen; KI-9 lives it on
+  // the (detail) root stack. The target goes through the object form (host ids
+  // carry `/` and `:` in the live .dev setup); a builder that hand-assembled a
+  // query string would fail below.
+  it("targets the (detail) rename route with raw serverId/agentId params", () => {
     const serverId = ".dev/paseo-home@192.168.31.190:6767";
     const agentId = "agent 9/#%&中文";
     expect(shellRenameHref({ serverId, agentId })).toEqual({
-      pathname: SHELL.rename,
+      pathname: DETAIL.rename,
       params: { serverId, agentId },
     });
+  });
+});
+
+// KI-9 migration invariant: the four screens changed GROUP, never global pathname
+// (expo-router strips the `(detail)` prefix) — split-predicates / tablet-selection
+// derive sections from those stripped strings, so each constant must keep its
+// group-stripped tail exactly.
+describe("KI-9 root-stack migration invariants", () => {
+  it("keeps every migrated route's group-stripped pathname intact", () => {
+    expect(DETAIL.import).toBe("/(detail)/import");
+    expect(DETAIL.commandsEdit).toBe("/(detail)/commands/edit");
+    expect(DETAIL.rename).toBe("/(detail)/rename");
+    for (const [name, pathname] of Object.entries(DETAIL)) {
+      if (name === "preview") continue;
+      expect(pathname.startsWith(`/${DETAIL_ROOT_ROUTE}/`), name).toBe(true);
+    }
+  });
+
+  it("leaves the (shell) group with only the tabs + root", () => {
+    expect(Object.keys(SHELL).sort()).toEqual(["chats", "me", "root", "workspace"]);
   });
 });
 

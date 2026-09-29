@@ -316,7 +316,6 @@
     "menu": "对话操作",
     "menuFiles": "查看项目文件",
     "menuDiff": "查看 diff",
-    "menuExplorer": "打开文件浏览器",
     "menuScripts": "运行脚本",
     "scriptRunning": "运行中",
     "scriptStopped": "未运行",

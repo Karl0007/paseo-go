@@ -78,25 +78,19 @@ export function shouldEnableShellEdgeBack(input: ShellSessionVisibilityInput): b
 // Menu matrix — the header-menu sibling of chatMenuPlan (shellAgentActions).
 // C21 aggregates the official compact-header right cluster (workspace-screen
 // headerRight + WorkspaceHeaderMenuMobile) into the capsule's ⋯: the session
-// actions ride shellAgentActions, the workspace views ride the official
-// openExplorerSidebarView path, and 运行脚本 is a subpage whose rows fire the
-// same client RPCs as WorkspaceScriptsButton (startWorkspaceScript/killTerminal).
+// actions ride shellAgentActions, the view rows ride the (detail) files push
+// (KI-9 收敛), and 运行脚本 is a subpage whose rows fire the same client RPCs as
+// WorkspaceScriptsButton (startWorkspaceScript/killTerminal).
 // Gating rules (all present-but-disabled when unmet, the 停止 precedent):
 //   查看项目文件 always (the C16 stack push resolves ids only);
-//   查看 diff needs a git checkout with a known directory (no changes tab else);
-//   打开文件浏览器 (explorer overlay, R2-16 wording) needs the checkout directory
-//   (openExplorerSidebarView no-ops without);
+//   查看 diff needs a git checkout with a known directory — KI-9 收敛: it pushes
+//   the same (detail) files screen with the initial diff tab (the C21 打开文件浏览器
+//   row is deleted; the official explorer overlay stays reachable through the
+//   official keyboard-action path, never through this menu);
 //   刷新 (C24) is imported-ONLY — a hidden row, not present-but-disabled.
 // ---------------------------------------------------------------------------
 
-export type SessionHeaderActionId =
-  | "files"
-  | "diff"
-  | "explorer"
-  | "scripts"
-  | "stop"
-  | "rename"
-  | "refresh";
+export type SessionHeaderActionId = "files" | "diff" | "scripts" | "stop" | "rename" | "refresh";
 
 /** Rows the runner acts on. 运行脚本 is a subpage trigger, never a dispatch. */
 export type SessionHeaderActionableId = Exclude<SessionHeaderActionId, "scripts">;
@@ -119,7 +113,6 @@ export function sessionHeaderMenuPlan(state: SessionHeaderMenuState): SessionHea
   return [
     { id: "files", enabled: true },
     { id: "diff", enabled: state.isGit && state.hasCheckout },
-    { id: "explorer", enabled: state.hasCheckout },
     { id: "scripts", enabled: state.hasScripts },
     { id: "stop", enabled: state.stoppable },
     { id: "rename", enabled: true },
@@ -132,17 +125,15 @@ export function sessionHeaderMenuPlan(state: SessionHeaderMenuState): SessionHea
 // Menu dispatch — the header sibling of `createChatMenuRunner` (chat-row-menu):
 // every actionable capsule row funnels its id through this table. 重命名 is the
 // row the menu never acts on itself (C33): it hands off to the injected screen
-// opener that pushes the (shell)/rename screen, so this module stays React- and
-// router-free and the routing is unit-testable. The 查看 diff / 打开文件浏览器 rows
-// hand off to the injected `openExplorerSidebarView` wrappers (C21) for the same
-// reason: the official opener is a store action, but the guard order and the
-// no-op-on-missing-checkout behaviour stay observable from here.
+// opener that pushes the (detail) rename screen (KI-9), so this module stays
+// React- and router-free and the routing is unit-testable. KI-9 收敛: the 查看
+// 项目文件/查看 diff rows hand off to injected push wrappers for the ONE files
+// screen (initial tab files|diff) — the openExplorer dep of the C21 era is gone.
 // ---------------------------------------------------------------------------
 
 export interface SessionHeaderRunnerDeps {
   openFiles: () => void;
   openDiff: () => void;
-  openExplorer: () => void;
   stop: () => void;
   openRename: () => void;
   refresh: () => void;
@@ -154,7 +145,6 @@ export function createSessionHeaderRunner(
   return (id) => {
     if (id === "files") deps.openFiles();
     else if (id === "diff") deps.openDiff();
-    else if (id === "explorer") deps.openExplorer();
     else if (id === "stop") deps.stop();
     else if (id === "refresh") deps.refresh();
     else deps.openRename();

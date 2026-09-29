@@ -5,19 +5,10 @@
 // → 导入按钮（逐条进度 n/m）→ 成功 toast → 返回对话列表，新条目出现后点开即完整
 // timeline（C4 opener）。重复导入按 daemon 的「already imported」错误归类为幂等
 // 提示而非失败。状态判定/行映射/勾选/结果分类都在 @/shell/import/rows（纯逻辑，
-// 单测覆盖），屏只剩数据接线与渲染。本屏是隐藏 tab（C5 KI-2 模式）：返回按钮与
-// 硬件返回都经 tab navigator 跳回对话。
+// 单测覆盖），屏只剩数据接线与渲染。KI-9 起本屏是 (detail) 根栈 push：返回按钮
+// =router.back 真弹栈（与硬件/手势返回同款），canGoBack 兑底 replace 回对话。
 import { useCallback, useEffect, useMemo, useState } from "react";
-import {
-  BackHandler,
-  FlatList,
-  Platform,
-  Pressable,
-  RefreshControl,
-  Text,
-  View,
-} from "react-native";
-import { useFocusEffect, useNavigation } from "@react-navigation/native";
+import { FlatList, Pressable, RefreshControl, Text, View } from "react-native";
 import { router, type Href } from "expo-router";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useTranslation } from "react-i18next";
@@ -44,7 +35,8 @@ import { ShellHostPickerSheet } from "@/shell/components/host-picker-sheet";
 import { SearchModeBar } from "@/shell/components/search/search-mode-bar";
 import { normalizeSearchQuery } from "@/shell/search/query";
 import { SHELL_I18N_NAMESPACE } from "@/shell/i18n";
-import { OFFICIAL, SHELL_TAB } from "@/shell/routes";
+import { OFFICIAL, SHELL } from "@/shell/routes";
+import { detailBack } from "@/shell/detail-back";
 import {
   buildImportToastParts,
   buildImportTree,
@@ -200,7 +192,6 @@ function ImportStatusBlock({
 }
 
 export default function ShellImportScreen() {
-  const navigation = useNavigation();
   const { t } = useTranslation(SHELL_I18N_NAMESPACE);
   const insets = useSafeAreaInsets();
   const toast = useToast();
@@ -304,6 +295,9 @@ export default function ShellImportScreen() {
     [rows, selectedSet],
   );
 
+  // KI-9 返回：真弹栈回来源（＋菜单在对话 tab，back 即回对话列表）；深链直达时
+  // 栈下无屏，兑底 replace 回对话 tab。硬件/手势返回由根栈原生处理。
+  const goBackToChats = useCallback(() => detailBack(SHELL.chats), []);
   const [progress, setProgress] = useState<{ current: number; total: number } | null>(null);
   const runImport = useCallback(async () => {
     if (!client || progress || selectedRows.length === 0) return;
@@ -336,29 +330,13 @@ export default function ShellImportScreen() {
     if (summary.imported > 0) {
       // 回对话列表：新 agent 经订阅出现，点开走 C4 opener（timeline 完整）。
       clearSelection();
-      navigation.navigate({ name: SHELL_TAB.chats } as never);
+      goBackToChats();
     }
     void load();
-  }, [clearSelection, client, load, navigation, progress, selectedRows, t, toast]);
+  }, [clearSelection, client, goBackToChats, load, progress, selectedRows, t, toast]);
   const handleImportPress = useCallback(() => {
     void runImport();
   }, [runImport]);
-
-  // 隐藏 tab 的返回：按钮与硬件返回都跳回对话 tab，不弹根栈（files 屏同款）。
-  const goBackToChats = useCallback(
-    () => navigation.navigate({ name: SHELL_TAB.chats } as never),
-    [navigation],
-  );
-  useFocusEffect(
-    useCallback(() => {
-      if (Platform.OS !== "android") return undefined;
-      const sub = BackHandler.addEventListener("hardwareBackPress", () => {
-        goBackToChats();
-        return true;
-      });
-      return () => sub.remove();
-    }, [goBackToChats]),
-  );
 
   const status = deriveImportStatus({
     hostCount: hosts.length,

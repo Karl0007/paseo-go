@@ -60,8 +60,8 @@ function ShellTabsBase({
   me,
 }: ShellTabsProps) {
   // C30 (DESIGN-tablet.md §3.2-1): on wide screens the bottom bar is replaced by
-  // the ShellTabletSplitHost nav rail, so it is hidden — Tabs skeleton, hidden
-  // screens and the lastFocusedTab recovery below all stay as-is.
+  // the ShellTabletSplitHost nav rail, so it is hidden — Tabs skeleton and the
+  // lastFocusedTab recovery below all stay as-is.
   // C31-F1 (C32): same window-dimension source as the split host itself — a
   // runtime rotation flips bar and split in the same frame (the Unistyles
   // breakpoint stayed stale portrait→landscape and left the bar visible mid-split).
@@ -74,6 +74,12 @@ function ShellTabsBase({
       tabBarStyle: isCompact ? styles.tabBar : styles.tabBarHidden,
       tabBarLabelStyle: styles.tabLabel,
       sceneStyle: styles.scene,
+      // KI-9: compact tab switches cross-fade (bottom-tabs v7 `animation:
+      // "fade"` — FadeSpec is a 150ms timing, the same beat as the wide
+      // list-column crossfade, SECTION_FADE_MS). Wide keeps "none": the bar is
+      // hidden there and the rail's section switch is animated by the list
+      // column itself.
+      animation: (isCompact ? "fade" : "none") as "fade" | "none",
     }),
     [activeTint, inactiveTint, isCompact],
   );
@@ -83,27 +89,19 @@ function ShellTabsBase({
     [workspace],
   );
   const meOptions = useMemo(() => ({ title: me, tabBarIcon: MeTabIcon }), [me]);
-  // C5/C7 full-screen pushes inside the group: the files tree and the 快捷指令
-  // form ride the group's route tree but must never surface as tabs — hidden from
-  // the bar, and the bar itself is suppressed while they are focused (they read
-  // as Stack pushes over the tabs).
-  const hiddenScreenOptions = useMemo(
-    () => ({ href: null, tabBarStyle: { display: "none" as const } }),
-    [],
-  );
+  // KI-9: the former hidden-tab screens (files/commands/edit/import/rename) now
+  // live in the (detail) root stack — real pushes with the native slide-in. The
+  // group carries only the three tabs plus the cold-start index below.
+  const hiddenIndexOptions = useMemo(() => ({ href: null }), []);
 
   return (
     <Tabs initialRouteName={initialRouteName} screenOptions={screenOptions}>
       {/* C8 cold-start dispatcher (index.tsx): resolvable at /(shell) but never a
           visible tab — it redirects straight to the 默认启动 tab. */}
-      <Tabs.Screen name="index" options={hiddenScreenOptions} />
+      <Tabs.Screen name="index" options={hiddenIndexOptions} />
       <Tabs.Screen name="chats" options={chatsOptions} />
       <Tabs.Screen name="workspace" options={workspaceOptions} />
       <Tabs.Screen name="me" options={meOptions} />
-      <Tabs.Screen name="files/[serverId]/[workspaceId]" options={hiddenScreenOptions} />
-      <Tabs.Screen name="commands/edit" options={hiddenScreenOptions} />
-      <Tabs.Screen name="import" options={hiddenScreenOptions} />
-      <Tabs.Screen name="rename" options={hiddenScreenOptions} />
     </Tabs>
   );
 }
@@ -122,8 +120,8 @@ export default function ShellTabsLayout() {
   useShellNotifications();
   useEffect(() => {
     // F3: useNavigation resolves to the root stack — the active tab lives one level
-    // deeper (focusedShellTab). Null on a hidden push (files/commands): those aren't
-    // tabs and must not overwrite the remembered position.
+    // deeper (focusedShellTab). Null while a (detail) push is on top (KI-9): the
+    // tabs group is not focused and must not overwrite the remembered position.
     const record = () => {
       const tab = focusedShellTab(navigation.getState() as unknown as NavStateLike | undefined);
       if (tab) lastFocusedTab = tab;

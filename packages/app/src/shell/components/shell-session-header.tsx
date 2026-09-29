@@ -9,9 +9,10 @@
 // (hamburger drawer, official ⋯, scripts button, explorer toggle) are
 // unreachable BY DESIGN. The official ⋯'s useful half is aggregated into the
 // capsule menu (see session-header/visibility for the matrix): 查看项目文件 /
-// 查看 diff / 打开文件浏览器 / 运行脚本 / 停止 / 重命名 — the view rows ride the
-// official openExplorerSidebarView path, the scripts page the official
-// startWorkspaceScript/killTerminal RPCs.
+// 查看 diff / 运行脚本 / 停止 / 重命名 — KI-9 收敛: both view rows push the ONE
+// (detail) files screen with the initial tab (files|diff), the C21 打开文件浏览器
+// row is deleted (same engine, redundant container); the scripts page rides the
+// official startWorkspaceScript/killTerminal RPCs.
 //
 // Edge gestures are re-routed for the capsule's whole visible span: the
 // provider's symbol-keyed open-gesture blocker parks the official left-open
@@ -42,7 +43,6 @@ import { useTranslation } from "react-i18next";
 import { StyleSheet, UnistylesRuntime, withUnistyles } from "react-native-unistyles";
 import {
   ChevronLeft,
-  Files,
   FolderTree,
   GitCompare,
   MoreHorizontal,
@@ -73,13 +73,8 @@ import {
   WORKSPACE_SECONDARY_HEADER_HEIGHT,
 } from "@/constants/layout";
 import { useBlockMobilePanelOpenGestures } from "@/mobile-panels/provider";
-import {
-  openExplorerSidebarView,
-  type ExplorerSidebarView,
-} from "@/workspace-tabs/explorer-sidebar";
-import { buildWorkspaceTabPersistenceKey } from "@/workspace-tabs/model";
 import { SHELL_I18N_NAMESPACE } from "@/shell/i18n";
-import { shellFilesDetailHref, shellRenameHref } from "@/shell/routes";
+import { shellFilesHref, shellRenameHref } from "@/shell/routes";
 import { usePaseoGoPinsStore } from "@/shell/stores/pins";
 import { usePaseoGoShellActive } from "@/shell/stores/settings";
 import { useShellAgentActions, type ShellChatTarget } from "@/shell/shellAgentActions";
@@ -116,7 +111,6 @@ const ThemedFolderTree = withUnistyles(FolderTree, (theme) => ({
 const ThemedGitCompare = withUnistyles(GitCompare, (theme) => ({
   color: theme.colors.foregroundMuted,
 }));
-const ThemedFiles = withUnistyles(Files, (theme) => ({ color: theme.colors.foregroundMuted }));
 const ThemedPlay = withUnistyles(Play, (theme) => ({ color: theme.colors.foregroundMuted }));
 const ThemedSquare = withUnistyles(Square, (theme) => ({ color: theme.colors.foregroundMuted }));
 const ThemedPenLine = withUnistyles(PenLine, (theme) => ({ color: theme.colors.foregroundMuted }));
@@ -127,7 +121,6 @@ const ThemedRefreshCw = withUnistyles(RefreshCw, (theme) => ({
 const HEADER_LABEL_KEY: Record<SessionHeaderActionId, string> = {
   files: "header.menuFiles",
   diff: "header.menuDiff",
-  explorer: "header.menuExplorer",
   scripts: "header.menuScripts",
   stop: "chats.menu.stop",
   rename: "chats.menu.rename",
@@ -140,8 +133,6 @@ function actionLeading(id: SessionHeaderActionId) {
       return <ThemedFolderTree size={16} />;
     case "diff":
       return <ThemedGitCompare size={16} />;
-    case "explorer":
-      return <ThemedFiles size={16} />;
     case "scripts":
       return <ThemedPlay size={16} />;
     case "stop":
@@ -343,50 +334,31 @@ function CapsuleInner({
   const openMenu = useCallback(() => menu.setOpen(true), [menu]);
 
   // The dispatch table is the pure `createSessionHeaderRunner` (matrix test pins
-  // it): 查看项目文件 is the (detail) files instance (C16) — a real root-Stack
-  // push on top of the session screen, so hardware/gesture back pops right back
-  // here. 重命名 (C33) pushes the (shell)/rename hidden tab: like the C14 finding
-  // for SHELL.files, that resolves into the mounted (shell) entry
-  // (navigate-reuse), so the capsule's rename chain lands on the rename screen
-  // and returns to the 对话 list — the card's 回列表 semantics, not a
-  // session-preserving push. 查看 diff / 打开文件浏览器 go through the ONE official
-  // opener the keyboard action `workspace.tab.open` itself routes through
-  // (workspace-screen handleWorkspacePanelOpenAction): on compact it sets the
-  // explorer tab for the checkout and slides the overlay in; on wide it opens
-  // the Explorer pane tab. Guard order mirrors the official call site.
-  const openWorkspaceView = useCallback(
-    (view: ExplorerSidebarView) => {
-      const workspaceKey = buildWorkspaceTabPersistenceKey({
-        serverId: workspace.serverId,
-        workspaceId: workspace.workspaceId,
-      });
-      const cwd = descriptor?.workspaceDirectory ?? "";
-      if (!workspaceKey || !cwd) return;
-      openExplorerSidebarView({
-        isCompact,
-        workspaceKey,
-        checkout: { serverId: workspace.serverId, cwd, isGit },
-        view,
-      });
-    },
-    [descriptor?.workspaceDirectory, isGit, isCompact, workspace.serverId, workspace.workspaceId],
-  );
+  // it). KI-9 菜单收敛: 查看项目文件 / 查看 diff both push the ONE (detail) files
+  // screen (C16 single instance) with the initial tab — a real root-Stack push on
+  // top of the session screen, so hardware/gesture back pops right back here, and
+  // the two rows no longer open two different containers with two different
+  // transition idioms. 重命名 (C33) likewise pushes the (detail) rename screen:
+  // back returns to the session (the hidden-tab navigate-reuse 回列表 detour is
+  // retired). The C21 打开文件浏览器 row is deleted; the official explorer
+  // overlay itself stays reachable through the official keyboard-action path
+  // (workspace-screen handleWorkspacePanelOpenAction), which the capsule never
+  // owned.
   const run = useMemo(
     () =>
       createSessionHeaderRunner({
         openFiles: () =>
-          router.push(shellFilesDetailHref(workspace.serverId, workspace.workspaceId)),
-        openDiff: () => openWorkspaceView("changes"),
-        openExplorer: () => openWorkspaceView("files"),
+          router.push(shellFilesHref(workspace.serverId, workspace.workspaceId, "files")),
+        openDiff: () =>
+          router.push(shellFilesHref(workspace.serverId, workspace.workspaceId, "diff")),
         stop: () => void actions.stop(target),
         openRename: () => router.push(shellRenameHref(target)),
         refresh: () => void actions.refresh(target),
       }),
-    [actions, openWorkspaceView, target, workspace.serverId, workspace.workspaceId],
+    [actions, target, workspace.serverId, workspace.workspaceId],
   );
   const runFiles = useCallback(() => run("files"), [run]);
   const runDiff = useCallback(() => run("diff"), [run]);
-  const runExplorer = useCallback(() => run("explorer"), [run]);
   const runStop = useCallback(() => run("stop"), [run]);
   const runRename = useCallback(() => run("rename"), [run]);
   const runRefresh = useCallback(() => run("refresh"), [run]);
@@ -394,12 +366,11 @@ function CapsuleInner({
     () => ({
       files: runFiles,
       diff: runDiff,
-      explorer: runExplorer,
       stop: runStop,
       rename: runRename,
       refresh: runRefresh,
     }),
-    [runDiff, runExplorer, runFiles, runRefresh, runRename, runStop],
+    [runDiff, runFiles, runRefresh, runRename, runStop],
   );
 
   // 运行脚本 is the menu's one subpage (official scripts dropdown's sibling):

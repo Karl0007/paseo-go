@@ -1,16 +1,17 @@
 // 重命名屏 (card C33, DESIGN §14.3): the rename form moves out of the row/capsule
-// menus' MenuTextField sub-page into its own hidden tab (files/commands/import
-// pattern, C5 KI-2) — context menus become plain anchored popovers, renaming is a
-// form page, like mainstream IM. Entry: 行长按菜单 / 胶囊 ⋯ → 重命名, both push
-// shellRenameHref with the target's raw ids (object params). 保存 = the existing
-// shellAgentActions.rename contract — a blank value clears the alias back to the
-// daemon title (裁定 5 的「空提交=清除」is that contract, never re-implemented
-// here); 返回/取消 = leave WITHOUT saving. The save/cancel wiring is the pure
-// `createRenameScreenHandlers` (unit-tested); the screen keeps field state and the
-// hidden-tab back (button and hardware both jump to the 对话 tab, never a stack pop).
+// menus' MenuTextField sub-page into its own screen — context menus become plain
+// anchored popovers, renaming is a form page, like mainstream IM. KI-9 lives it
+// as a (detail) root-Stack push: 行长按菜单 / 胶囊 ⋯ → 重命名 both push
+// shellRenameHref with the target's raw ids (object params), and back lands on
+// the screen that opened it (行长按菜单 → 对话列表；胶囊 ⋯ → 会话屏) — the
+// navigate-reuse 回列表 detour is gone with the hidden-tab form. 保存 = the
+// existing shellAgentActions.rename contract — a blank value clears the alias
+// back to the daemon title (裁定 5 的「空提交=清除」is that contract, never
+// re-implemented here); 返回/取消 = leave WITHOUT saving. The save/cancel wiring
+// is the pure `createRenameScreenHandlers` (unit-tested); the screen keeps field
+// state and the detailBack pop (button; hardware/gesture pop natively).
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { BackHandler, Platform, Pressable, Text, View } from "react-native";
-import { useFocusEffect, useNavigation } from "@react-navigation/native";
+import { Pressable, Text, View } from "react-native";
 import { useLocalSearchParams } from "expo-router";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useTranslation } from "react-i18next";
@@ -19,7 +20,8 @@ import { ChevronLeft } from "lucide-react-native";
 import { Button } from "@/components/ui/button";
 import { EditingTextInput } from "@/components/ui/text-input";
 import { SHELL_I18N_NAMESPACE } from "@/shell/i18n";
-import { SHELL_TAB } from "@/shell/routes";
+import { SHELL } from "@/shell/routes";
+import { detailBack } from "@/shell/detail-back";
 import { usePaseoGoPinsStore } from "@/shell/stores/pins";
 import {
   useShellAgentActions,
@@ -108,8 +110,7 @@ function RenameFormBody({
   );
 }
 
-export default function ShellRenameScreen() {
-  const navigation = useNavigation();
+export default function DetailRenameScreen() {
   const { t } = useTranslation(SHELL_I18N_NAMESPACE);
   const insets = useSafeAreaInsets();
   const params = useLocalSearchParams<{ serverId?: string; agentId?: string }>();
@@ -122,23 +123,9 @@ export default function ShellRenameScreen() {
   const alias = usePaseoGoPinsStore((state) => (target ? state.aliases[target.key] : undefined));
   const actions = useShellAgentActions();
 
-  // 隐藏 tab 的返回 (files/import pattern): 返回/取消 both jump back to the 对话 tab
-  // through the tab navigator — 不保存退出 (裁定 5). The hardware listener is
-  // focus-scoped.
-  const goBack = useCallback(
-    () => navigation.navigate({ name: SHELL_TAB.chats } as never),
-    [navigation],
-  );
-  useFocusEffect(
-    useCallback(() => {
-      if (Platform.OS !== "android") return undefined;
-      const sub = BackHandler.addEventListener("hardwareBackPress", () => {
-        goBack();
-        return true;
-      });
-      return () => sub.remove();
-    }, [goBack]),
-  );
+  // KI-9 返回：真弹栈回来源屏（长按菜单/胶囊 ⋯ 各回其位）；深链直达时兑底
+  // replace 回对话 tab — 不保存退出 (裁定 5)。硬件/手势返回由根栈原生处理。
+  const goBack = useCallback(() => detailBack(SHELL.chats), []);
 
   return (
     <View style={styles.screen} testID="shell-rename-screen">

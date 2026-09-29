@@ -1,6 +1,6 @@
 // C33 acceptance: the row menu's dispatch table. Every menu row funnels its action
 // id through `createChatMenuRunner`; 重命名 is the one row the menu must NOT act on
-// itself — it hands the target to the injected screen opener (the (shell)/rename
+// itself — it hands the target to the injected screen opener (the (detail)/rename
 // push lives with the caller), never touching `actions.rename`. The other rows keep
 // the C3 semantics (the plan itself is pinned in shellAgentActions.test.ts).
 import { describe, expect, it, vi } from "vitest";

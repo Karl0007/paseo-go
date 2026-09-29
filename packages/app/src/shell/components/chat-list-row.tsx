@@ -9,8 +9,8 @@
 // C3 interaction layer (card C3): every row wraps the official ContextMenu engine —
 // long press opens the menu, the ⋯ button opens the same menu for accessibility.
 // C19/C33 (DESIGN §14.3): the menu is the anchored popover — 重命名 left it for the
-// (shell)/rename screen, so the engine's "input pages stay sheets" rule no longer
-// applies here.
+// (detail)/rename screen (KI-9 root stack), so the engine's "input pages stay
+// sheets" rule no longer applies here.
 // C20 (DESIGN §14.4): on the live filter EVERY row rides the DraggableFlatList
 // through this arbitration hook — long-press decides the anchored window, and
 // sliding past the relay slop dismisses it and lifts the row in ONE touch
@@ -237,7 +237,7 @@ function ChatRowInner({
     () => ({ pinned, archived, stoppable, imported }),
     [pinned, archived, stoppable, imported],
   );
-  // C33: 重命名 pushes the hidden-tab rename screen (object params, hostile ids).
+  // C33: 重命名 pushes the (detail) rename screen (KI-9; object params, hostile ids).
   const openRename = useCallback(
     (renameTarget: ShellChatTarget) => router.push(shellRenameHref(renameTarget)),
     [],

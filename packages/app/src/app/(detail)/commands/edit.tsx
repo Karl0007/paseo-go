@@ -3,12 +3,11 @@
 // 问) / 模型(可空=默认) / prompt 多行*; validation lives in validateCommandForm (pure,
 // unit-tested), pickers ride the official menu engine in sheet shape like every other
 // shell sheet — each picker is its own component so the form body stays under the
-// complexity gate and every menu row keeps a stable handler. The screen is a hidden
-// tab (same as files, C5 KI-2): back — button or hardware — returns to the 工作区 tab
-// through the navigator, never a stack pop.
+// complexity gate and every menu row keeps a stable handler. KI-9 lives it as a
+// (detail) root-Stack push: back — button or hardware/gesture — pops to the
+// 工作区 (the entry's only caller), canGoBack兑底 = 工作区 tab.
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
-import { BackHandler, Platform, Pressable, ScrollView, Text, View } from "react-native";
-import { useFocusEffect, useNavigation } from "@react-navigation/native";
+import { Pressable, ScrollView, Text, View } from "react-native";
 import { useLocalSearchParams } from "expo-router";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useTranslation } from "react-i18next";
@@ -30,7 +29,8 @@ import { useHosts } from "@/runtime/host-runtime";
 import type { HostProfile } from "@/types/host-connection";
 import { resolveProviderLabel } from "@/utils/provider-definitions";
 import { SHELL_I18N_NAMESPACE } from "@/shell/i18n";
-import { SHELL_TAB } from "@/shell/routes";
+import { SHELL } from "@/shell/routes";
+import { detailBack } from "@/shell/detail-back";
 import { usePaseoGoCommandsStore, type ShellCommand } from "@/shell/stores/commands";
 import {
   validateCommandForm,
@@ -438,8 +438,7 @@ function CommandFormBody({
   );
 }
 
-export default function ShellCommandEditScreen() {
-  const navigation = useNavigation();
+export default function DetailCommandEditScreen() {
   const { t } = useTranslation(SHELL_I18N_NAMESPACE);
   const insets = useSafeAreaInsets();
   const { id } = useLocalSearchParams<{ id?: string }>();
@@ -453,22 +452,9 @@ export default function ShellCommandEditScreen() {
     id ? (state.items.find((item) => item.id === id) ?? null) : null,
   );
 
-  // Hidden-tab back (files screen pattern): jump through the tab navigator, never
-  // pop the root stack; the hardware listener is focus-scoped.
-  const handleBack = useCallback(
-    () => navigation.navigate({ name: SHELL_TAB.workspace } as never),
-    [navigation],
-  );
-  useFocusEffect(
-    useCallback(() => {
-      if (Platform.OS !== "android") return undefined;
-      const sub = BackHandler.addEventListener("hardwareBackPress", () => {
-        navigation.navigate({ name: SHELL_TAB.workspace } as never);
-        return true;
-      });
-      return () => sub.remove();
-    }, [navigation]),
-  );
+  // KI-9 返回：真弹栈回来源（工作区 ＋新建/行编辑），深链直达时兑底 replace 回
+  // 工作区 tab；保存走同一 handleBack。硬件/手势返回由根栈原生处理。
+  const handleBack = useCallback(() => detailBack(SHELL.workspace), []);
 
   const title = command ? t("commands.editTitle") : t("commands.newTitle");
 

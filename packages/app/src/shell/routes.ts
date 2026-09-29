@@ -1,8 +1,10 @@
 // All route strings the Paseo Go shell navigates with (DESIGN.md §2.3) — single
 // source of truth. Shell screens push SHELL.* within their own group and OFFICIAL.*
-// to reuse upstream routes unchanged (D2). `commandsEdit` lands with C7 (the run
-// flow is a sheet on the 工作区 tab, not a route); DETAIL.* is the C6 preview stack
-// plus the C16 files instance (real root-Stack push for the session capsule).
+// to reuse upstream routes unchanged (D2). DETAIL.* is the root-Stack push stack:
+// the C6 preview plus the KI-9 secondary screens (files/import/commands-edit/
+// rename) — migrated out of the (shell) Tabs' hidden screens so every one of them
+// is a real push with the native slide-in and pop-back (the global pathnames are
+// unchanged: expo-router strips the group prefix, `/files/…` `/import` etc.).
 //
 // R2-12: the group/segment NAMES below are what EVERY route-name comparison in the
 // shell consumes (session-header capsule predicate, tablet selection, split
@@ -11,6 +13,7 @@
 // set against the real src/app file tree, so a drifted name fails the suite
 // instead of silently killing navigation (capsule never shows, tab jumps miss).
 import type { Href } from "expo-router";
+import type { FilesScreenTab } from "@/shell/files/files-tabs";
 import {
   buildHostWorkspaceOpenRoute,
   buildHostWorkspaceRoute,
@@ -24,12 +27,13 @@ export const DETAIL_ROOT_ROUTE = "(detail)";
 export const HOST_ROOT_ROUTE = "h/[serverId]";
 /** Segment of the official workspace-session route under the host navigator. */
 export const HOST_WORKSPACE_SEGMENT = "workspace";
-/** Files browse screen's segment inside both groups (group-stripped: `/files/…`). */
+/** Files browse screen's segment under the (detail) group (group-stripped:
+ * `/files/…` — the split predicates derive the workspace section from it). */
 export const FILES_ROUTE_SEGMENT = "files";
 
 // Tab screen names for in-navigator jumps (navigation.navigate never pops the root
-// stack, unlike a path navigate — the files placeholder's back must stay in-tabs).
-// Also the source for the tab pathnames below and the rail's section keys.
+// stack, unlike a path navigate). Also the source for the tab pathnames below and
+// the rail's section keys.
 export const SHELL_TAB = { chats: "chats", workspace: "workspace", me: "me" } as const;
 
 export const SHELL = {
@@ -37,21 +41,22 @@ export const SHELL = {
   chats: `/${SHELL_ROOT_ROUTE}/${SHELL_TAB.chats}`,
   workspace: `/${SHELL_ROOT_ROUTE}/${SHELL_TAB.workspace}`,
   me: `/${SHELL_ROOT_ROUTE}/${SHELL_TAB.me}`,
-  files: `/${SHELL_ROOT_ROUTE}/${FILES_ROUTE_SEGMENT}/[serverId]/[workspaceId]`,
-  commandsEdit: `/${SHELL_ROOT_ROUTE}/commands/edit`,
-  // C10 导入屏: 隐藏 tab（同 files/commands 的 C5 KI-2 模式），＋菜单 push 进入。
-  import: `/${SHELL_ROOT_ROUTE}/import`,
-  // C33 重命名屏: 隐藏 tab（同 files/commands/import 模式），行长按菜单与胶囊 ⋯ 的
-  // rename 项 push 进入；菜单本体因此去掉了输入子页、转回 popover（DESIGN §14.3/§14.4）。
-  rename: `/${SHELL_ROOT_ROUTE}/rename`,
 } as const;
 
-// 预览屏 lives in its own top-level group so opening a file is a real root-Stack
-// push (C6 ruling): hardware/gesture back pops it naturally onto the files tab,
-// unlike a hidden-tab screen whose back must be intercepted in-tab.
+// 详情栈 (C6 ruling, KI-9 completion): every secondary screen lives in this
+// top-level group so opening it is a real root-Stack push — hardware/gesture back
+// pops it naturally onto whatever screen opened it, unlike a hidden-tab screen
+// whose back had to be intercepted in-tab (C5 KI-2 form, retired by KI-9).
 export const DETAIL = {
   preview: `/${DETAIL_ROOT_ROUTE}/preview`,
   files: `/${DETAIL_ROOT_ROUTE}/${FILES_ROUTE_SEGMENT}/[serverId]/[workspaceId]`,
+  // C10 导入屏: ＋菜单 push 进入。
+  import: `/${DETAIL_ROOT_ROUTE}/import`,
+  // C7 快捷指令表单屏: 工作区 ＋新建/编辑 push 进入。
+  commandsEdit: `/${DETAIL_ROOT_ROUTE}/commands/edit`,
+  // C33 重命名屏: 行长按菜单与胶囊 ⋯ 的 rename 项 push 进入（菜单本体因此去掉了
+  // 输入子页、转回 popover，DESIGN §14.3/§14.4）。
+  rename: `/${DETAIL_ROOT_ROUTE}/rename`,
 } as const;
 
 // Preview params ride the query string: paths carry CJK, spaces, '?' and '%', so
@@ -71,23 +76,22 @@ export function shellPreviewHref(params: ShellPreviewParams): Href {
 }
 
 // The files route is dynamic; push it through this param object so the segment
-// names stay in one place and expo-router handles encoding (C5 rows → C6 browse).
-export function shellFilesHref(serverId: string, workspaceId: string): Href {
-  return { pathname: SHELL.files, params: { serverId, workspaceId } } as Href;
-}
-
-// C16 胶囊入口: the SAME browse screen as SHELL.files, mounted as a real
-// root-Stack push so back pops onto the session screen. Pushing SHELL.files from
-// a session resolves into the existing (shell) entry (navigate-reuse, C14
-// measured) and pops the session — never use it as a capsule target.
-export function shellFilesDetailHref(serverId: string, workspaceId: string): Href {
-  return { pathname: DETAIL.files, params: { serverId, workspaceId } } as Href;
+// names stay in one place and expo-router handles encoding (C5 rows → C6 browse,
+// KI-9 single root-stack instance). `tab` is the INITIAL page tab only (KI-9 菜单
+// 收敛: 查看项目文件=files / 查看 diff=diff) — the screen consumes it once into
+// in-screen state (C27 裁定 4: 不入 persist、不进后续 URL 状态); anything unknown
+// falls back to 文件 via resolveFilesScreenTab.
+export function shellFilesHref(serverId: string, workspaceId: string, tab?: FilesScreenTab): Href {
+  return {
+    pathname: DETAIL.files,
+    params: { serverId, workspaceId, ...(tab ? { tab } : {}) },
+  } as Href;
 }
 
 // 快捷指令表单屏: same screen serves 新建 (no id) and 编辑 (?id=) — the id goes
 // through the object form so expo-router owns the encoding, like the preview params.
 export function shellCommandEditHref(id?: string): Href {
-  return (id ? { pathname: SHELL.commandsEdit, params: { id } } : SHELL.commandsEdit) as Href;
+  return (id ? { pathname: DETAIL.commandsEdit, params: { id } } : DETAIL.commandsEdit) as Href;
 }
 
 // C33 重命名屏: the target rides the object params (serverId/agentId can carry `/`
@@ -99,7 +103,7 @@ export interface ShellRenameParams {
 }
 
 export function shellRenameHref(params: ShellRenameParams): Href {
-  return { pathname: SHELL.rename, params: { ...params } } as Href;
+  return { pathname: DETAIL.rename, params: { ...params } } as Href;
 }
 
 // Workspace routes wrap the official builders (host-routes) so the shell never

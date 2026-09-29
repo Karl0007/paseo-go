@@ -32,12 +32,13 @@ export function shouldActivateTabletSplit(activation: TabletSplitActivation): bo
   return activation.shellActive && !activation.isCompact && !activation.fullBleed;
 }
 
-// pathname → section (§3.2-2). The (shell) group is stripped from the global
-// pathname, so tab screens read `/chats` / `/workspace` / `/me` and the hidden
-// pushes add `/files/…`, `/import`, `/commands/edit`, `/rename` (C33) and
-// `/preview` (detail group, C6). `/h/…` (official session), `/import`,
-// `/commands/edit`, `/rename` and `/preview` map to null = "keep the previous
-// section" — the host remembers via ref. Exact-match on the tab paths is
+// pathname → section (§3.2-2). The group is stripped from the global pathname,
+// so tab screens read `/chats` / `/workspace` / `/me` and the (detail) root-stack
+// pushes (KI-9) keep their group-stripped paths: `/files/…`, `/import`,
+// `/commands/edit`, `/rename` (C33), `/preview` (C6). `/h/…` (official session),
+// `/import`, `/commands/edit`, `/rename` and `/preview` map to null = "keep the
+// previous section" — the host remembers via ref (`/files/…` is the exception:
+// it belongs to the 工作区 section). Exact-match on the tab paths is
 // deliberate: the official session route contains `/workspace/` mid-path
 // (`/h/<sid>/workspace/<wid>`) and must NOT be read as the workspace tab.
 export function tabletSectionForPathname(pathname: string): TabletSection | null {

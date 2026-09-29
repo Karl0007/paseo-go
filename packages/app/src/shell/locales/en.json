@@ -316,7 +316,6 @@
     "menu": "Chat actions",
     "menuFiles": "View project files",
     "menuDiff": "View diff",
-    "menuExplorer": "Open file explorer",
     "menuScripts": "Run scripts",
     "scriptRunning": "Running",
     "scriptStopped": "Stopped",

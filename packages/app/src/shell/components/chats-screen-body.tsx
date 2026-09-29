@@ -83,7 +83,7 @@ import {
 } from "@/shell/search/chat-filter";
 import { normalizeSearchQuery } from "@/shell/search/query";
 import { resolveProjectPlacement } from "@/utils/project-placement";
-import { OFFICIAL, SHELL } from "@/shell/routes";
+import { DETAIL, OFFICIAL } from "@/shell/routes";
 import { usePaseoGoArchiveStore } from "@/shell/stores/archive";
 import { usePaseoGoPinsStore } from "@/shell/stores/pins";
 import { usePaseoGoReadStateStore } from "@/shell/stores/readState";
@@ -517,7 +517,7 @@ export function ChatsScreenBody({ selectedAgentKey = null }: ShellScreenBodyProp
     setSearchActive(false);
     setQuery("");
   }, []);
-  const handleImportChat = useCallback(() => router.push(SHELL.import as Href), []);
+  const handleImportChat = useCallback(() => router.push(DETAIL.import as Href), []);
   const handleShowActive = useCallback(() => setFilter("active"), []);
 
   const renderItem = useCallback(

@@ -1,12 +1,12 @@
-// 文件浏览屏 shared body (card C16, restructured by C27): one browse UI, two
-// root-stack positions.
-//   (shell)/files/[serverId]/[workspaceId]   hidden-tab entry (C5 KI-2) — back is an
-//       in-tab jump to the 工作区 tab and the Android hardware back is intercepted
-//       while focused; that wiring lives in the thin route wrapper, not here.
-//   (detail)/files/[serverId]/[workspaceId]  real root-Stack push (capsule entry) —
-//       back is a real pop (the wrapper's header back mirrors it); the session
-//       screen stays on the stack underneath (C14 measured the hidden-tab route's
-//       push to be a navigate-reuse that popped it).
+// 文件浏览屏 shared body (card C16, restructured by C27; KI-9 single instance):
+// the UI behind the ONE route `(detail)/files/[serverId]/[workspaceId]` — a real
+// root-Stack push (工作区 tree row / session capsule / deep link all land here),
+// so back is a real pop and that wiring lives in the thin route wrapper, not
+// here. (The C5 KI-2 hidden-tab twin and its in-tab back interception were
+// retired by KI-9.)
+// The wrapper also feeds the optional `tab` query param through `initialTab`
+// (KI-9 菜单收敛) — an INITIAL value only: tab state stays in-screen (裁定 4:
+// 不入 persist、不进后续 URL 状态).
 // C27 (DESIGN §14.9): the header is a single project-path line (the host › project
 // › workspace breadcrumb was 拍板没有意义), with a 放大镜 morphing into the C9 search
 // bar scoped to THIS workspace's browsed directories; below it a three-segment tab
@@ -267,10 +267,13 @@ function GitLogPane({
 export function FilesScreenBody({
   serverId,
   workspaceId,
+  initialTab = "files",
   onBack,
 }: {
   serverId: string;
   workspaceId: string;
+  /** KI-9: the wrapper's resolved `?tab=` — initial value only, see header. */
+  initialTab?: FilesScreenTab;
   onBack: () => void;
 }) {
   const { t } = useTranslation(SHELL_I18N_NAMESPACE);
@@ -292,14 +295,18 @@ export function FilesScreenBody({
   const workspaceName = workspace?.title?.trim() || workspace?.name || workspaceId;
 
   // ---- C27 三段页签 (in-screen state, 裁定 4: 不入 persist) --------------------
-  const [tab, setTab] = useState<FilesScreenTab>("files");
+  // KI-9: seeded from `initialTab` (the wrapper's resolved `?tab=`); later URL
+  // never changes it — the state machine below owns it from the first frame.
+  const [tab, setTab] = useState<FilesScreenTab>(initialTab);
   // Panels lazy-mount on first visit and then stay mounted (RetainedPanel), so
-  // tab round-trips never rebuild (and never re-fetch from zero) a pane.
-  const [visited, setVisited] = useState<Record<FilesScreenTab, boolean>>({
+  // tab round-trips never rebuild (and never re-fetch from zero) a pane. 文件
+  // stays mounted from frame one: it is constrainFilesScreenTab's fallback
+  // target when a diff/git entry meets a non-git checkout.
+  const [visited, setVisited] = useState<Record<FilesScreenTab, boolean>>(() => ({
     files: true,
-    diff: false,
-    git: false,
-  });
+    diff: initialTab === "diff",
+    git: initialTab === "git",
+  }));
   const handleTabChange = useCallback((next: FilesScreenTab) => {
     setTab(next);
     setVisited((prev) => (prev[next] ? prev : { ...prev, [next]: true }));
