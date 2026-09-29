@@ -11,11 +11,15 @@
 // 次行（小字 muted）: 会话真标题，单行截断。descriptor 未 hydration（无项目
 // 名）时退化为单行=标题走主字重样式，同样零占位。
 //
-// 高度口径（KI-14，用户拍板 2026-09-29）：workspace-screen.tsx 的上游触点在
-// shellActive && compact 下把官方 header 带 + tab 行整个卸载（COMPAT
-// (shellHideOfficialSessionChrome)），胶囊不再兼任盖条——KI-8 的 cover 补偿
-// （sessionHeaderCoverCompensationDp）与 R2-08③ 的 tab-row-cover 一并退役，
-// 带高回归纯两行内容高（compact 44 / wide 34），会话内容随之整体上移。
+// 高度口径（KI-14，用户拍板 2026-09-29；KI-17② 扩面，编排者拍板 2026-09-30）：
+// workspace-screen.tsx 的上游触点在 shellActive（不再 && compact）下把官方 header
+// 带（compact 与 wide 两条带）、mobile tab 行与 desktop fallback tab 行整个卸载
+// （COMPAT(shellHideOfficialSessionChrome)），胶囊不再兼任盖条——KI-8 的 cover
+// 补偿（sessionHeaderCoverCompensationDp）与 R2-08③ 的 tab-row-cover 一并退役，
+// 带高回归纯两行内容高（compact 44 / wide 34），会话内容随之整体上移；KI-17①
+// 起会话内容容器的顶 inset 读本文件底部的带底算式（同一真相源）。
+
+import { HEADER_TOP_PADDING_MOBILE } from "@/constants/layout";
 
 /**
  * RN text line-height ceiling the two-line block pins itself to (Android
@@ -33,6 +37,40 @@ export const SESSION_HEADER_INNER_HEIGHT_DP = { compact: 44, wide: 34 } as const
 
 export function sessionHeaderInnerHeightDp(isCompact: boolean): number {
   return isCompact ? SESSION_HEADER_INNER_HEIGHT_DP.compact : SESSION_HEADER_INNER_HEIGHT_DP.wide;
+}
+
+/** 胶囊 status-bar 之下的顶垫高：compact=HEADER_TOP_PADDING_MOBILE，wide=0。
+ *  barStyle 的 paddingTop 与带底算式共用件（勿在别处重抄三元）。 */
+export function sessionHeaderTopPadDp(isCompact: boolean): number {
+  return isCompact ? HEADER_TOP_PADDING_MOBILE : 0;
+}
+
+/**
+ * 胶囊带底边（窗口顶 → 不透明条下缘）= insets.top + topPad + inner。
+ * shell-session-header barStyle 的高度算式即此函数（单真相源）；KI-17① 会话
+ * 内容容器的 paddingTop 读同一个函数——条与内容永远同底。负 inset 钳 0（防御）。
+ */
+export function sessionHeaderBandBottomDp(statusBarInsetDp: number, isCompact: boolean): number {
+  return (
+    Math.max(0, statusBarInsetDp) +
+    sessionHeaderTopPadDp(isCompact) +
+    sessionHeaderInnerHeightDp(isCompact)
+  );
+}
+
+/**
+ * KI-17①: the session content container's top-inset style. Shell chrome owns
+ * the top band ⇒ paddingTop = band bottom (content starts under the capsule,
+ * first message never covered); shell chrome off ⇒ undefined — the official
+ * layout stays byte-identical (pinned by compact-rows.test.ts).
+ */
+export function shellSessionContentInsetStyle(
+  shellChromeActive: boolean,
+  statusBarInsetDp: number,
+  isCompact: boolean,
+): { paddingTop: number } | undefined {
+  if (!shellChromeActive) return undefined;
+  return { paddingTop: sessionHeaderBandBottomDp(statusBarInsetDp, isCompact) };
 }
 
 /** The checkout_status slice the branch slot reads (structural, push-driven cache). */

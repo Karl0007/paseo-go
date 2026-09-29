@@ -5,8 +5,14 @@
 //  2. 高度（KI-14 口径）: inner 真收（compact ≥8dp、wide 钳 34dp 控件底线）、
 //     双行 lineHeight 块装得下最紧的 inner——KI-8 的 cover 补偿与 tab-row-cover
 //     已随官方 chrome 触点退役（带高=纯内容高），本文件不再钉底边补偿算术。
+//  3. KI-17①: 带底算式（barStyle 高=会话内容顶 inset 的同一真相源）与 gate
+//     off ⇒ undefined 的官方模式零差异钉。
 import { describe, expect, it } from "vitest";
-import { HEADER_INNER_HEIGHT, HEADER_INNER_HEIGHT_MOBILE } from "@/constants/layout";
+import {
+  HEADER_INNER_HEIGHT,
+  HEADER_INNER_HEIGHT_MOBILE,
+  HEADER_TOP_PADDING_MOBILE,
+} from "@/constants/layout";
 import { FONT_SIZE } from "@/styles/theme";
 import {
   SESSION_HEADER_CONTROL_HEIGHT_DP,
@@ -14,7 +20,10 @@ import {
   resolveSessionHeaderBranch,
   resolveSessionHeaderProjectLabel,
   resolveSessionHeaderRows,
+  sessionHeaderBandBottomDp,
   sessionHeaderInnerHeightDp,
+  sessionHeaderTopPadDp,
+  shellSessionContentInsetStyle,
 } from "./compact-rows";
 
 describe("resolveSessionHeaderBranch (checkout_status → 分支槽)", () => {
@@ -115,5 +124,37 @@ describe("sessionHeaderInnerHeightDp (KI-14: 带高 = 纯内容高)", () => {
       Math.ceil(FONT_SIZE.sm * TEXT_LINE_HEIGHT_CEILING);
     expect(block).toBeLessThanOrEqual(sessionHeaderInnerHeightDp(false));
     expect(block).toBeLessThanOrEqual(sessionHeaderInnerHeightDp(true));
+  });
+});
+
+describe("sessionHeaderBandBottomDp / shellSessionContentInsetStyle (KI-17① 带底单真相)", () => {
+  it("compact 带底 = insets.top + HEADER_TOP_PADDING_MOBILE + inner44（barStyle 同式）", () => {
+    expect(sessionHeaderBandBottomDp(24, true)).toBe(24 + HEADER_TOP_PADDING_MOBILE + 44);
+    expect(sessionHeaderTopPadDp(true)).toBe(HEADER_TOP_PADDING_MOBILE);
+  });
+
+  it("wide 带底 = insets.top + inner34（无 topPad，KI-17② wide 内容高口径）", () => {
+    expect(sessionHeaderBandBottomDp(24, false)).toBe(24 + 34);
+    expect(sessionHeaderTopPadDp(false)).toBe(0);
+  });
+
+  it("inset 系数恒 1；负 inset 钳 0（防御）", () => {
+    for (const inset of [0, 24, 38, 48]) {
+      expect(sessionHeaderBandBottomDp(inset, true) - sessionHeaderBandBottomDp(0, true)).toBe(
+        inset,
+      );
+    }
+    expect(sessionHeaderBandBottomDp(-12, true)).toBe(sessionHeaderBandBottomDp(0, true));
+  });
+
+  it("内容 inset = 带底；gate off ⇒ undefined（官方模式逐字节零差异，Main 裁决③）", () => {
+    expect(shellSessionContentInsetStyle(true, 38, true)).toEqual({
+      paddingTop: sessionHeaderBandBottomDp(38, true),
+    });
+    expect(shellSessionContentInsetStyle(true, 38, false)).toEqual({
+      paddingTop: sessionHeaderBandBottomDp(38, false),
+    });
+    expect(shellSessionContentInsetStyle(false, 38, true)).toBeUndefined();
+    expect(shellSessionContentInsetStyle(false, 0, false)).toBeUndefined();
   });
 });

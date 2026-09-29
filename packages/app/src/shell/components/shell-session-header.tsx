@@ -4,11 +4,12 @@
 // visible (shouldShowWorkspaceScreenHeader = !focusMode || isMobile); the C14
 // bottom-coexistence branch was overturned by the C21 ruling — the bar sits at
 // the very top. KI-14 (用户拍板 2026-09-29) then landed the upstream touchpoint
-// COMPAT(shellHideOfficialSessionChrome): under shellActive && compact the
-// official header band + tab row are UNMOUNTED in-flow, so the bar is pure
-// two-line content height (44/34) + status-bar inset — no cover compensation,
-// nothing left to paint out. The header's controls (hamburger drawer, official
-// ⋯, scripts button, explorer toggle) being gone from the screen is the point;
+// COMPAT(shellHideOfficialSessionChrome) and KI-17② (编排者拍板 2026-09-30)
+// widened its gate to shellActive alone: on BOTH form factors the official
+// header band + tab rows are UNMOUNTED in-flow, so the bar is pure two-line
+// content height (44/34) + status-bar inset — no cover compensation, nothing
+// left to paint out. The header's controls (hamburger drawer, official ⋯,
+// scripts button, explorer toggle) being gone from the screen is the point;
 // their useful half is aggregated into the
 // capsule menu (see session-header/visibility for the matrix): 查看项目文件 /
 // 查看 diff / 运行脚本 / 停止 / 重命名 — KI-9 收敛: both view rows push the ONE
@@ -27,8 +28,8 @@
 // (agent list) and right-open (explorer) swipes and releases them on unmount
 // (shell-off / non-session routes see zero behaviour change), while a
 // transparent 32dp left-edge band carries the shell's own rightward-swipe →
-// router.back() (shell-header/edge-swipe + use-shell-edge-back-gesture). The band
-// is compact-only (C32 裁定 2): wide pops via hardware back / the capsule 返回 key.
+// the same back verb (shell-header/edge-swipe + use-shell-edge-back-gesture,
+// KI-17③: detailBack — pop, or replace onto (shell)/chats on a headless stack).
 // While the compact explorer overlay is open the capsule yields its band
 // (visibility input explorerOverlayOpen) — the overlay owns the top rail then.
 //
@@ -74,10 +75,10 @@ import { selectIsCompactFileExplorerOpen, usePanelStore } from "@/stores/panel-s
 import { deriveSidebarStateBucket, type SidebarStateBucket } from "@/utils/sidebar-agent-state";
 import { isImportedProviderSession } from "@getpaseo/protocol/agent-labels";
 import { useCheckoutStatusQuery } from "@/git/use-status-query";
-import { HEADER_TOP_PADDING_MOBILE } from "@/constants/layout";
 import { useBlockMobilePanelOpenGestures } from "@/mobile-panels/provider";
 import { SHELL_I18N_NAMESPACE } from "@/shell/i18n";
-import { shellFilesHref, shellRenameHref } from "@/shell/routes";
+import { SHELL, shellFilesHref, shellRenameHref } from "@/shell/routes";
+import { detailBack } from "@/shell/detail-back";
 import { usePaseoGoPinsStore } from "@/shell/stores/pins";
 import { usePaseoGoShellActive } from "@/shell/stores/settings";
 import { useShellAgentActions, type ShellChatTarget } from "@/shell/shellAgentActions";
@@ -101,7 +102,8 @@ import {
   resolveSessionHeaderBranch,
   resolveSessionHeaderProjectLabel,
   resolveSessionHeaderRows,
-  sessionHeaderInnerHeightDp,
+  sessionHeaderBandBottomDp,
+  sessionHeaderTopPadDp,
   type SessionHeaderRows,
 } from "@/shell/session-header/compact-rows";
 
@@ -320,25 +322,24 @@ function CapsuleInner({
   // C24: the imported stamp (C22) is what gates the 刷新 row.
   const imported = isImportedProviderSession(agent);
 
-  // KI-14 (用户拍板 2026-09-29): the official compact header + tab row are now
-  // UNMOUNTED in-flow by the workspace-screen touchpoint
-  // (COMPAT(shellHideOfficialSessionChrome)), so the bar no longer doubles as a
-  // cover — R2-08③'s tab-row-cover and KI-8's cover compensation are retired
-  // with them (关 tab→归档 is structurally unreachable, not painted out).
-  // The bar IS the header: top-anchored full width, pure two-line content
-  // height + status-bar inset, opaque surface0 with the shared bottom-border
-  // token. paddingBottom keeps the controls + two lines centered in the inner
-  // box. (Wide split: the touchpoint gate is compact-only, the official wide
-  // header still renders there — see report known_issues, wide convergence
-  // needs a separate ruling.)
+  // KI-14 (用户拍板 2026-09-29; KI-17② 扩面 2026-09-30): the official session
+  // chrome — header band (compact AND wide), mobile tab row, desktop fallback
+  // tabs row — is UNMOUNTED in-flow by the workspace-screen touchpoint
+  // (COMPAT(shellHideOfficialSessionChrome), gate = shellActive alone), so the
+  // bar no longer doubles as a cover — R2-08③'s tab-row-cover and KI-8's cover
+  // compensation are retired with them (关 tab→归档 is structurally
+  // unreachable, not painted out). The bar IS the header: top-anchored full
+  // width, pure two-line content height + status-bar inset, opaque surface0
+  // with the shared bottom-border token. paddingBottom keeps the controls +
+  // two lines centered in the inner box. The height math is compact-rows'
+  // `sessionHeaderBandBottomDp` — the SAME source KI-17① pads the session
+  // content column with, so bar bottom and content top can never drift.
   const barStyle = useMemo(() => {
-    const topPad = isCompact ? HEADER_TOP_PADDING_MOBILE : 0;
-    const inner = sessionHeaderInnerHeightDp(isCompact);
     return [
       styles.bar,
       {
-        height: insets.top + topPad + inner,
-        paddingTop: insets.top + topPad,
+        height: sessionHeaderBandBottomDp(insets.top, isCompact),
+        paddingTop: insets.top + sessionHeaderTopPadDp(isCompact),
       },
     ];
   }, [insets.top, isCompact]);
@@ -346,7 +347,10 @@ function CapsuleInner({
   const goBack = useCallback(() => {
     // Same verb as the system back and the edge swipe: pops the official screen
     // onto the shell list (C4's push-verb entry keeps that list mounted below).
-    router.back();
+    // KI-17③: on a headless cold deep-link stack (no `(shell)` beneath — the
+    // capsule now shows there too) there is nothing to pop, so detailBack
+    // replaces onto the shell chats list instead of stranding the screen.
+    detailBack(SHELL.chats);
   }, []);
   const openMenu = useCallback(() => menu.setOpen(true), [menu]);
 

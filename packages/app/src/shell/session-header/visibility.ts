@@ -6,9 +6,14 @@
 // 2. the top root-stack entry is the official host navigator (`h/[serverId]`) AND the
 //    resolved pathname is an official workspace route `/h/<sid>/workspace/<wid>` —
 //    the session screen the shell entered via the C4 open-intent push;
-// 3. a `(shell)` entry sits BELOW that top entry: the stack carries shell provenance.
-//    A session opened from the official IA (official /sessions, cold deep link,
-//    shellMode=false) has no `(shell)` beneath and never shows the bar.
+// 3. (KI-17③, orchestrator ruling 2026-09-30) NO provenance condition: the
+//    touchpoint gate hides the official chrome on shellMode alone, so a cold
+//    deep link (`paseogo://h/…`, no `(shell)` beneath) must carry the capsule
+//    too — a shell-mode session screen is unconditional (KI-14 aftermath:
+//    chrome gone + bar withheld = headless screen). With nothing to pop below,
+//    the capsule's 返回 key and the edge band replace onto (shell)/chats
+//    (detail-back idiom). Official IA (shellMode=false, incl. /sessions) still
+//    shows no bar through condition 1.
 // 4. (component side) the official session store reports a focused agent for that
 //    server — no agent tab, no bar.
 // 5. (C21) the compact explorer overlay is NOT open: the overlay paints its own
@@ -26,7 +31,7 @@
 // screen on tab focus, cleared on blur) is the single live source.
 
 import { parseHostWorkspaceRouteFromPathname } from "@/utils/host-routes";
-import { HOST_ROOT_ROUTE, SHELL_ROOT_ROUTE } from "@/shell/routes";
+import { HOST_ROOT_ROUTE } from "@/shell/routes";
 
 // The root-stack route names the predicate keys off live in shell/routes.ts
 // (R2-12 single source; routes.test.ts pairs them against the src/app tree).
@@ -60,7 +65,8 @@ export function resolveShellSessionWorkspace(
   if (input.explorerOverlayOpen) return null;
   const top = input.rootRoutes[input.rootIndex];
   if (top !== HOST_ROOT_ROUTE) return null;
-  if (!input.rootRoutes.slice(0, input.rootIndex).includes(SHELL_ROOT_ROUTE)) return null;
+  // KI-17③: the former `(shell)`-beneath provenance check is GONE — see header
+  // contract item 3 (a cold deep-link session is a headless screen without it).
   return parseHostWorkspaceRouteFromPathname(input.pathname);
 }
 

@@ -22,7 +22,8 @@ import { useCallback, useMemo } from "react";
 import { PixelRatio } from "react-native";
 import { Gesture } from "react-native-gesture-handler";
 import { useSharedValue } from "react-native-reanimated";
-import { router } from "expo-router";
+import { detailBack } from "@/shell/detail-back";
+import { SHELL } from "@/shell/routes";
 import { scheduleOnRN } from "react-native-worklets";
 import { useHorizontalScrollOptional } from "@/contexts/horizontal-scroll-context";
 import { resolveShellEdgeSwipeIntent, SHELL_EDGE_BAND_WIDTH_DP } from "./edge-swipe";
@@ -33,7 +34,10 @@ export function useShellEdgeBackGesture(enabled: boolean) {
   const touchStartY = useSharedValue(0);
 
   const requestBack = useCallback(() => {
-    router.back();
+    // KI-17③: same verb as the capsule's 返回 key — pops onto the shell list;
+    // on a headless cold deep-link stack (nothing beneath to pop) it replaces
+    // onto (shell)/chats instead of swallowing the swipe.
+    detailBack(SHELL.chats);
   }, []);
 
   // The layer spans the window, so the card's ≈32dp band is a start-x limit.

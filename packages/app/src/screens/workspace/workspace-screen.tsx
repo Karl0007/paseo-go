@@ -208,9 +208,11 @@ import { RenderProfile } from "@/utils/render-profiler";
 import { useWorkspaceCheckoutStatus } from "@/screens/workspace/use-workspace-checkout-status";
 import { useHasPullRequest, usePullRequestAutoAdd } from "@/panels/pull-request";
 // COMPAT(shellHideOfficialSessionChrome): paseo-go fork touchpoint source (card
-// KI-14, user ruling 2026-09-29) — read by useOfficialSessionChromeGates below.
-// Official files otherwise never import from src/shell/**; keep this the only one.
+// KI-14, user ruling 2026-09-29; KI-17 ruling A 2026-09-30 added the
+// compact-rows inset helper) — read by useOfficialSessionChromeGates below.
+// Official files otherwise never import from src/shell/**; keep these the only.
 import { usePaseoGoShellActive } from "@/shell/stores/settings";
+import { shellSessionContentInsetStyle } from "@/shell/session-header/compact-rows";
 
 const WORKSPACE_FLOATING_PANEL_PORTAL_HOST_PREFIX = "workspace-floating-panels";
 const EMPTY_UI_TABS: WorkspaceTab[] = [];
@@ -1295,22 +1297,29 @@ function shouldInspectWorkspaceRecovery(
 }
 
 // COMPAT(shellHideOfficialSessionChrome): paseo-go fork touchpoint read source
-// (card KI-14, user ruling 2026-09-29). In shell mode the official in-flow
-// session chrome — the ScreenHeader band and the mobile tab row
-// (workspace-tabs-row, the only in-shell leak of the close-tab→archive
-// gesture) — is superseded by the shell's session-header capsule (C21), which
-// already aggregates every control the band carried. The gate is
-// shellMode AND compact: official mode, e2e and every wide layout keep the
-// chrome verbatim. Both booleans are pre-gated HERE because
+// (card KI-14, user ruling 2026-09-29; gate widened by KI-17, orchestrator
+// ruling 2026-09-30). In shell mode the official in-flow session chrome — the
+// ScreenHeader band (compact AND wide), the mobile tab row and the desktop
+// fallback tabs row (the in-shell leaks of the close-tab→archive gesture) — is
+// superseded by the shell's session-header capsule (C21), which already
+// aggregates every control the band carried and floats on both form factors
+// (wide inner 34dp). The gate is shellMode ALONE: official mode and e2e keep
+// the chrome verbatim. isMobile still shapes showTabRow (the mobile switcher
+// is the compact-only surface). Both booleans are pre-gated HERE because
 // WorkspaceScreenContent's oxlint complexity sits at the ceiling — the body
-// seams are the showScreenHeader memo and the tab-row ternary, each consuming
-// one of these flags. Merge posture = re-apply those two gated reads onto the
-// new upstream body (keep the upstream JSX intact), same discipline as
-// COMPAT(shellFormFactorRotation) in constants/layout.ts.
-function useOfficialSessionChromeGates(): { hideHeaderBand: boolean; showTabRow: boolean } {
+// seams are the showScreenHeader memo, the tab-row ternary and the
+// fallback-row memo, each consuming one of these flags. Merge posture =
+// re-apply those gated reads onto the new upstream body (keep the upstream
+// JSX intact), same discipline as COMPAT(shellFormFactorRotation) in
+// constants/layout.ts.
+function useOfficialSessionChromeGates(insetTop = 0) {
   const isMobile = useIsCompactFormFactor();
-  const hide = usePaseoGoShellActive() && isMobile;
-  return { hideHeaderBand: hide, showTabRow: !hide && isMobile };
+  const hide = usePaseoGoShellActive();
+  // KI-17① (ruling A): the session content column starts at the capsule's
+  // bottom edge — math lives in compact-rows (same source as the bar itself);
+  // gate off ⇒ undefined ⇒ the official column's style array is a zero diff.
+  const insetStyle = shellSessionContentInsetStyle(hide, insetTop, isMobile);
+  return { hideHeaderBand: hide, showTabRow: !hide && isMobile, insetStyle };
 }
 
 function WorkspaceScreenGateFrame({ children }: { children: ReactNode }) {
@@ -1569,7 +1578,7 @@ function WorkspaceScreenContent({
   const isMobile = useIsCompactFormFactor();
   // COMPAT(shellHideOfficialSessionChrome) read source — see the hook's comment
   // for the gate rationale and merge posture.
-  const { hideHeaderBand, showTabRow } = useOfficialSessionChromeGates();
+  const { hideHeaderBand, showTabRow, insetStyle } = useOfficialSessionChromeGates(_insets.top);
   const hasMacTrafficLights = useHasWindowChromeObstruction("top-left");
   const explorerToggleOwner = resolveWorkspaceExplorerToggleOwner({
     isMobile,
@@ -3520,8 +3529,12 @@ function WorkspaceScreenContent({
   );
   const canRenderDesktopPaneSplits = supportsDesktopPaneSplits();
   const shouldRenderDesktopPaneFallback = useMemo(
-    () => !isMobile && !canRenderDesktopPaneSplits,
-    [isMobile, canRenderDesktopPaneSplits],
+    // COMPAT(shellHideOfficialSessionChrome) seam ④ (KI-17②): the desktop
+    // fallback tabs row carries the same close-tab→archive gesture the mobile
+    // switcher does — the shell capsule replaces it too (gate = hideHeaderBand,
+    // now shellActive alone).
+    () => !isMobile && !canRenderDesktopPaneSplits && !hideHeaderBand,
+    [canRenderDesktopPaneSplits, hideHeaderBand, isMobile],
   );
   useEffect(() => {
     if (!isRouteFocused || isNative || typeof document === "undefined" || activeTabDescriptor) {
@@ -3856,7 +3869,7 @@ function WorkspaceScreenContent({
 
   const showScreenHeader = useMemo(
     // COMPAT(shellHideOfficialSessionChrome) seam ①: the shell capsule replaces
-    // the whole header band under shellActive && compact.
+    // the whole header band under shellActive (KI-17②: compact AND wide).
     () => shouldShowWorkspaceScreenHeader({ isFocusModeEnabled, isMobile }) && !hideHeaderBand,
     [isFocusModeEnabled, isMobile, hideHeaderBand],
   );
@@ -4068,7 +4081,7 @@ function WorkspaceScreenContent({
   );
 
   const workspaceCenterColumn = (
-    <View style={styles.centerColumn}>
+    <View style={[styles.centerColumn, insetStyle]}>
       {rendersDesktopSplitContent ? null : renderWorkspaceScreenHeader()}
 
       {showTabRow ? (

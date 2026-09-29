@@ -66,10 +66,15 @@ describe("resolveShellSessionWorkspace", () => {
     ).toBeNull();
   });
 
-  it("hides when the stack carries no shell provenance (deep link / official sessions)", () => {
-    expect(
-      resolveShellSessionWorkspace(input({ rootRoutes: [HOST_ROUTE], rootIndex: 0 })),
-    ).toBeNull();
+  it("renders the capsule regardless of stack provenance (KI-17③ headless deep link)", () => {
+    // KI-14 aftermath closed by KI-17③: the touchpoint gate hides the official
+    // chrome on shellMode alone, so a cold deep link (`paseogo://h/…`, the host
+    // navigator as the ONLY root entry) must carry the capsule — hiding it here
+    // was the headless session screen. The 返回 key / edge band兑底 replace
+    // onto (shell)/chats when there is nothing to pop (detail-back idiom).
+    expect(resolveShellSessionWorkspace(input({ rootRoutes: [HOST_ROUTE], rootIndex: 0 }))).toEqual(
+      { serverId: "srv_1", workspaceId: "wks_86ef0" },
+    );
     // Shell entry ABOVE the host navigator (a second (shell) pushed over the session)
     // means a shell screen is on top, not the session.
     expect(
@@ -122,7 +127,10 @@ const VISIBILITY_BUCKETS: ReadonlyArray<readonly [string, ShellSessionVisibility
   ],
   ["shell off", input({ shellMode: false })],
   ["explorer overlay open", input({ explorerOverlayOpen: true })],
-  ["no shell provenance", input({ rootRoutes: [HOST_ROUTE], rootIndex: 0 })],
+  [
+    "headless deep link, no shell provenance (capsule up, KI-17③)",
+    input({ rootRoutes: [HOST_ROUTE], rootIndex: 0 }),
+  ],
   [
     "(shell) entry on top",
     input({ rootRoutes: [SHELL_ROUTE, HOST_ROUTE, SHELL_ROUTE], rootIndex: 2 }),
@@ -145,18 +153,19 @@ describe("C32 isCompact extension (capsule breakpoint-free, edge band compact-on
     expect(shouldEnableShellEdgeBack({ ...base, isCompact: false })).toBe(false);
   });
 
-  it("keeps the compact verdict byte-for-byte the pre-C32 predicate (既有桶逐值不变)", () => {
-    // The §6 zero-regression claim: with isCompact=true every bucket still
-    // returns exactly what the C21 predicate returned before the 扩参.
+  it("keeps every other bucket byte-for-byte (KI-17③ re-pin: provenance left the predicate)", () => {
+    // The §6 zero-regression claim, re-pinned by KI-17③: every bucket keeps its
+    // C21 verdict EXCEPT provenance, which is no longer an input to visibility —
+    // a shell-mode session screen is unconditional.
     expect(resolveShellSessionWorkspace(input())).toEqual({
       serverId: "srv_1",
       workspaceId: "wks_86ef0",
     });
     expect(resolveShellSessionWorkspace(input({ shellMode: false }))).toBeNull();
     expect(resolveShellSessionWorkspace(input({ explorerOverlayOpen: true }))).toBeNull();
-    expect(
-      resolveShellSessionWorkspace(input({ rootRoutes: [HOST_ROUTE], rootIndex: 0 })),
-    ).toBeNull();
+    expect(resolveShellSessionWorkspace(input({ rootRoutes: [HOST_ROUTE], rootIndex: 0 }))).toEqual(
+      { serverId: "srv_1", workspaceId: "wks_86ef0" },
+    );
   });
 });
 
