@@ -38,8 +38,12 @@ includeDirectories:false, matchMode:"fuzzy", limit:100}`（走 host runtime clie
   `authorization/operation-permissions.ts` +两行（`workspace.read`）。
 - **壳**：Tier 1 文件名零命中 → 自动发内容搜索，结果区标题「文件内容 · N」；命中行点击→预览
   定位到行（预览若不支持行定位则只打开文件，记 known_issue）。
-- **能力闸**：旧 daemon 无此 RPC → 按 `useHostFeature` 既有模式加闸，缺席=只跑 Tier 1 且
-  不自动发内容搜索请求（错误静默）。
+- **能力闸（KI-6S 已定契约，照此实现勿另造）**：server 未加 server_info.features 旗标；
+  壳侧把 `rpc_error{requestType:"workspace.content_search.request"}`（handler_error/校验失败）
+  视为"主机无内容搜索"→ 静默只跑 Tier-1，不重复骚扰、不弹错。
+  响应无 error 字段；cwd 不存在=rpc_error；空 query=零命中 truncated=false；
+  truncated=true 涵盖 limit/64MB 预算/5s 超时/深度>12 任一早停；matches.path=相对 cwd 正斜杠，
+  preview≤120 字符。详见 `agent://KI6SServer` api_shape 节。
 
 ## 验收（证据契约四项）
 
