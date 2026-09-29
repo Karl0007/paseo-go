@@ -71,7 +71,7 @@
 | KI-4                    | 导入屏父子会话无法辨认：父无 title→副标题退化成时间戳+UUID；且只加副标题未分组（devd 实测 50/60 带 parentHandleId、父仅 2 个）              | 📝 `todo/KI4-import-parent-chain-missing.md` 待拍板         |
 | KI-5                    | 导入屏主机 chip 点击无反应：单主机走 `useHostChooser` 自动选中捷径（host-chooser.tsx:88-91），modal 永不打开，且「添加主机」不可达          | 📝 `todo/KI5-import-host-chip-noop.md` 待拍板               |
 | KI-10                   | 已回答的交互提问在时间线回放中复活为待答态（误提交=脏数据注入；临时口径=点关闭勿提交）                                                      | 📝 `todo/KI10-answered-ask-resurfaces.md` 待钉死归属        |
-| KI-11                   | 对话列表：长按应即时弹菜单/菜单开→拖动接力/下拖误触刷新/拖动置顶与按钮疑似冲突（四条已拍板成卡）                                            | 🚧 `todo/KI11-chat-longpress-drag-pin.md` 排队（KI-5 后）   |
+| KI-11                   | 对话列表长按/拖动/置顶四条：代码+单测+①帧已验收（cf305d19，置顶冲突实锤已统一同 action）；②③④设备帧=blocked-device-env 待墙充补证轮         | 🔶 代码毕，补证待设备（BUILD 坑6d）                         |
 | KI-12                   | 三 tab 顶栏逻辑/高度不统一且随滚动移动：抽 shell-tab-header 等高固定容器，逐屏搬出滚动区（已拍板成卡）                                      | 🚧 `todo/KI12-tab-header-unify.md` 排队（KI-11 后 KI-9 前） |
 
 ## 6. 证据契约总核（§11）
