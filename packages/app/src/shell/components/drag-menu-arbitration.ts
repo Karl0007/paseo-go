@@ -15,10 +15,11 @@
 //   pressing → armed      at DRAG_ARM_DELAY_MS (180ms) if within
 //                          DRAG_ARM_STATIONARY_SLOP_PX (4px) of the anchor;
 //   pressing|armed → menu_open
-//                        at CONTEXT_MENU_DELAY_MS (500ms — the shell's OWN
-//                        decision constant, see the note at its definition:
-//                        no shared source with the engine/RN defaults) if
-//                        within CONTEXT_MENU_STATIONARY_SLOP_PX (6px);
+//                        at CONTEXT_MENU_DELAY_MS (250ms since KI-16 — the
+//                        shell's OWN decision constant, see the note at its
+//                        definition: no shared source with the engine/RN
+//                        defaults) if within
+//                        CONTEXT_MENU_STATIONARY_SLOP_PX (6px);
 //   menu_open → dragging   once the finger is more than
 //                          MENU_TO_DRAG_RELAY_SLOP_PX (8px) from the anchor —
 //                          the C20 relay edge.
@@ -26,7 +27,7 @@
 // Why 4 < 6 < 8: the arm slop is the strictest because arming only *enables*
 // a drag — a mis-arm is invisible to the user. The menu slop is looser because
 // opening the window is a visible commitment. The relay must strictly exceed
-// the menu slop (a finger that drifted 6px at t=500ms legitimately decided the
+// the menu slop (a finger that drifted 6px at t=250ms legitimately decided the
 // window; that same drift must not snatch it back) AND beat the list's own
 // gesture steal. The card ruled 10px; the MatePad measured the steal: a
 // continued slide after the decision reached the row only up to ~10px before
@@ -48,15 +49,17 @@ import { decideLongPressMove } from "@/utils/sidebar-gesture-arbitration";
 
 export const DRAG_ARM_DELAY_MS = 180;
 export const DRAG_ARM_STATIONARY_SLOP_PX = 4;
-// The shell's OWN menu-open decision window (C3 on-device validated). This is
-// NOT sourced from the engine or RN: the shell never passes a delayLongPress into
-// the engine's native-Pressable path, so archived/search rows tickle at React
-// Native's internal default — which merely HAPPENS to be 500 too (coincidence,
-// no shared source; the official sidebar arm uses 450 in
-// use-long-press-drag-interaction.ts). Treat this constant as the single truth
-// for the arbitration rows; move it only with new on-device data, never to
-// "align" it with an upstream default (R2-24).
-export const CONTEXT_MENU_DELAY_MS = 500;
+// The shell's OWN menu-open decision window. KI-16 (user ruling 2026-09-30,
+// 「时间先砍半」): halved 500→250. The archived/search Pressable path now
+// receives THIS constant explicitly (chat-list-row.tsx passes it as the
+// trigger's longPressDelayMs), so the old "coincidence 500" — React Native's
+// internal default merely matching us — is gone: one source of truth for both
+// row families. Still no shared source with the engine or the official sidebar
+// arm (450 in use-long-press-drag-interaction.ts); move it only with new
+// on-device data or a new user ruling, never to "align" it with an upstream
+// default (R2-24). Arm stays 180: the ladder 180 < 250 keeps arming
+// observable before the window decision.
+export const CONTEXT_MENU_DELAY_MS = 250;
 export const CONTEXT_MENU_STATIONARY_SLOP_PX = 6;
 // Card value was 10; lowered to the armed path's 8 after the on-device steal
 // measurement above. 8 still strictly exceeds the 6px menu slop.
@@ -91,7 +94,7 @@ export type RowGestureEvent =
   | { type: "press_in" }
   /** The 180ms arm timer fired; `distance` is from the anchor at that instant. */
   | { type: "arm_tick"; distance: number }
-  /** The 500ms menu timer fired; `distance` is from the anchor at that instant. */
+  /** The 250ms menu timer fired; `distance` is from the anchor at that instant. */
   | { type: "menu_tick"; distance: number }
   /** Finger moved; deltas are from the anchor (the menu anchors at the press point). */
   | { type: "touch_move"; dx: number; dy: number }

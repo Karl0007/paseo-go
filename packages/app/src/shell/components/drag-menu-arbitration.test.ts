@@ -5,7 +5,9 @@
 // window in the SAME step it lifts the row, and terminal phases never flip back.
 import { describe, expect, it } from "vitest";
 import {
+  CONTEXT_MENU_DELAY_MS,
   CONTEXT_MENU_STATIONARY_SLOP_PX,
+  DRAG_ARM_DELAY_MS,
   DRAG_ARM_STATIONARY_SLOP_PX,
   IDLE_ROW_GESTURE_STATE,
   MENU_TO_DRAG_RELAY_SLOP_PX,
@@ -46,7 +48,7 @@ describe("drag-menu-arbitration: hold ladder", () => {
     expect(step.effects).toEqual([]);
   });
 
-  it("stationary 500ms opens the anchored window from pressing OR armed", () => {
+  it("stationary 250ms opens the anchored window from pressing OR armed", () => {
     const fromPressing = stepRowGesture(run([{ type: "press_in" }]), menuTick());
     expect(fromPressing.state).toEqual({ phase: "menu_open", didLongPress: true });
     expect(fromPressing.effects).toEqual(["open_menu", "haptic_menu"]);
@@ -71,6 +73,18 @@ describe("drag-menu-arbitration: hold ladder", () => {
     expect(stepRowGesture(dragged, armTick()).effects).toEqual([]);
     const owned = run([{ type: "press_in" }, move(1, 10)]);
     expect(stepRowGesture(owned, menuTick()).effects).toEqual([]);
+  });
+});
+
+// KI-16 (user ruling 2026-09-30「时间先砍半」): the ladder VALUES are part of
+// the contract — the hook arms its timers from these constants, so the machine
+// test pins the halved threshold and the arm-before-menu ordering (a menu that
+// fires at or before the arm tick would make arming meaningless).
+describe("drag-menu-arbitration: timing constants (KI-16)", () => {
+  it("menu threshold is the halved 250ms and still trails the 180ms arm", () => {
+    expect(CONTEXT_MENU_DELAY_MS).toBe(250);
+    expect(DRAG_ARM_DELAY_MS).toBe(180);
+    expect(DRAG_ARM_DELAY_MS).toBeLessThan(CONTEXT_MENU_DELAY_MS);
   });
 });
 

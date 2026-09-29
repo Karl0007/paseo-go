@@ -11,7 +11,8 @@
 // MenuOverlay is a window-level native Modal, and SHOWING a Modal mid-gesture cancels
 // the row's touch stream (C20 device finding, re-verified for the popover form in
 // C33 — BUILD.md §"菜单转 popover 后…抬手才 materialize"). Ruling ① wants the menu at
-// the 500ms threshold WITH the finger still down, and ruling ② wants the same finger
+// the 250ms menu threshold (KI-16 halving) WITH the finger still down, and
+// ruling ② wants the same finger
 // to then slide into a row drag — both need the stream to survive, so the mid-hold
 // surface cannot be a Modal. The host below renders the engine's OWN `AnchoredSurface`
 // + `MenuPage` + `MenuItem` (zero engine-file changes, pixel-identical popover) inside

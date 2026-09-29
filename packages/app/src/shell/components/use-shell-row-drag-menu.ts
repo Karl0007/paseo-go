@@ -1,14 +1,15 @@
 // Drag-vs-menu arbitration for chat rows (cards C3 + C20, DESIGN §14.4; KI-11).
 //
 // The decisions live in the pure state machine (`drag-menu-arbitration.ts`):
-// drag arms at 180ms stationary, the menu window OPENS at a 500ms stationary
-// hold, movement before either decides between them — and once the window is
-// open, moving the same finger past the relay slop (8px, measured-safe — see
+// drag arms at 180ms stationary, the menu window OPENS at a 250ms stationary
+// hold (KI-16 halving; the machine module's constant note), movement before
+// either decides between them — and once the window is open, moving the same
+// finger past the relay slop (8px, measured-safe — see
 // the machine module) dismisses the menu and hands the touch to the row drag,
 // in one synchronous frame (the KI-11 ruling ② edge). See that module for the
 // slop ladder and why 4 < 6 < 8.
 //
-// KI-11 ruling ① reversed the C20 actuator: the menu now appears AT the 500ms
+// KI-11 ruling ① reversed the C20 actuator: the menu now appears AT the menu
 // threshold with the finger still down, not on release. That is only possible
 // because the mid-hold surface left the engine's Modal — showing a window-level
 // Modal mid-gesture cancels the row's touch stream (C20 device finding, re-

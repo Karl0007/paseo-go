@@ -17,9 +17,10 @@
 // stream. Unpinned rows dropped into the group pin themselves at the drop slot
 // (the screen owns that semantics). Rows fade in/out individually — keys are
 // stable, so nothing ever re-mounts the whole table.
-// KI-11 (rulings ①+②): the window OPENS at the 500ms threshold with the finger
-// still down, and the relay fires from that VISIBLE menu. Both are only
-// possible because the row menu's surface is no longer the engine's Modal —
+// KI-11 (rulings ①+②): the window OPENS at the menu threshold (250ms since the
+// KI-16 halving) with the finger still down, and the relay fires from that
+// VISIBLE menu. Both are only possible because the row menu's surface is no
+// longer the engine's Modal —
 // every chat-row menu (long press, ⋯, archived/search rows) renders through the
 // shell-hosted `ShellRowMenuHost` (chat-row-menu.tsx). The engine's
 // ContextMenu/ContextMenuTrigger stay as the press primitive + context provider
@@ -38,6 +39,7 @@ import {
   useShellRowDragMenu,
   type RowMenuController,
 } from "@/shell/components/use-shell-row-drag-menu";
+import { CONTEXT_MENU_DELAY_MS } from "@/shell/components/drag-menu-arbitration";
 import { getProviderIcon } from "@/components/provider-icons";
 import { joinSubtitleParts } from "@/command-center/results";
 import { useCompactTimeAgo } from "@/hooks/use-compact-time-ago";
@@ -290,8 +292,9 @@ function ChatRowInner({
   }, [openMenuAt]);
 
   // Archived/search rows keep the plain Pressable long press (no drag layer,
-  // so no arbitration): the trigger's own 500ms tick opens the host menu at
-  // the touch point — the same threshold ruling ① gives the live rows.
+  // so no arbitration): the trigger's own CONTEXT_MENU_DELAY_MS tick opens the
+  // host menu at the touch point — KI-16 passes the threshold explicitly below
+  // (no reliance on React Native's internal 500ms default; single source).
   const handleLongPress = useCallback(
     (event: GestureResponderEvent) => {
       selectionHaptic();
@@ -356,9 +359,11 @@ function ChatRowInner({
         // (enabledOnMobile=false keeps the trigger as a press primitive only).
         // Draggable rows (every live-filter row since C20) hand the long press
         // to the arbitration hook, which opens the host menu at its own tick;
-        // archived/search rows open the same host menu from the plain 500ms
-        // Pressable long press below.
+        // archived/search rows open the same host menu from the Pressable long
+        // press below. KI-16: BOTH ride the same CONTEXT_MENU_DELAY_MS — the
+        // trigger's delay is passed explicitly, killing the "coincidence 500".
         enabledOnMobile={false}
+        longPressDelayMs={CONTEXT_MENU_DELAY_MS}
         onLongPress={draggable ? undefined : handleLongPress}
         onContextMenu={handleContextMenu}
         onPressIn={draggable ? interaction.handlePressIn : undefined}
