@@ -15,7 +15,6 @@
 import { useCallback, useEffect, useMemo, useRef, type ReactNode } from "react";
 import { Pressable, ScrollView, Switch, Text, View } from "react-native";
 import { router, type Href } from "expo-router";
-import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useTranslation } from "react-i18next";
 import { StyleSheet, withUnistyles } from "react-native-unistyles";
 import { ChevronRight } from "lucide-react-native";
@@ -39,6 +38,7 @@ import { usePaseoGoSettingsStore, type ShellTab } from "@/shell/stores/settings"
 import { usePaseoGoArchiveStore } from "@/shell/stores/archive";
 import { confirmDialog } from "@/utils/confirm-dialog";
 import { subscribeRailRetap } from "@/shell/tablet/rail-events";
+import { ShellTabHeader } from "@/shell/components/shell-tab-header";
 
 // Theme-fed Switch tints via the withUnistyles pattern (docs/unistyles.md §3).
 const ThemedModeSwitch = withUnistyles(Switch, (theme) => ({
@@ -206,7 +206,6 @@ function HostSettingsRow({ host, online }: { host: HostProfile; online: boolean 
 
 export function MeScreenBody() {
   const { t } = useTranslation(SHELL_I18N_NAMESPACE);
-  const insets = useSafeAreaInsets();
   const toast = useToast();
 
   // C31 §4-8: rail retap = 回顶 — a real animated scrollTo on this ScrollView.
@@ -311,113 +310,111 @@ export function MeScreenBody() {
   }, [handleClearData]);
 
   return (
-    <ScrollView
-      ref={scrollRef}
-      style={styles.screen}
-      contentContainerStyle={[styles.content, { paddingTop: insets.top + 12 }]}
-    >
-      <Text style={styles.title}>{t("me.title")}</Text>
+    <View style={styles.screen}>
+      {/* KI-12: 标题行搬出 ScrollView——顶栏固定不随滚动，与对话/工作区等高。 */}
+      <ShellTabHeader title={t("me.title")} />
+      <ScrollView ref={scrollRef} style={styles.scroll} contentContainerStyle={styles.content}>
+        <Text style={styles.sectionHeader}>{t("me.overviewHeader")}</Text>
+        <View style={styles.card} testID="me-overview">
+          <Text style={styles.rowTitle}>
+            {overviewLoading
+              ? t("me.overviewLoading")
+              : t("me.overview", {
+                  hosts: overview.hostCount,
+                  projects: overview.projectCount,
+                  agents: overview.activeAgentCount,
+                })}
+          </Text>
+        </View>
 
-      <Text style={styles.sectionHeader}>{t("me.overviewHeader")}</Text>
-      <View style={styles.card} testID="me-overview">
-        <Text style={styles.rowTitle}>
-          {overviewLoading
-            ? t("me.overviewLoading")
-            : t("me.overview", {
-                hosts: overview.hostCount,
-                projects: overview.projectCount,
-                agents: overview.activeAgentCount,
-              })}
-        </Text>
-      </View>
+        <Text style={styles.sectionHeader}>{t("me.officialHeader")}</Text>
+        <View style={styles.card}>
+          <SettingRow
+            title={t("me.globalSettings")}
+            hint={t("me.globalSettingsHint")}
+            onPress={handleOpenGlobalSettings}
+            testID="me-global-settings"
+          />
+          {hosts.map((host) => (
+            <HostSettingsRow
+              key={host.serverId}
+              host={host}
+              online={(statuses.get(host.serverId) ?? "connecting") === "online"}
+            />
+          ))}
+        </View>
 
-      <Text style={styles.sectionHeader}>{t("me.officialHeader")}</Text>
-      <View style={styles.card}>
-        <SettingRow
-          title={t("me.globalSettings")}
-          hint={t("me.globalSettingsHint")}
-          onPress={handleOpenGlobalSettings}
-          testID="me-global-settings"
-        />
-        {hosts.map((host) => (
-          <HostSettingsRow
-            key={host.serverId}
-            host={host}
-            online={(statuses.get(host.serverId) ?? "connecting") === "online"}
+        <Text style={styles.sectionHeader}>{t("me.shellModeHeader")}</Text>
+        <View style={styles.card}>
+          <SettingRow
+            title={t("me.shellMode")}
+            hint={t("me.shellModeHint", { env: SHELL_MODE_ENV_DEFAULT ? "on" : "off" })}
+            testID="me-shell-mode-row"
+          >
+            <ThemedModeSwitch
+              testID="shell-mode-switch"
+              value={shellModeActive}
+              accessibilityLabel={t("me.shellMode")}
+              onValueChange={handleToggleShellMode}
+            />
+          </SettingRow>
+          <View style={styles.divider} />
+          <SettingRow title={t("me.theme")} hint={t("me.themeHint")} testID="me-theme-row">
+            <ChoiceChips
+              options={themeOptions}
+              value={themeChoice}
+              onSelect={handleSelectTheme}
+              testIdPrefix="me-theme"
+            />
+          </SettingRow>
+          <View style={styles.divider} />
+          <SettingRow
+            title={t("me.defaultTab")}
+            hint={t("me.defaultTabHint")}
+            testID="me-default-tab-row"
+          >
+            <ChoiceChips
+              options={defaultTabOptions}
+              value={defaultTab}
+              onSelect={handleSelectDefaultTab}
+              testIdPrefix="me-default-tab"
+            />
+          </SettingRow>
+          <View style={styles.divider} />
+          <SettingRow
+            title={t("me.notifications")}
+            hint={t("me.notificationsHint")}
+            testID="me-notifications-row"
+          >
+            <ThemedModeSwitch
+              testID="shell-notify-switch"
+              value={notifications}
+              accessibilityLabel={t("me.notifications")}
+              onValueChange={handleToggleNotifications}
+            />
+          </SettingRow>
+          <View style={styles.divider} />
+          <SettingRow
+            title={t("me.clearData")}
+            hint={t("me.clearDataHint")}
+            destructive
+            onPress={handleClearDataPress}
+            testID="me-clear-data"
           />
-        ))}
-      </View>
+        </View>
 
-      <Text style={styles.sectionHeader}>{t("me.shellModeHeader")}</Text>
-      <View style={styles.card}>
-        <SettingRow
-          title={t("me.shellMode")}
-          hint={t("me.shellModeHint", { env: SHELL_MODE_ENV_DEFAULT ? "on" : "off" })}
-          testID="me-shell-mode-row"
-        >
-          <ThemedModeSwitch
-            testID="shell-mode-switch"
-            value={shellModeActive}
-            accessibilityLabel={t("me.shellMode")}
-            onValueChange={handleToggleShellMode}
-          />
-        </SettingRow>
-        <View style={styles.divider} />
-        <SettingRow title={t("me.theme")} hint={t("me.themeHint")} testID="me-theme-row">
-          <ChoiceChips
-            options={themeOptions}
-            value={themeChoice}
-            onSelect={handleSelectTheme}
-            testIdPrefix="me-theme"
-          />
-        </SettingRow>
-        <View style={styles.divider} />
-        <SettingRow
-          title={t("me.defaultTab")}
-          hint={t("me.defaultTabHint")}
-          testID="me-default-tab-row"
-        >
-          <ChoiceChips
-            options={defaultTabOptions}
-            value={defaultTab}
-            onSelect={handleSelectDefaultTab}
-            testIdPrefix="me-default-tab"
-          />
-        </SettingRow>
-        <View style={styles.divider} />
-        <SettingRow
-          title={t("me.notifications")}
-          hint={t("me.notificationsHint")}
-          testID="me-notifications-row"
-        >
-          <ThemedModeSwitch
-            testID="shell-notify-switch"
-            value={notifications}
-            accessibilityLabel={t("me.notifications")}
-            onValueChange={handleToggleNotifications}
-          />
-        </SettingRow>
-        <View style={styles.divider} />
-        <SettingRow
-          title={t("me.clearData")}
-          hint={t("me.clearDataHint")}
-          destructive
-          onPress={handleClearDataPress}
-          testID="me-clear-data"
-        />
-      </View>
-
-      <Text style={styles.sectionHeader}>{t("me.aboutHeader")}</Text>
-      <View style={styles.card} testID="me-about">
-        <SettingRow
-          title={t("me.shellVersion", { version: about.version })}
-          hint={t("me.upstream", { ref: about.upstreamRef })}
-          testID="me-about-row"
-        >
-          <ExternalLink href={about.licenseUrl} label={t("me.license")} testID="me-license" />
-        </SettingRow>
-      </View>
-    </ScrollView>
+        <Text style={styles.sectionHeader}>{t("me.aboutHeader")}</Text>
+        <View style={styles.card} testID="me-about">
+          <SettingRow
+            title={t("me.shellVersion", { version: about.version })}
+            hint={t("me.upstream", { ref: about.upstreamRef })}
+            testID="me-about-row"
+          >
+            <ExternalLink href={about.licenseUrl} label={t("me.license")} testID="me-license" />
+          </SettingRow>
+        </View>
+      </ScrollView>
+    </View>
   );
 }
 
@@ -426,16 +423,14 @@ const styles = StyleSheet.create((theme) => ({
     flex: 1,
     backgroundColor: theme.colors.surface0,
   },
+  scroll: {
+    flex: 1,
+  },
   content: {
     paddingHorizontal: theme.spacing[4],
+    paddingTop: theme.spacing[2],
     paddingBottom: theme.spacing[8],
     gap: theme.spacing[2],
-  },
-  title: {
-    fontSize: theme.fontSize["2xl"],
-    fontWeight: theme.fontWeight.semibold,
-    color: theme.colors.foreground,
-    marginBottom: theme.spacing[2],
   },
   sectionHeader: {
     fontSize: theme.fontSize.sm,

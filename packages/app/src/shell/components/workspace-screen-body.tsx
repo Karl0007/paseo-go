@@ -12,8 +12,10 @@
 // bodies, so expansion survives tab round-trips and session pushes.
 //
 // --- original screen notes (unchanged behaviour, cards C5-C26) ---
-// 工作区 tab (DESIGN §5 + §14.8, cards C5+C6+C7+C9+C26): 搜索 (C9: the bar morphs into
-// an input; 文件名 hits come from the session-store explorer cache — the protocol has
+// 工作区 tab (DESIGN §5 + §14.8, cards C5+C6+C7+C9+C26; KI-12: the top bar is the
+// unified ShellTabHeader — fixed height, inset once, outside the FlatList): 搜索
+// (C9: the header icon morphs the bar into an input; 文件名 hits come from the
+// session-store explorer cache — the protocol has
 // no filename-search RPC, so only 已浏览目录 are covered, which the empty state says
 // out loud; a hit pushes the C6 preview directly) → 收藏夹区 (files star + ⚡ 快捷指令
 // 混排) → 主机分组 (连接点 + 名称 + ⚙ 官方 host settings；离线置灰+重试) → 三层树
@@ -24,7 +26,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { FlatList, Pressable, RefreshControl, Text, View } from "react-native";
 import { router, type Href } from "expo-router";
-import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useTranslation } from "react-i18next";
 import { StyleSheet } from "react-native-unistyles";
 import { FolderTree, Plus, Search, SearchX, Star, Zap, type LucideIcon } from "lucide-react-native";
@@ -64,6 +65,7 @@ import { usePaseoGoFavoritesStore, type ShellFavoriteFile } from "@/shell/stores
 import { usePaseoGoCommandsStore, type ShellCommand } from "@/shell/stores/commands";
 import { useShellCommandRunner } from "@/shell/commands/use-shell-command-runner";
 import { SearchModeBar } from "@/shell/components/search/search-mode-bar";
+import { ShellTabHeader } from "@/shell/components/shell-tab-header";
 import { FileSearchRow } from "@/shell/components/search/file-search-row";
 import {
   collectBrowsedWorkspaces,
@@ -212,7 +214,6 @@ function ActionRow({
 
 export function WorkspaceScreenBody({ selectedAgentKey = null }: ShellScreenBodyProps) {
   const { t } = useTranslation(SHELL_I18N_NAMESPACE);
-  const insets = useSafeAreaInsets();
   const toast = useToast();
   const openAddProject = useOpenAddProject();
 
@@ -478,6 +479,12 @@ export function WorkspaceScreenBody({ selectedAgentKey = null }: ShellScreenBody
     setSearchActive(false);
     setQuery("");
   }, []);
+  // KI-12: the search affordance unified onto the chats tab's icon → morph logic
+  // (same 顶栏逻辑 the user asked for); the SearchModeBar behavior is verbatim.
+  const searchStyle = useCallback(
+    ({ pressed }: { pressed: boolean }) => [styles.iconButton, pressed && styles.iconButtonPressed],
+    [],
+  );
   const handleOpenHit = useCallback(
     (hit: FileSearchHit) =>
       router.push(
@@ -798,8 +805,8 @@ export function WorkspaceScreenBody({ selectedAgentKey = null }: ShellScreenBody
 
   return (
     <View style={styles.screen}>
-      <View style={[styles.header, { paddingTop: insets.top + 12 }]}>
-        {searchActive ? (
+      {searchActive ? (
+        <ShellTabHeader>
           <SearchModeBar
             onQueryChange={setQuery}
             onCancel={handleSearchClose}
@@ -807,23 +814,20 @@ export function WorkspaceScreenBody({ selectedAgentKey = null }: ShellScreenBody
             inputTestID="shell-workspace-search-input"
             cancelTestID="shell-workspace-search-cancel"
           />
-        ) : (
-          <>
-            <Text style={styles.title}>{t("workspace.title")}</Text>
-            <Pressable
-              onPress={handleSearchOpen}
-              accessibilityRole="search"
-              style={styles.searchBar}
-              testID="shell-workspace-search"
-            >
-              <Search size={15} color={styles.searchIcon.color} />
-              <Text style={styles.searchPlaceholder} numberOfLines={1}>
-                {t("workspace.searchPlaceholder")}
-              </Text>
-            </Pressable>
-          </>
-        )}
-      </View>
+        </ShellTabHeader>
+      ) : (
+        <ShellTabHeader title={t("workspace.title")}>
+          <Pressable
+            onPress={handleSearchOpen}
+            accessibilityRole="search"
+            hitSlop={8}
+            testID="shell-workspace-search"
+            style={searchStyle}
+          >
+            <Search size={18} color={styles.iconColor.color} />
+          </Pressable>
+        </ShellTabHeader>
+      )}
       {body}
       <CommandWorkspacePickerSheet
         open={pickerCommand !== null}
@@ -840,34 +844,19 @@ const styles = StyleSheet.create((theme) => ({
     flex: 1,
     backgroundColor: theme.colors.surface0,
   },
-  header: {
-    paddingHorizontal: theme.spacing[4],
-    paddingBottom: theme.spacing[2],
-    gap: theme.spacing[3],
-  },
-  title: {
-    fontSize: theme.fontSize["2xl"],
-    fontWeight: theme.fontWeight.semibold,
-    color: theme.colors.foreground,
-  },
-  searchBar: {
-    flexDirection: "row",
+  // KI-12: the header search icon shares the chats header's icon-button tokens.
+  iconButton: {
+    width: 32,
+    height: 32,
     alignItems: "center",
-    gap: theme.spacing[2],
-    height: 44,
-    paddingHorizontal: theme.spacing[3],
-    borderRadius: theme.borderRadius.lg,
+    justifyContent: "center",
+    borderRadius: theme.borderRadius.full,
+  },
+  iconButtonPressed: {
     backgroundColor: theme.colors.surface1,
-    borderWidth: StyleSheet.hairlineWidth,
-    borderColor: theme.colors.border,
   },
-  searchIcon: {
+  iconColor: {
     color: theme.colors.foregroundMuted,
-  },
-  searchPlaceholder: {
-    flex: 1,
-    fontSize: theme.fontSize.sm,
-    color: theme.colors.foregroundExtraMuted,
   },
   searchEmpty: {
     alignItems: "center",

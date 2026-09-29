@@ -45,7 +45,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Text, View } from "react-native";
 import { router, type Href } from "expo-router";
-import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useTranslation } from "react-i18next";
 import { StyleSheet } from "react-native-unistyles";
 import { Archive, MessageCircle, SearchX, WifiOff } from "lucide-react-native";
@@ -250,7 +249,6 @@ function searchFieldsFor(
 
 export function ChatsScreenBody({ selectedAgentKey = null }: ShellScreenBodyProps) {
   const { t } = useTranslation(SHELL_I18N_NAMESPACE);
-  const insets = useSafeAreaInsets();
   const toast = useToast();
 
   const hosts = useHosts();
@@ -616,23 +614,23 @@ export function ChatsScreenBody({ selectedAgentKey = null }: ShellScreenBodyProp
 
   return (
     <View style={styles.screen}>
-      <View style={[styles.headerWrap, { paddingTop: insets.top }]}>
-        <ChatsHeader
-          hosts={hosts}
-          statuses={statuses}
-          onRetryHost={handleRetryHost}
-          onNewChat={handleNewChat}
-          onImportChat={handleImportChat}
-          onConnectHost={handleConnectHost}
-          onSearch={handleSearchOpen}
-          searchActive={searchActive}
-          onQueryChange={setQuery}
-          onSearchClose={handleSearchClose}
-          filter={filter}
-          onFilterChange={setFilter}
-          archivedCount={archivedCount}
-        />
-      </View>
+      {/* KI-12: ChatsHeader 自带 ShellTabHeader（inset 在容器内加一次），头栏是列表的
+          兄弟节点——固定不随滚动，宽屏列表列复用同一 body 天然同构。 */}
+      <ChatsHeader
+        hosts={hosts}
+        statuses={statuses}
+        onRetryHost={handleRetryHost}
+        onNewChat={handleNewChat}
+        onImportChat={handleImportChat}
+        onConnectHost={handleConnectHost}
+        onSearch={handleSearchOpen}
+        searchActive={searchActive}
+        onQueryChange={setQuery}
+        onSearchClose={handleSearchClose}
+        filter={filter}
+        onFilterChange={setFilter}
+        archivedCount={archivedCount}
+      />
       {showSkeleton ? (
         <View style={styles.skeletonWrap} testID="shell-chats-skeleton">
           <SidebarAgentListSkeleton />
@@ -661,10 +659,6 @@ const styles = StyleSheet.create((theme) => ({
   screen: {
     flex: 1,
     backgroundColor: theme.colors.surface0,
-  },
-  headerWrap: {
-    backgroundColor: theme.colors.surface0,
-    paddingTop: theme.spacing[2],
   },
   skeletonWrap: {
     flex: 1,

@@ -1,11 +1,13 @@
-// 对话 tab top bar (DESIGN §4): 连接状态胶囊 (tap = per-host status popover with
-// single-host retry) | 进行中/已归档 filter segment (C3: archived rows hide from the
-// live list; the filter reveals them and their 取消归档/删除 menu) | 搜索 (C9: the
-// icon opens the header's search mode — the whole bar morphs into input + 取消,
-// filtering the list below instantly) | ＋菜单 (新建对话 = C17 direct push of the
-// official /new screen (DESIGN §14.7), 导入会话 = C10 push of the shell import screen).
-// Menus ride the official menu engine
-// in its anchored-popover presentation (C19, DESIGN §14.3): the engine default compact
+// 对话 tab top bar (KI-12: rendered inside the unified ShellTabHeader — fixed
+// height, inset once, outside the list). DESIGN §4: 连接状态胶囊 (tap = per-host
+// status popover with single-host retry) sits in the bar's right slot next to
+// 搜索/＋; the 进行中/已归档 filter segment (C3: archived rows hide from the live
+// list; the filter reveals them and their 取消归档/删除 menu) rides the accessory
+// band. 搜索 (C9: the icon opens the header's search mode — the bar row morphs
+// into input + 取消, filtering the list below instantly). ＋菜单 (新建对话 = C17
+// direct push of the official /new screen (DESIGN §14.7), 导入会话 = C10 push of
+// the shell import screen). Menus ride the official menu engine in its
+// anchored-popover presentation (C19, DESIGN §14.3): the engine default compact
 // mode, anchoring under the trigger and clamping at the right edge.
 import { useCallback, useMemo } from "react";
 import { Pressable, Text, View } from "react-native";
@@ -24,6 +26,7 @@ import type { HostRuntimeConnectionStatus } from "@/runtime/host-runtime";
 import { SHELL_I18N_NAMESPACE } from "@/shell/i18n";
 import type { HostProfile } from "@/types/host-connection";
 import { SearchModeBar } from "@/shell/components/search/search-mode-bar";
+import { ShellTabHeader } from "@/shell/components/shell-tab-header";
 
 const HOST_STATUS_LABEL_KEY: Record<HostRuntimeConnectionStatus, string> = {
   idle: "chats.hostStatus.idle",
@@ -157,10 +160,36 @@ export function ChatsHeader({
   );
   const pickActive = useCallback(() => onFilterChange("active"), [onFilterChange]);
   const pickArchived = useCallback(() => onFilterChange("archived"), [onFilterChange]);
+  // KI-12 accessory 带：进行中/已归档 segment（react-perf：JSX 进 prop 须 useMemo 稳引用）。
+  const filterAccessory = useMemo(
+    () => (
+      <View style={[styles.pill, styles.segmentGroup]} testID="shell-chat-filter">
+        <FilterSegment
+          label={t("chats.filter.active")}
+          selected={filter === "active"}
+          onPress={pickActive}
+          testID="shell-filter-active"
+        />
+        <FilterSegment
+          label={
+            archivedCount > 0
+              ? t("chats.filter.archivedCount", { count: archivedCount })
+              : t("chats.filter.archived")
+          }
+          selected={filter === "archived"}
+          onPress={pickArchived}
+          testID="shell-filter-archived"
+        />
+      </View>
+    ),
+    [t, filter, archivedCount, pickActive, pickArchived],
+  );
 
   if (searchActive) {
+    // KI-12: the search morph rides the same fixed container (title-less full-row
+    // slot) — total header height never changes, the list below never jumps.
     return (
-      <View style={styles.header}>
+      <ShellTabHeader>
         <SearchModeBar
           onQueryChange={onQueryChange}
           onCancel={onSearchClose}
@@ -168,131 +197,89 @@ export function ChatsHeader({
           inputTestID="shell-chat-search-input"
           cancelTestID="shell-chat-search-cancel"
         />
-      </View>
+      </ShellTabHeader>
     );
   }
   return (
-    <View style={styles.header}>
-      <Text style={styles.title}>{t("chats.title")}</Text>
-      <View style={styles.controlsRow}>
-        <DropdownMenu>
-          <DropdownMenuTrigger
-            testID="shell-host-pill"
-            accessibilityRole="button"
-            hitSlop={PILL_HIT_SLOP}
-            style={styles.pillTrigger}
-          >
-            <View style={[styles.pill, styles.pillRow]}>
-              <View style={[styles.dot, pillDotStyle]} />
-              <Text style={styles.pillText} numberOfLines={1}>
-                {total === 0 ? t("chats.noHostsShort") : t("chats.hostsOnline", { online, total })}
-              </Text>
-            </View>
-          </DropdownMenuTrigger>
-          <DropdownMenuContent width={300}>
-            {total === 0 ? (
-              <>
-                <DropdownMenuHint>{t("chats.noHosts")}</DropdownMenuHint>
-                <DropdownMenuItem
-                  testID="shell-host-sheet-connect"
-                  leading={connectLeading}
-                  onSelect={onConnectHost}
-                >
-                  {t("chats.connectHost")}
-                </DropdownMenuItem>
-              </>
-            ) : (
-              hosts.map((host) => (
-                <HostMenuItem
-                  key={host.serverId}
-                  host={host}
-                  status={statuses.get(host.serverId) ?? "idle"}
-                  onRetry={onRetryHost}
-                />
-              ))
-            )}
-          </DropdownMenuContent>
-        </DropdownMenu>
-        <View style={[styles.pill, styles.segmentGroup]} testID="shell-chat-filter">
-          <FilterSegment
-            label={t("chats.filter.active")}
-            selected={filter === "active"}
-            onPress={pickActive}
-            testID="shell-filter-active"
-          />
-          <FilterSegment
-            label={
-              archivedCount > 0
-                ? t("chats.filter.archivedCount", { count: archivedCount })
-                : t("chats.filter.archived")
-            }
-            selected={filter === "archived"}
-            onPress={pickArchived}
-            testID="shell-filter-archived"
-          />
-        </View>
-        <View style={styles.spacer} />
-        <Pressable
-          onPress={onSearch}
-          accessibilityRole="search"
-          hitSlop={8}
-          testID="shell-chats-search"
-          style={searchStyle}
+    <ShellTabHeader title={t("chats.title")} accessory={filterAccessory}>
+      <DropdownMenu>
+        <DropdownMenuTrigger
+          testID="shell-host-pill"
+          accessibilityRole="button"
+          hitSlop={PILL_HIT_SLOP}
+          style={styles.pillTrigger}
         >
-          <Search size={18} color={styles.iconColor.color} />
-        </Pressable>
-        <DropdownMenu>
-          <DropdownMenuTrigger
-            testID="shell-plus-menu"
-            accessibilityRole="button"
-            hitSlop={6}
-            style={styles.iconButton}
+          <View style={[styles.pill, styles.pillRow]}>
+            <View style={[styles.dot, pillDotStyle]} />
+            <Text style={styles.pillText} numberOfLines={1}>
+              {total === 0 ? t("chats.noHostsShort") : t("chats.hostsOnline", { online, total })}
+            </Text>
+          </View>
+        </DropdownMenuTrigger>
+        <DropdownMenuContent width={300}>
+          {total === 0 ? (
+            <>
+              <DropdownMenuHint>{t("chats.noHosts")}</DropdownMenuHint>
+              <DropdownMenuItem
+                testID="shell-host-sheet-connect"
+                leading={connectLeading}
+                onSelect={onConnectHost}
+              >
+                {t("chats.connectHost")}
+              </DropdownMenuItem>
+            </>
+          ) : (
+            hosts.map((host) => (
+              <HostMenuItem
+                key={host.serverId}
+                host={host}
+                status={statuses.get(host.serverId) ?? "idle"}
+                onRetry={onRetryHost}
+              />
+            ))
+          )}
+        </DropdownMenuContent>
+      </DropdownMenu>
+      <Pressable
+        onPress={onSearch}
+        accessibilityRole="search"
+        hitSlop={8}
+        testID="shell-chats-search"
+        style={searchStyle}
+      >
+        <Search size={18} color={styles.iconColor.color} />
+      </Pressable>
+      <DropdownMenu>
+        <DropdownMenuTrigger
+          testID="shell-plus-menu"
+          accessibilityRole="button"
+          hitSlop={6}
+          style={styles.iconButton}
+        >
+          <Plus size={18} color={styles.iconColor.color} />
+        </DropdownMenuTrigger>
+        <DropdownMenuContent width={300}>
+          <DropdownMenuItem testID="shell-new-chat" leading={newChatLeading} onSelect={onNewChat}>
+            {t("chats.newChat")}
+          </DropdownMenuItem>
+          <DropdownMenuItem
+            testID="shell-import-chat"
+            leading={importLeading}
+            onSelect={onImportChat}
           >
-            <Plus size={18} color={styles.iconColor.color} />
-          </DropdownMenuTrigger>
-          <DropdownMenuContent width={300}>
-            <DropdownMenuItem testID="shell-new-chat" leading={newChatLeading} onSelect={onNewChat}>
-              {t("chats.newChat")}
-            </DropdownMenuItem>
-            <DropdownMenuItem
-              testID="shell-import-chat"
-              leading={importLeading}
-              onSelect={onImportChat}
-            >
-              {t("chats.importChat")}
-            </DropdownMenuItem>
-          </DropdownMenuContent>
-        </DropdownMenu>
-      </View>
-    </View>
+            {t("chats.importChat")}
+          </DropdownMenuItem>
+        </DropdownMenuContent>
+      </DropdownMenu>
+    </ShellTabHeader>
   );
 }
 
 const styles = StyleSheet.create((theme) => ({
-  header: {
-    paddingHorizontal: theme.spacing[4],
-    paddingBottom: theme.spacing[2],
-    gap: theme.spacing[3],
-  },
-  title: {
-    fontSize: theme.fontSize["2xl"],
-    fontWeight: theme.fontWeight.semibold,
-    color: theme.colors.foreground,
-  },
-  controlsRow: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: theme.spacing[2],
-  },
-  spacer: {
-    flex: 1,
-  },
   pillTrigger: {
     borderRadius: theme.borderRadius.full,
-    // C32 wide matrix: in the split's 260/300dp list column the row overflows
-    // (measured: search/＋ pushed fully past the column edge). The status pill
-    // absorbs the whole overflow (ellipsize → dot); the icons stay reachable.
-    // Compact never overflows → flexShrink is inert there (pixel-identical).
+    // KI-12/C32: the pill is the right slot's shrink victim — long 在线 labels
+    // ellipsize (→ dot) before the search/＋ icons give up a pixel.
     flexShrink: 1,
   },
   pill: {
