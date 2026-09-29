@@ -2,19 +2,18 @@
 // maths. Two halves the card pins:
 //  1. 双行内容: git=「项目 · 分支」/ 非 git 或未回=只显项目名 / descriptor 未
 //     hydration=单行标题退化——标题永不丢、无占位符；
-//  2. 高度（Main 裁定②）: inner 真收（compact ≥8dp、wide 钳 34dp 控件底线）、
-//     双行 lineHeight 块装得下最紧的 inner、inner+cover 补偿恒等于官方定高
-//     （bar 底边钉死 = R2-08③ 不露 tab 行窄条的算术面）。
+//  2. 高度（KI-14 口径）: inner 真收（compact ≥8dp、wide 钳 34dp 控件底线）、
+//     双行 lineHeight 块装得下最紧的 inner——KI-8 的 cover 补偿与 tab-row-cover
+//     已随官方 chrome 触点退役（带高=纯内容高），本文件不再钉底边补偿算术。
 import { describe, expect, it } from "vitest";
 import { HEADER_INNER_HEIGHT, HEADER_INNER_HEIGHT_MOBILE } from "@/constants/layout";
 import { FONT_SIZE } from "@/styles/theme";
-import { TEXT_LINE_HEIGHT_CEILING } from "./tab-row-cover";
 import {
   SESSION_HEADER_CONTROL_HEIGHT_DP,
+  TEXT_LINE_HEIGHT_CEILING,
   resolveSessionHeaderBranch,
   resolveSessionHeaderProjectLabel,
   resolveSessionHeaderRows,
-  sessionHeaderCoverCompensationDp,
   sessionHeaderInnerHeightDp,
 } from "./compact-rows";
 
@@ -95,7 +94,7 @@ describe("resolveSessionHeaderRows (双行内容)", () => {
   });
 });
 
-describe("sessionHeaderInnerHeightDp + cover 补偿 (Main 裁定②)", () => {
+describe("sessionHeaderInnerHeightDp (KI-14: 带高 = 纯内容高)", () => {
   it("compact inner 真收 56→44（≥8dp），且 ≥ 34dp 控件底线（命中区不动）", () => {
     expect(sessionHeaderInnerHeightDp(true)).toBe(44);
     expect(HEADER_INNER_HEIGHT_MOBILE - sessionHeaderInnerHeightDp(true)).toBeGreaterThanOrEqual(8);
@@ -116,16 +115,5 @@ describe("sessionHeaderInnerHeightDp + cover 补偿 (Main 裁定②)", () => {
       Math.ceil(FONT_SIZE.sm * TEXT_LINE_HEIGHT_CEILING);
     expect(block).toBeLessThanOrEqual(sessionHeaderInnerHeightDp(false));
     expect(block).toBeLessThanOrEqual(sessionHeaderInnerHeightDp(true));
-  });
-
-  it("inner + cover 补偿 ≡ 官方定高（bar 底边钉死，R2-08③ 不露 tab 行）", () => {
-    expect(sessionHeaderInnerHeightDp(true) + sessionHeaderCoverCompensationDp(true)).toBe(
-      HEADER_INNER_HEIGHT_MOBILE,
-    );
-    expect(sessionHeaderInnerHeightDp(false) + sessionHeaderCoverCompensationDp(false)).toBe(
-      HEADER_INNER_HEIGHT,
-    );
-    expect(sessionHeaderCoverCompensationDp(true)).toBe(12);
-    expect(sessionHeaderCoverCompensationDp(false)).toBe(2);
   });
 });

@@ -207,6 +207,10 @@ import {
 import { RenderProfile } from "@/utils/render-profiler";
 import { useWorkspaceCheckoutStatus } from "@/screens/workspace/use-workspace-checkout-status";
 import { useHasPullRequest, usePullRequestAutoAdd } from "@/panels/pull-request";
+// COMPAT(shellHideOfficialSessionChrome): paseo-go fork touchpoint source (card
+// KI-14, user ruling 2026-09-29) — read by useOfficialSessionChromeGates below.
+// Official files otherwise never import from src/shell/**; keep this the only one.
+import { usePaseoGoShellActive } from "@/shell/stores/settings";
 
 const WORKSPACE_FLOATING_PANEL_PORTAL_HOST_PREFIX = "workspace-floating-panels";
 const EMPTY_UI_TABS: WorkspaceTab[] = [];
@@ -1290,10 +1294,33 @@ function shouldInspectWorkspaceRecovery(
   return recoveryRequested && hasHydratedWorkspaces && workspace === null;
 }
 
+// COMPAT(shellHideOfficialSessionChrome): paseo-go fork touchpoint read source
+// (card KI-14, user ruling 2026-09-29). In shell mode the official in-flow
+// session chrome — the ScreenHeader band and the mobile tab row
+// (workspace-tabs-row, the only in-shell leak of the close-tab→archive
+// gesture) — is superseded by the shell's session-header capsule (C21), which
+// already aggregates every control the band carried. The gate is
+// shellMode AND compact: official mode, e2e and every wide layout keep the
+// chrome verbatim. Both booleans are pre-gated HERE because
+// WorkspaceScreenContent's oxlint complexity sits at the ceiling — the body
+// seams are the showScreenHeader memo and the tab-row ternary, each consuming
+// one of these flags. Merge posture = re-apply those two gated reads onto the
+// new upstream body (keep the upstream JSX intact), same discipline as
+// COMPAT(shellFormFactorRotation) in constants/layout.ts.
+function useOfficialSessionChromeGates(): { hideHeaderBand: boolean; showTabRow: boolean } {
+  const isMobile = useIsCompactFormFactor();
+  const hide = usePaseoGoShellActive() && isMobile;
+  return { hideHeaderBand: hide, showTabRow: !hide && isMobile };
+}
+
 function WorkspaceScreenGateFrame({ children }: { children: ReactNode }) {
+  // COMPAT(shellHideOfficialSessionChrome) seam ③: the hydration/loading/error
+  // shells mount the same ScreenHeader band — hide it under the same gate or
+  // the route gate flashes the 88dp official band the capsule replaced.
+  const { hideHeaderBand } = useOfficialSessionChromeGates();
   return (
     <>
-      <ScreenHeader left={GATED_WORKSPACE_HEADER_LEFT} />
+      {hideHeaderBand ? null : <ScreenHeader left={GATED_WORKSPACE_HEADER_LEFT} />}
       <View style={styles.centerContent}>{children}</View>
     </>
   );
@@ -1540,6 +1567,9 @@ function WorkspaceScreenContent({
   const _insets = useSafeAreaInsets();
   const toast = useToast();
   const isMobile = useIsCompactFormFactor();
+  // COMPAT(shellHideOfficialSessionChrome) read source — see the hook's comment
+  // for the gate rationale and merge posture.
+  const { hideHeaderBand, showTabRow } = useOfficialSessionChromeGates();
   const hasMacTrafficLights = useHasWindowChromeObstruction("top-left");
   const explorerToggleOwner = resolveWorkspaceExplorerToggleOwner({
     isMobile,
@@ -3825,8 +3855,10 @@ function WorkspaceScreenContent({
   );
 
   const showScreenHeader = useMemo(
-    () => shouldShowWorkspaceScreenHeader({ isFocusModeEnabled, isMobile }),
-    [isFocusModeEnabled, isMobile],
+    // COMPAT(shellHideOfficialSessionChrome) seam ①: the shell capsule replaces
+    // the whole header band under shellActive && compact.
+    () => shouldShowWorkspaceScreenHeader({ isFocusModeEnabled, isMobile }) && !hideHeaderBand,
+    [isFocusModeEnabled, isMobile, hideHeaderBand],
   );
   const renderExplorerSidebarHeaderAction = useCallback(
     () => (
@@ -4039,7 +4071,7 @@ function WorkspaceScreenContent({
     <View style={styles.centerColumn}>
       {rendersDesktopSplitContent ? null : renderWorkspaceScreenHeader()}
 
-      {isMobile ? (
+      {showTabRow ? (
         <MobileWorkspaceTabSwitcher
           tabs={tabs}
           activeTabKey={activeTabKey}

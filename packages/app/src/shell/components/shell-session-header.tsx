@@ -2,14 +2,14 @@
 // full-width bar the shell floats over the official session screen, replacing it.
 // C14 proved the official compact header has no injection point and is ALWAYS
 // visible (shouldShowWorkspaceScreenHeader = !focusMode || isMobile); the C14
-// bottom-coexistence branch was overturned by the C21 ruling — the bar now sits
-// at the very top, height = official compact header (KI-8: the inner box is
-// the two-line metric 44/34 + a cover compensation, the bottom edge still
-// pinned at the official header bottom + tab-row cover) + status-bar inset,
-// opaque surface0 with the same bottom-border token, so it paints the official
-// header out and its controls
-// (hamburger drawer, official ⋯, scripts button, explorer toggle) are
-// unreachable BY DESIGN. The official ⋯'s useful half is aggregated into the
+// bottom-coexistence branch was overturned by the C21 ruling — the bar sits at
+// the very top. KI-14 (用户拍板 2026-09-29) then landed the upstream touchpoint
+// COMPAT(shellHideOfficialSessionChrome): under shellActive && compact the
+// official header band + tab row are UNMOUNTED in-flow, so the bar is pure
+// two-line content height (44/34) + status-bar inset — no cover compensation,
+// nothing left to paint out. The header's controls (hamburger drawer, official
+// ⋯, scripts button, explorer toggle) being gone from the screen is the point;
+// their useful half is aggregated into the
 // capsule menu (see session-header/visibility for the matrix): 查看项目文件 /
 // 查看 diff / 运行脚本 / 停止 / 重命名 — KI-9 收敛: both view rows push the ONE
 // (detail) files screen with the initial tab (files|diff), the C21 打开文件浏览器
@@ -42,13 +42,13 @@
 // screen in-window: touches outside the bar pass through to the session, and
 // system back/gesture pop it untouched.
 import { useCallback, useMemo } from "react";
-import { Platform, Pressable, Text, useWindowDimensions, View } from "react-native";
+import { Pressable, Text, View } from "react-native";
 import { GestureDetector } from "react-native-gesture-handler";
 import { router, usePathname, useRootNavigation } from "expo-router";
 import { Portal } from "@gorhom/portal";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useTranslation } from "react-i18next";
-import { StyleSheet, UnistylesRuntime, withUnistyles } from "react-native-unistyles";
+import { StyleSheet, withUnistyles } from "react-native-unistyles";
 import {
   ChevronLeft,
   FolderTree,
@@ -74,11 +74,7 @@ import { selectIsCompactFileExplorerOpen, usePanelStore } from "@/stores/panel-s
 import { deriveSidebarStateBucket, type SidebarStateBucket } from "@/utils/sidebar-agent-state";
 import { isImportedProviderSession } from "@getpaseo/protocol/agent-labels";
 import { useCheckoutStatusQuery } from "@/git/use-status-query";
-import {
-  HEADER_TOP_PADDING_MOBILE,
-  supportsDesktopPaneSplits,
-  WORKSPACE_SECONDARY_HEADER_HEIGHT,
-} from "@/constants/layout";
+import { HEADER_TOP_PADDING_MOBILE } from "@/constants/layout";
 import { useBlockMobilePanelOpenGestures } from "@/mobile-panels/provider";
 import { SHELL_I18N_NAMESPACE } from "@/shell/i18n";
 import { shellFilesHref, shellRenameHref } from "@/shell/routes";
@@ -100,15 +96,11 @@ import { SessionHeaderScriptsPage } from "@/shell/session-header/scripts-submenu
 import { SHELL_EDGE_BAND_WIDTH_DP } from "@/shell/session-header/edge-swipe";
 import { useShellEdgeBackGesture } from "@/shell/session-header/use-shell-edge-back-gesture";
 import {
-  TEXT_LINE_HEIGHT_CEILING,
-  tabRowCoverHeightDp,
-} from "@/shell/session-header/tab-row-cover";
-import {
   SESSION_HEADER_CONTROL_HEIGHT_DP,
+  TEXT_LINE_HEIGHT_CEILING,
   resolveSessionHeaderBranch,
   resolveSessionHeaderProjectLabel,
   resolveSessionHeaderRows,
-  sessionHeaderCoverCompensationDp,
   sessionHeaderInnerHeightDp,
   type SessionHeaderRows,
 } from "@/shell/session-header/compact-rows";
@@ -328,50 +320,28 @@ function CapsuleInner({
   // C24: the imported stamp (C22) is what gates the 刷新 row.
   const imported = isImportedProviderSession(agent);
 
-  // R2-08③: the bar doubles as the tab-row cover. The official tab row — compact's
-  // MobileWorkspaceTabSwitcher / the native-wide fallback row, the shell's ONLY
-  // remaining 关 tab→归档 entry (close-tab-policy archive-on-close, C24 真机误触) —
-  // sits directly under the header and is painted out by the same opaque surface0
-  // span. Heights = official token maths, machine-pinned by tab-row-cover.test.ts;
-  // Live theme tokens (pane.tsx's UnistylesRuntime.getTheme() precedent — the
-  // useUnistyles hook import is burn-down-banned): the row styles resolve the
-  // SAME tokens, so the cover tracks appearance-font-size updates.
-  const theme = UnistylesRuntime.getTheme();
-  const { fontScale } = useWindowDimensions();
-  const tabRowCover = tabRowCoverHeightDp({
-    isCompact,
-    triggerPaddingDp: theme.spacing[2],
-    triggerFontSizeDp: theme.fontSize.base,
-    triggerIconDp: theme.iconSize.sm,
-    borderWidthDp: theme.borderWidth[1],
-    secondaryHeaderHeightDp: WORKSPACE_SECONDARY_HEADER_HEIGHT,
-    // RN applies Android's fontScale to text height; iOS' getFontScale() is the
-    // DISPLAY scale (2–3×) and RN iOS text does not scale — using it there would
-    // over-cover the session top by tens of dp.
-    fontScale: Platform.OS === "android" ? fontScale : 1,
-    desktopSplits: supportsDesktopPaneSplits(),
-  });
-  // The bar IS the header: top-anchored full width, official height + status
-  // bar inset + the tab-row cover, opaque surface0 with the shared bottom-border
-  // token. KI-8 裁定②: the inner box really shrinks to the two-line metric
-  // (56→44 / 36→34); the shortfall vs the official header height rides in the
-  // cover padding, so the bar's BOTTOM EDGE stays pinned at the official tab
-  // row's bottom — the opaque span keeps painting header+tab行 out (R2-08③,
-  // FixB4 sliver). paddingBottom keeps the controls + two lines centered in
-  // the inner box, not in the whole bar.
+  // KI-14 (用户拍板 2026-09-29): the official compact header + tab row are now
+  // UNMOUNTED in-flow by the workspace-screen touchpoint
+  // (COMPAT(shellHideOfficialSessionChrome)), so the bar no longer doubles as a
+  // cover — R2-08③'s tab-row-cover and KI-8's cover compensation are retired
+  // with them (关 tab→归档 is structurally unreachable, not painted out).
+  // The bar IS the header: top-anchored full width, pure two-line content
+  // height + status-bar inset, opaque surface0 with the shared bottom-border
+  // token. paddingBottom keeps the controls + two lines centered in the inner
+  // box. (Wide split: the touchpoint gate is compact-only, the official wide
+  // header still renders there — see report known_issues, wide convergence
+  // needs a separate ruling.)
   const barStyle = useMemo(() => {
     const topPad = isCompact ? HEADER_TOP_PADDING_MOBILE : 0;
     const inner = sessionHeaderInnerHeightDp(isCompact);
-    const underPad = tabRowCover + sessionHeaderCoverCompensationDp(isCompact);
     return [
       styles.bar,
       {
-        height: insets.top + topPad + inner + underPad,
+        height: insets.top + topPad + inner,
         paddingTop: insets.top + topPad,
-        paddingBottom: underPad,
       },
     ];
-  }, [insets.top, isCompact, tabRowCover]);
+  }, [insets.top, isCompact]);
 
   const goBack = useCallback(() => {
     // Same verb as the system back and the edge swipe: pops the official screen
@@ -604,7 +574,7 @@ const styles = StyleSheet.create((theme) => ({
     borderBottomWidth: theme.borderWidth[1],
     borderBottomColor: theme.colors.border,
   },
-  // KI-8 双行文本列：显式 lineHeight（tab-row-cover 同款 1.2 上限）让
+  // KI-8 双行文本列：显式 lineHeight（compact-rows 的 TEXT_LINE_HEIGHT_CEILING
   // base+sm 两行块（17+15=32dp）装得进最紧的 wide inner=34，且不随 Android
   // fontScale 漂移——compact-rows.test.ts 钉这块算术。
   textColumn: {
