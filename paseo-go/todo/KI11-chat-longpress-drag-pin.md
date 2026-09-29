@@ -45,3 +45,14 @@
 - 文件域=chats 列表族（chat-row-menu / use-shell-row-drag-menu / chats-screen-body / pins），
   与 KI-5/9/6/7/8 不相交；但**设备道串行**：排 KI-5 之后、KI-9 之前。
 - 恰好一次 commit；报告 JSON（含第 4 条冲突调查发现专节）。
+
+---
+
+## 编排者处置（2026-09-29）
+
+- **代码/单测/裁定4冲突修复=已验收**（cf305d19，113 定向绿，套件零新增）。
+- 证据①（未松手菜单已现帧）已入库；**②③④=blocked-device-env 待补证轮**：
+  平板 PC USB 不充电（14% 递减+两次 wedge），低电态注入与 JS 计时不可信（同码健康态
+  07:14 曾成功弹菜单）。②③④ 行为已由定向单测钉住（接力序列/刷新闸/同 action 落盘逐字段）。
+- 补证配方在 `evidence/KI11/ki11-evidence.sh` 系列脚本 + 报告「补证配方」节；
+  墙充 ≥30% 后一次跑完，或转真人手指（smoke-plan MANUAL-PENDING 通道）。

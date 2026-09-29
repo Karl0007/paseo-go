@@ -118,6 +118,10 @@ npx expo prebuild --platform android --clean
 6. **定稿一键**：`PHASES="0 1 2 3 4" bash paseo-go/release/build-release-wsl.sh`（幂等可重入：0=重打补丁+桩；1=gradle export minified JS+记录 bundle sha；2=hermesc 原生/WSL2 降级+防呆断言(新鲜 bundle sha 一致+hbc mtime≥bundle)+header 校验+mv 就位；3=marker+assembleRelease 全链；4=清 marker+sha256 记录）。产物 `android\app\build\outputs\apk\release\app-release.apk`；**签名=debug keystore**（RN 模板 release `signingConfig signingConfigs.debug`，正式签名 TODO：换 keystore 后在 `android/keystore.properties` + 签名块替换，发布前必须做）。release 包 JS 为离线 bundle（不走 metro），装机即验证"无 metro 可用性"。
    6b. **坑⑥ prebuild 变体漂移（v0.2.0 实锤）**：android/ 树是 prebuild 快照——**debug 构建若跑过 `expo prebuild --clean`，会把 `.debug` 烙进树基 applicationId**（`android/app/build.gradle` 的 `applicationId 'app.paseo.shell.debug'` 是基值不是 suffix），此后 release 一键链**不重跑 prebuild** → assembleRelease 静默产出 `.debug` 包（adb install 报 Success 但 `pm path app.paseo.shell` 空、logcat 显示替换的是 debug 包）。**release 前必跑 production prebuild**（APP_VARIANT 不设+PASEO_GO=1，见上命令块）并核对 `grep applicationId android/app/build.gradle` = `app.paseo.shell`。
    6c. **坑⑦ WSL 可能整备消失（v0.2.0 实锤）**：`wsl.exe` 报"未安装"（特性被系统更新移除级）→ phase2 的 WSL2 降级路失效。原生 win64 hermesc 实测 **FreeVis≥20.4GB 即可成**（18.8GB OOM；脚本 23GB 门槛是保守值）——WSL 不可用时：`PHASES="0 1"` 脚本跑 → 手动 `hermesc.exe -w -emit-binary -out <gen>/index.android.bundle.hbc <gen>/index.android.bundle` → 手动跑 phase2 防呆三断言+mv → `PHASES="3 4"` 收尾。
+   6d. **低电设备=不可信测试台（KI-11 二役实锤）**：MatePad 电量 <20% 且未真充电（dumpsys 无 ac/usb 位）时，
+   > 3s 的 input 注入被电源管理静默丢、JS 长按计时链不触发、persist 可丢写、内核 hung_wp_screen wedge 需整机重启。
+   > 测前必查 `dumpsys battery` 的 level+充电位；**PC USB 口不保证充电**，长测挂墙充。
+   > 另：force-stop 重启 app 可能恢复到上次路由（会话屏）而非列表页——取证脚本第一步必须断言在目标页。
 7. 版本/上游注入：`paseo-go/VERSION`=展示版本源（当前 0.1.0，与 `src/shell/config.ts` `SHELL_VERSION` 常量同步改）；关于页 hash 来自 `EXPO_PUBLIC_PASEO_GO_UPSTREAM` 构建期内联（已证：sentinel 值 export 后 bundle 内恰 1 处命中、无运行时 process.env 查找；终验=关于页实拍）。
 
 ## 4. 装机 + 连 daemon + 起 app（对应证据契约 3）
