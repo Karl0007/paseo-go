@@ -615,4 +615,53 @@ describe("AgentManager transcript byte attribution (R4-01/03/04)", () => {
       harness.cleanup();
     }
   });
+
+  it("does not arm the external pending when the dedup belt swallows every row (R4-33)", async () => {
+    const work = mkdtempSync(join(tmpdir(), "agent-ownership-dedup-badge-"));
+    const { client, crash } = createCrashableClaudeClient();
+    const harness = createHarness(work, client);
+    try {
+      const agent = await harness.manager.createAgent(
+        { provider: "claude", cwd: work },
+        undefined,
+        { workspaceId: undefined },
+      );
+      const transcript = join(harness.projectDir, `${agent.persistence?.sessionId ?? ""}.jsonl`);
+
+      // A foreground turn fails; its prompt row is in the timeline AND in the
+      // provider journal. The spontaneous failure observation then baselines.
+      await drainStream(
+        harness.manager.streamAgent(agent.id, "Emit a turn failure", { clientMessageId: "cm1" }),
+      );
+      writeFileSync(transcript, claudeLine("user", "Emit a turn failure", "u1"));
+      crash();
+      await harness.manager.flush();
+
+      // A same-text row lands at the tail (death-flush echo of the recorded
+      // prompt). The belt swallows it whole — row level is already handled —
+      // so the OBSERVATION must be treated as settled: cursor advances, but no
+      // `externalChangeObserved` is armed and the badge stays honest.
+      appendFileSync(transcript, claudeLine("user", "Emit a turn failure", "u2"));
+      await harness.manager.sweepTranscriptWatch();
+      await harness.manager.flush();
+      expect(
+        harness.manager
+          .getTimeline(agent.id)
+          .filter((item) => item.type === "user_message" && item.text === "Emit a turn failure"),
+      ).toHaveLength(1);
+
+      await harness.manager.closeAgent(agent.id);
+      await harness.manager.flush();
+      const record = await harness.storage.get(agent.id);
+      expect(record?.ownership).toBe("none");
+      expect(record?.ownershipBaselineBytes).toBe(
+        Buffer.byteLength(
+          claudeLine("user", "Emit a turn failure", "u1") +
+            claudeLine("user", "Emit a turn failure", "u2"),
+        ),
+      );
+    } finally {
+      harness.cleanup();
+    }
+  });
 });

@@ -4058,8 +4058,16 @@ export class AgentManager {
     for (const item of foreign) {
       this.recordTimeline(live.id, item);
     }
+    // R4-33: rows the dedup belt swallowed WHOLE are paseo's own bytes echoing
+    // back (death-flush of an already-recorded turn), not a foreign message —
+    // the observation advances the cursor but must not arm the sticky external
+    // pending. A change with no visible rows at all (items=[], meta/control
+    // rows) IS foreign evidence (R4-04 posture); only full dedup settles.
+    const settledObservation = change.items.length > 0 && foreign.length === 0;
     const pending = ownershipWithExternalActivity(
-      ownershipOnExternalChange(live.ownership, { baselineBytes: change.baselineBytes }),
+      settledObservation
+        ? ownershipWithTranscriptVisibility(live.ownership, true, change.baselineBytes)
+        : ownershipOnExternalChange(live.ownership, { baselineBytes: change.baselineBytes }),
       change.externalLooksActive,
     );
     const settled = foreign.length === 0 && pending.value === live.ownership.value;
@@ -4108,15 +4116,19 @@ export class AgentManager {
         );
       }
     }
+    // R4-33: same posture as the live path — a fully-deduplicated observation
+    // commits the cursor without arming `external`; a no-visible-row change
+    // (meta rows) stays foreign evidence.
+    const restored = restoreAgentOwnership({
+      ownership: record.ownership,
+      externalLooksActive: record.externalLooksActive,
+      baselineBytes: record.ownershipBaselineBytes,
+    });
+    const settledObservation = change.items.length > 0 && foreign.length === 0;
     const escalated = ownershipWithExternalActivity(
-      ownershipOnExternalChange(
-        restoreAgentOwnership({
-          ownership: record.ownership,
-          externalLooksActive: record.externalLooksActive,
-          baselineBytes: record.ownershipBaselineBytes,
-        }),
-        { baselineBytes: change.baselineBytes },
-      ),
+      settledObservation
+        ? ownershipWithTranscriptVisibility(restored, true, change.baselineBytes)
+        : ownershipOnExternalChange(restored, { baselineBytes: change.baselineBytes }),
       change.externalLooksActive,
     );
     // Nothing observable changed (a torn line, a control row, a repeated sweep
@@ -4234,8 +4246,10 @@ export class AgentManager {
    * notice) sit between the provider's own tail and the read-back — so match
    * against a tail window, not a strict suffix. Stream rows and journal rows
    * carry different ids for the same message (client id vs provider uuid), so
-   * identity here is (type, text) only; a legitimate identical re-send falls
-   * outside the small window.
+   * identity here is (type, text) only. The accepted trade: a foreign writer
+   * re-sending the exact same text AT the timeline tail is swallowed as a
+   * duplicate (row and badge both — R4-33) in exchange for killing the
+   * deterministic full-turn replay.
    */
   private dropTimelineTailDuplicates(
     agentId: string,
