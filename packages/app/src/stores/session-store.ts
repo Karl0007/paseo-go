@@ -106,6 +106,13 @@ export interface Agent {
   // messages, string = the preview. Official surfaces ignore both new fields.
   lastMessagePreview?: string | null;
   lastMessageRole?: "user" | "assistant" | "other" | null;
+  // COMPAT(agentOwnership): Paseo Go B4-OWNERSHIP protocol pure-add (see
+  // protocol/messages.ts). Read by the shell's 「外部」 badge (chat row + session
+  // header) and the R4 send guard. Wire posture mirrors the preview pair:
+  // `undefined` = daemon predates the field — consumers MUST read it as `none`
+  // (and `externalLooksActive` as `false`). Official surfaces ignore both.
+  ownership?: "paseo" | "external" | "none" | null;
+  externalLooksActive?: boolean | null;
 }
 
 export interface WorkspaceDescriptor {

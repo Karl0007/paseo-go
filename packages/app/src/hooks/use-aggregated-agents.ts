@@ -102,6 +102,10 @@ export function useAggregatedAgents(options?: {
           // subtitle reads the last-message pair; the official UI ignores it.
           lastMessagePreview: agent.lastMessagePreview ?? null,
           lastMessageRole: agent.lastMessageRole ?? null,
+          // COMPAT(agentOwnership): Paseo Go B4-OWNERSHIP — the shell chat row /
+          // session header read the ownership pair; the official UI ignores it.
+          ownership: agent.ownership ?? null,
+          externalLooksActive: agent.externalLooksActive ?? null,
         };
         const cacheKey = `${serverId}:${agent.id}`;
         const prev = prevAgentsRef.current.get(cacheKey);

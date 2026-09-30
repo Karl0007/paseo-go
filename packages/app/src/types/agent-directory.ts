@@ -22,6 +22,10 @@ export type AgentDirectoryEntry = Pick<
   // subtitle reads the last-message pair off the directory entry.
   | "lastMessagePreview"
   | "lastMessageRole"
+  // COMPAT(agentOwnership): Paseo Go B4-OWNERSHIP — the shell's 「外部」 badge and
+  // R4 send guard read the ownership pair off the directory entry.
+  | "ownership"
+  | "externalLooksActive"
 > & {
   pendingPermissionCount?: number;
 };

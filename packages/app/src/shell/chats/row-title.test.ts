@@ -67,6 +67,21 @@ describe("buildChatRowTitle", () => {
       "repo-a b",
     );
   });
+
+  // B4-ROW tail: deriveProjectName passes GitHub remote keys through as
+  // `owner/repo` — the row shows the repo short name.
+  it("shortens an owner/repo project name to the repo segment", () => {
+    expect(
+      buildChatRowTitle({ projectName: "getpaseo/paseo", cwd: "/srv/paseo", note: null }),
+    ).toBe("paseo");
+    expect(
+      buildChatRowTitle({ projectName: "getpaseo/paseo", cwd: "/home/dev/paseo", note: "急" }),
+    ).toBe("paseo-急");
+    // A trailing separator must not invent an empty project.
+    expect(buildChatRowTitle({ projectName: "org/repo/", cwd: "/srv/repo", note: null })).toBe(
+      "repo",
+    );
+  });
 });
 
 describe("buildChatSubtitle", () => {

@@ -10,6 +10,7 @@ import { useTranslation } from "react-i18next";
 import { StyleSheet, withUnistyles } from "react-native-unistyles";
 import { useShellWindowCompact } from "@/shell/tablet/form-factor";
 import { useShellNotifications } from "@/shell/notify/use-shell-notifications";
+import { useOwnershipSendGuard } from "@/shell/composer/use-ownership-send-guard";
 import { ShellUpdateBanner } from "@/shell/components/shell-update-banner";
 import { useShellUpdateCheck } from "@/shell/update/use-shell-update-check";
 import { ensureShellI18n, SHELL_I18N_NAMESPACE } from "@/shell/i18n";
@@ -121,6 +122,10 @@ export default function ShellTabsLayout() {
 
   // C11: attention watcher lives on the tabs layout, so it runs on every shell tab.
   useShellNotifications();
+  // B4-OWNERSHIP-UI (ruling 14): R4 send guard — wraps the runtime clients'
+  // sendAgentMessage for exactly as long as the shell tabs live (the session
+  // screen rides on top of this layout, so the guard covers composer sends).
+  useOwnershipSendGuard();
   // M4 slice 2: startup update probe (one per JS context; silent on failure —
   // the 我的 row is the visible retry affordance).
   useShellUpdateCheck();

@@ -83,6 +83,7 @@ import { usePaseoGoPinsStore } from "@/shell/stores/pins";
 import { usePaseoGoShellActive } from "@/shell/stores/settings";
 import { useShellAgentActions, type ShellChatTarget } from "@/shell/shellAgentActions";
 import { ChatStatusLight } from "@/shell/components/chat-status-light";
+import { OwnershipBadge } from "@/shell/components/ownership-badge";
 import { useShellWindowCompact } from "@/shell/tablet/form-factor";
 import {
   createSessionHeaderRunner,
@@ -534,6 +535,14 @@ function HeaderRowsText({
         >
           {rows.primary}
         </Text>
+        {/* B4-OWNERSHIP-UI (ruling 14): same 「外部」 pill as the chat row, riding
+            the focused agent's COMPAT(agentOwnership) pair; the status light keeps
+            the far-right slot. */}
+        <OwnershipBadge
+          ownership={agent.ownership}
+          externalLooksActive={agent.externalLooksActive}
+          testID={`shell-session-ownership-${targetKey}`}
+        />
         <ChatStatusLight agent={agent} bucket={bucket} />
       </View>
       {rows.secondary !== null ? (

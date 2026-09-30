@@ -82,6 +82,16 @@
       "needsReply": "需要回复",
       "me": "我"
     },
+    "ownership": {
+      "badge": "外部",
+      "badgeActive": "外部·运行中",
+      "sendTitle": "该会话可能正在外部运行",
+      "sendBody": "该会话可能正在外部终端运行，继续将从此会话启动新进程，可能产生分叉。",
+      "sendBodyCodex": "该会话可能正在外部终端运行。消息不会丢失，但对方将看不到你这条。",
+      "sendConfirm": "仍要发送",
+      "sendCancel": "取消",
+      "sendCancelled": "已取消发送"
+    },
     "time": {
       "yesterday": "昨天"
     },

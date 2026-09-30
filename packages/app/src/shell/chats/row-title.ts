@@ -102,10 +102,13 @@ export interface ChatRowTitleInput {
 /**
  * `项目-worktree[-备注]`. The worktree segment drops out when it repeats the project
  * (a plain checkout, where cwd's tail IS the project directory) so the common case
- * reads 「paseo」 and not 「paseo-paseo」.
+ * reads 「paseo」 and not 「paseo-paseo」. A `/` in the project name is a remote
+ * owner/repo (deriveProjectName hands GitHub keys through as `getpaseo/paseo`) —
+ * the row shows the repo short name, the owner adds noise at 14sp (B4-ROW tail).
  */
 export function buildChatRowTitle(input: ChatRowTitleInput): string {
-  const project = singleLine(input.projectName);
+  const projectSegments = singleLine(input.projectName).split("/").filter(Boolean);
+  const project = projectSegments[projectSegments.length - 1] ?? "";
   const worktree = singleLine(worktreeSegment(input.cwd));
   const note = singleLine(input.note);
   const worktreeIsProject =

@@ -141,5 +141,12 @@ export function normalizeAgentSnapshot(snapshot: AgentSnapshotPayload, serverId:
     // restore shows no preview until the directory re-syncs.
     lastMessagePreview: snapshot.lastMessagePreview ?? null,
     lastMessageRole: snapshot.lastMessageRole ?? null,
+    // COMPAT(agentOwnership): Paseo Go B4-OWNERSHIP pure-add; old daemons omit the
+    // pair and consumers read that as `none`/`false`. Like the preview pair this is
+    // deliberately NOT projected back out by projectAgentSnapshot: the replica
+    // cache's strict StoredAgentSnapshotSchema does not carry it, so a cold cache
+    // restore shows no badge until the directory re-syncs.
+    ownership: snapshot.ownership ?? null,
+    externalLooksActive: snapshot.externalLooksActive ?? null,
   };
 }

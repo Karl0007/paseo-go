@@ -44,6 +44,14 @@ export function identityColor(name: IdentityColorName): string {
   return IDENTITY_COLORS[name];
 }
 
+// The glyph color for a FILLED identity chip (project avatar). The fill table above
+// is tuned for one light glyph in either theme (4.2-4.8:1 vs #ffffff, computed), so
+// the letter must NOT follow a theme token: in dark, `accentForeground` is #18181b
+// (the near-white accent needs dark text) and drops every hue to 3.76-4.14:1 —
+// below the 4.5:1 text floor on all ten fills (B4-ROW tail, measured 2026-10-01).
+// The hex lives here, with the rest of the palette's literals (DESIGN §5).
+export const IDENTITY_GLYPH_COLOR = "#ffffff";
+
 // The same ten identities used as *foreground* — a glyph or a label painted directly on the
 // row — rather than as a fill with a white letter on top. That is a different contrast
 // problem and the fill table cannot solve it: clearing 4.5:1 against a near-white surface

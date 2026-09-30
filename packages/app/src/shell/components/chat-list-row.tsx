@@ -45,6 +45,7 @@ import {
 import { CONTEXT_MENU_DELAY_MS } from "@/shell/components/drag-menu-arbitration";
 import {
   IDENTITY_COLOR_NAMES,
+  IDENTITY_GLYPH_COLOR,
   identityColor,
   type IdentityColorName,
 } from "@/styles/identity-colors";
@@ -66,6 +67,8 @@ import type { ShellAgentActions, ShellChatTarget } from "@/shell/shellAgentActio
 import { resolveProjectPlacement } from "@/utils/project-placement";
 import type { SidebarStateBucket } from "@/utils/sidebar-agent-state";
 import { isImportedProviderSession } from "@getpaseo/protocol/agent-labels";
+import { OwnershipBadge } from "@/shell/components/ownership-badge";
+import { OWNERSHIP_BADGE_LABEL_KEY, ownershipBadgeKind } from "@/shell/chats/ownership";
 
 /** The derivation input widened with the live agent payload the row renders. */
 export interface ShellChatAgent {
@@ -429,6 +432,13 @@ function ChatRowInner({
   );
 
   const activityLabelKey = ACTIVITY_LABEL_KEY[agent.bucket];
+  // B4-OWNERSHIP-UI (ruling 14): the 「外部」 pill on the title line. The badge
+  // facts ride the COMPAT(agentOwnership) passthrough — a pre-go.7 daemon's
+  // undefined pair reads as `none` (no badge), so old hosts change nothing here.
+  const ownershipKind = ownershipBadgeKind({
+    ownership: agent.agent.ownership,
+    externalLooksActive: agent.agent.externalLooksActive,
+  });
   // The spinner is invisible to TalkBack, so 运行中 stays a spoken word even though
   // ruling 8 took it off the screen.
   const rowLabel = [
@@ -436,6 +446,7 @@ function ChatRowInner({
     unread ? t("chats.a11yUnread") : null,
     activityLabelKey ? t(activityLabelKey) : null,
     agent.bucket === "running" ? t("chats.activity.running") : null,
+    ownershipKind ? t(OWNERSHIP_BADGE_LABEL_KEY[ownershipKind]) : null,
     dimmed ? t("chats.hostStatus.offline") : null,
   ]
     .filter(Boolean)
@@ -485,6 +496,13 @@ function ChatRowInner({
             <Text style={[styles.title, unread && styles.titleUnread]} numberOfLines={1}>
               {displayTitle}
             </Text>
+            {ownershipKind !== null ? (
+              <OwnershipBadge
+                ownership={agent.agent.ownership}
+                externalLooksActive={agent.agent.externalLooksActive}
+                testID={`shell-chat-ownership-${agent.key}`}
+              />
+            ) : null}
             {showSpinner ? (
               <RunningSpinner
                 size={RUNNING_SPINNER_SIZE}
@@ -561,6 +579,9 @@ const styles = StyleSheet.create((theme) => ({
   },
   // Ruling 3: 40dp rounded tile, WeChat's proportion for a conversation avatar,
   // filled with the project's hash colour (AVATAR_FILL).
+  // B4-ROW tail (dark frame): the glyph is the palette's one light letter, NOT
+  // `accentForeground` — in dark that token is #18181b (for the near-white accent
+  // chip) and measures 3.76-4.14:1 on these fills, under the 4.5:1 text floor.
   avatar: {
     width: 40,
     height: 40,
@@ -571,7 +592,7 @@ const styles = StyleSheet.create((theme) => ({
   avatarGlyph: {
     fontSize: theme.fontSize.xl,
     fontWeight: theme.fontWeight.semibold,
-    color: theme.colors.accentForeground,
+    color: IDENTITY_GLYPH_COLOR,
   },
   body: {
     flex: 1,
