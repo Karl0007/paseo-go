@@ -191,6 +191,46 @@ $ADB = "$env:LOCALAPPDATA\Android\platform-tools\adb.exe"
 规则：每卡 ≥2 张存 `paseo-go/evidence/<卡号>/`，Agent 必须亲自 read 每张并在报告写结论。
 （注意平板可能横竖屏切换：screencap 原图尺寸以实际为准，uiautomator bounds 是**当前方向**的坐标系。）
 
+## 6. M2 fork CI 全平台出包流水线（tag → Actions → Releases 唯一分发源）
+
+**终态**：dev 仓 → `make-public-mirror.sh` 单向重放 → public 仓（Karl0007/paseo-go）打 tag → GitHub Actions（`.github/workflows/fork-release.yml`，fork 专属新文件=壳侧资产非上游触点）出全平台包 → Releases 为唯一分发/更新源。
+
+### 6.1 触发与产物
+
+- 触发 tag：`v*.*.*-go.*`（如 `v0.10.2-go.2`；VERSION 文件=上游线系列 `0.10.2-go.N`）。
+- 产物：CLI tarball ×2（`getpaseo-cli-<ver>-linux-x64.tgz` / `-win32-x64.tgz`，**平台特定**）、shell APK（arm64-v8a）、desktop win（Setup exe + zip）、desktop linux（deb/rpm/AppImage/tar.gz）。mac 不出（无 Apple 凭据，release 说明已注明）。
+- release 说明顶部=产物直链清单+每产物 sha256（latest 指针）；release 标 prerelease（deploy-website 的 `!prerelease` 守卫使其 release 事件自然 skip）。
+
+### 6.2 CLI tarball 口径（为何不是裸 npm pack）
+
+裸 `npm pack -w @getpaseo/cli` 的 tarball 里 `@getpaseo/{client,protocol,server,...}` 依赖会去 **公共 npm registry 拉上游 0.10.2**——fork 的 server 改动（188 文件）全丢。且 npm 11 拒绝 bundle workspace 链接依赖；半 bundle（只 bundle 壳包、外部依赖留给 registry）在 `npm i -g` 全局布局下**确定性失败**（嵌套 lifecycle 依赖 bin-link 缺失，win11/npm 11.6 复现两次）。定稿=`paseo-go/release/pack-cli-bundle.mjs`：7 个壳包 `npm pack` → 全新 staging `npm install --omit=dev <7 tgz>`（外部依赖走 registry、node-pty 按宿主平台出预编译产物）→ 整棵 production node_modules 以 `bundleDependencies` 全量 vendored 进最终包。**终用户 `npm i -g <url>.tgz` = 纯解包+bin 链接，零 registry、零脚本**；代价=tarball 平台特定（win-x64/linux-x64 各一，release 说明分列）。脚本内置三道防呆：fork 血统标记（server dist 里 fork-only 文件）、web-ui 导出探针、node-pty 原生模块探针。
+
+### 6.3 APK 口径（CI 与本机 §3.5 的差异）
+
+CI=ubuntu runner（JDK21+镜像自带 Android SDK，AGP 自动补组件）：`PASEO_GO=1 EXPO_PUBLIC_PASEO_GO_SHELL=1 EXPO_PUBLIC_PASEO_GO_UPSTREAM=<上游短sha> ENTRY_FILE=packages/app/index.ts` + 壳侧桩（§3.5 坑①同物，workflow 内联生成）+ `expo prebuild --clean` + `gradlew :app:assembleRelease`（arm64-v8a 单 ABI）。**linux hermesc=Optimized，§3.5 坑②(win64 debug OOM)整套不存在，无需 afterEvaluate 补丁/外部 hermesc/WSL**——本机一键链的 phase0-4 在 CI 全部不需要。prebuild 后断言 `applicationId 'app.paseo.shell'`（坑⑥漂移防线）。
+
+**keystore 保管纪律**：签名=RN 模板 debug keystore（cert SHA-256 `fac61745dc…91033b9c`，与 M1 装机包同源=可 `-r` 升级）。⚠ 注意 `~/.android/debug.keystore` 是**另一把**（cert `5E8F…`），别混。保管三处：① public 仓 secret `PASEO_DEBUG_KEYSTORE`（base64，CI 写回 `android/app/debug.keystore`——gradle 模板 release 块本就指 `file('debug.keystore')`，**零 gradle 改动**）；② 本机副本 `C:/work/paseo-go-keystore/debug.keystore`（仓外，不入库）；③ 源头=prebuild 模板自带（`packages/app/android/app/debug.keystore`，android/ gitignored）。正式签名 keystore 仍是发布前待办（换 keystore 会断装机升级链，需配合卸载重装）。
+
+### 6.4 上游 workflow 冲突处置（零触点原则）
+
+上游 12 个 workflow 逐个核 triggers：与 `v*.*.*-go.*` 撞 tag 且缺凭据必红的 4 个——`android-apk-release.yml`(EXPO*TOKEN)、`deploy-app.yml`(CLOUDFLARE_API_TOKEN)、`desktop-release.yml`(APPLE*\*)、`release-notes-sync.yml`(GITHUB_TOKEN 够用但会用 CHANGELOG 覆写我们的 release 说明)——在 **public 仓仓库级禁用**（`gh api -X PUT …/workflows/<id>/disable`，不改文件=不扩触点；禁用态是服务端属性，镜像 force-push 不复原）。第 5 个禁用=`docker.yml`：纯 GITHUB_TOKEN 本可用，但其 setup 断言 `package.json.version == tag去v`，与我们的 `0.10.2-go.N` 系列天然冲突（go.1-3 三轮 publish 全红实锤），不改上游文件只能禁。其余 7 个 trigger=main/PR/manual，镜像分支 `paseo-go/v0.1.0` 上天然休眠。安全面：public 仓非 owner 不能推 tag，secrets 只在 owner 推 tag 时可达；`allowed_actions=local` **未设**（会连 actions/checkout 一起禁掉，本仓 workflow 全瘫）。
+
+### 6.5 镜像全量重建 runbook（本轮实测版）
+
+`make-public-mirror.sh` 的 bash 路线在本机已不可依赖，两个环境级坑：
+
+1. **PATH 里的 `bash` = `C:\Windows\system32\bash.exe`（WSL 残留 shim，坑⑦）**——任何 `bash xxx.sh` 直接弹"未安装发行版"。git-bash 在 `C:\Program Files\Git\bin\bash.exe`，或按本轮做法用 node 编排等价步骤。
+2. **git 2.43.win 的 `format-patch --binary` + pathspec 组合静默产出空文件**（打印文件名、rc=0、文件不存在；node fs 实锤）。定稿=逐 commit `format-patch --binary -1`（无 pathspec）→ 文本层剥除 `paseo-go/evidence/` 段（剥完补 `-- ` 签名，否则 am 报 corrupt）。
+3. 根提交=tarball 解包时 **`git archive` 产物无前缀目录**，不要 `--strip-components=1`；bsdtar 撞 symlink-vs-dir 报错可容忍（symlink 用 `git ls-tree db4fd334` 的 120000 条目写桩+`update-index --cacheinfo` 修 mode）；`git add -A` 必须带 `-f`（上游有被 ignore 但已跟踪的文件，如 `app.json` 样例）；`.gitignore` blob 上游存的是 CRLF，add 会被 `core.autocrlf=input`(全局) 归一成 LF——最终树对账前用 `cat-file blob` 原字节回写+amend。
+4. **树对账（必做，空=过）**：`git fetch <mirror> +HEAD:refs/mirror-check && git diff --stat HEAD refs/mirror-check -- . ':(exclude)paseo-go/evidence'` 必须零输出（本轮 `v0.10.2-go.2` 时=EMPTY）。
+5. 增量同步（修 workflow 后重出包）：`format-patch -1 HEAD` → 镜像 `git am` → `push --force` 分支 → 删旧 tag 重打 `go.N+1`（Actions 不重跑已失败 tag）。
+
+### 6.6 出包→换装→任务重启 全链
+
+1. 出包：dev 仓提交 → 镜像重建/增量（§6.5）→ `git tag v0.10.2-go.N && git push origin <tag>` → `gh run watch`（public 仓）。
+2. 换装：CLI=本机 `npm i -g --prefix <测试前缀> <win32 tarball>` → `paseo --version` 应为 `<ver>` → 隔离 `PASEO_HOME`+config.json `daemon.listen` 指第三端口 → `daemon start/stop`；APK=`adb -s 192.168.31.14:5555 install -r <apk>`（签名同源可直接覆盖）→ 冷启三 tab；win zip=解包+清单核对（本机禁忌#1 不实跑）。
+3. 任务重启：新包验证过 → RELEASE.md 记 go.N 行（产物 sha256+run 链接）→ 后续任务按新成品包口径验收。
+
 ## 已知问题 / 边界
 
 1. 上表 4 个环境性测试失败（zh-CN locale x3、CRLF x1、forges 测试 Windows 路径 bug x1）——Linux CI 全绿，本机不修（`packages/` 铁律禁改）。
