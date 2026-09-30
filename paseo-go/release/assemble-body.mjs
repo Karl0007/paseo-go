@@ -9,7 +9,6 @@
 //
 // usage: node assemble-body.mjs --assets-json a.json --sha-dir art --out body.md \
 //        --version 0.10.2-go.6 --tag v0.10.2-go.6 --repo owner/name
-import { execFileSync } from "node:child_process";
 import { readFileSync, writeFileSync, readdirSync, statSync } from "node:fs";
 import path from "node:path";
 

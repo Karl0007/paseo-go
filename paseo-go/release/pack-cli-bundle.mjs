@@ -83,15 +83,16 @@ const NPM_CLI_CANDIDATES = [
     "bin",
     "npm-cli.js",
   ),
-].filter((p) => existsSync(p));
-const NPM_CLI = NPM_CLI_CANDIDATES[0];
+];
+const NPM_CLI = NPM_CLI_CANDIDATES.find((p) => existsSync(p));
+
 function run(cmd, cmdArgs, opts = {}) {
-  const [bin, argv] =
-    cmd === "npm"
-      ? process.platform === "win32"
-        ? [process.execPath, [NPM_CLI, ...cmdArgs]]
-        : ["npm", cmdArgs]
-      : [cmd, cmdArgs];
+  let bin = cmd;
+  let argv = cmdArgs;
+  if (cmd === "npm" && process.platform === "win32") {
+    bin = process.execPath;
+    argv = [NPM_CLI, ...cmdArgs];
+  }
   console.log(`$ ${bin} ${argv.join(" ")}`);
   return execFileSync(bin, argv, {
     cwd: REPO,
