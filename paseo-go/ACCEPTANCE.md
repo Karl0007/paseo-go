@@ -171,3 +171,45 @@
 ## B6. 批次二结论
 
 **Paseo Go v0.2.0 验收通过**。功能面 §14 十三项全 ✅（语音端到端=外部依赖挂起非缺陷）；review 轮 26 卡全处置（修毕/降级/驳回/转上游=UPSTREAM-ISSUES.md 8 条）；P1 全销卡含设备复验；门禁=基线零新增；发布物在档。开放项三条见 README 首屏（真人拖拽/语音端点/Q10 事后审），无口头债。
+
+---
+
+# 战略链增补（M1-M4，2026-09-30；只增不改上文）
+
+## M1. 上游合流 v0.10.2
+
+- ✅ 种子合并：`9ce29a1d7`（codeload tarball，树=上游真 sha `919c737c` 逐文件全等 4980 文件+7 syml，父=db4fd334；partial clone 拒 fetch 的既定替代路径）→ merge `1789ebbca` **零冲突**（312 文件 +19912/-2168）；fixup `3cb40c0c1`（VERSION=0.10.2-go.0 双系口径 / SHELL_UPSTREAM_REF=919c737c）
+- ✅ 11 触点文件逐一 re-stick 核验（8 上游未动=壳版原样；messages.ts/daemon-client.ts/\_layout.tsx hunk 自动合+壳增行 comm 子集校验零缺失）；壳自有树上游零压入
+- ⚠ 姿势变更：仓 repo-local `core.autocrlf=false` 永久制（autocrlf×oxfmt 结构性冲突，BUILD.md 坑9 已改口径）
+
+## M2. fork CI 出包（Karl0007/paseo-go）
+
+- ✅ 审计：上游 12 workflow 逐一分级（4 禁用：EAS/Apple/CHANGELOG 覆写/docker 版本断言冲突；其余休眠）；**零触点原则**——仓库级禁用+新增 fork 专属文件，上游 workflow 零改动
+- ✅ `fork-release.yml`（tag `v*.*.*-go.*`）：meta/CLI(win32+linux)/APK/desktop(win+linux)/release 组装；go.1→go.6 六轮迭代全绿（npm-cli 路径/exec-bit/sdkmanager/runner 资源各坑在案）
+- ⚠ 裁定：APK job GitHub runner 三连驱逐（16GB 天花板，infra 非配置）→ **APK 本机重打 merge 后首包**（sha256=`e3ca12a0…`）上传 Releases+真机装机帧（关于页实拍 `919c737c`）；runner 化留下轮（候选：降并发/self-hosted）
+- ✅ Releases `v0.10.2-go.6`=22 资产+全 sha256 表+latest 指针+prerelease；keystore=模板 keystore（与装机链 cert 一致，仓外保管 `C:/work/paseo-go-keystore/`，不入库）；win zip CI 内 unzip -l 六项校验（本机禁忌#1 不实跑）
+- ✅ 镜像纪律升级：全量重建+**树对账必须 EMPTY**（merge commit 展平验证）
+
+## M3. 生产 daemon 切 fork
+
+- ✅ 演练：隔离 prefix/home/127.0.0.1:6799 全绿（health/401/omp/血统探针）+壳 APK 三能力真机帧（导入树/内容搜索/git DAG，`evidence/M3/`）
+- ✅ 切换：go.6 win32 tarball（Releases 下载，sha256 对账 `5d2d8c2b…b8de`）→ Stop 任务→npm i -g→Start；**自检四条全绿+祖谱合法链**（svchost←services←wininit）；编排者独立复核一致
+- ✅ 兼容代证：官方 registry CLI 0.10.1 对 fork daemon 密码闸/hello/provider ls/agent ls 全通（协议纯增纪律兑现）；回滚件=0.10.1 一条命令
+- 📝 DEPLOY-NOTES 更新 diff 已交用户过目（`evidence/M3/deploy-notes-diff.md`，未直改生产文档）
+
+## M4. 更新指向 fork Releases
+
+- ✅ 壳 APK：feed=`/releases?per_page=1`（实测 prerelease 仓 latest 端点 404）+`0.10.x-go.N` 段内数值序+一次性提示条（seen 跨重启，第 8 持久店入 reset）+设置页手动三态；测试钩 `EXPO_PUBLIC_PASEO_GO_UPDATE_FEED`；设备 5 帧 `evidence/M4/`
+- ✅ desktop feed 触点#（申报）：electron-builder.yml owner/repo→fork（净 +13/-2）+config-parse 单测；📝 发现：electron-updater stable 通道不吃 prerelease→触发需去 prerelease 或切 beta 通道（BUILD.md §7.2 在案，未改）
+- ✅ 版本盖章链：`EXPO_PUBLIC_PASEO_GO_VERSION`（CI tag→gradle→壳）+WSL 脚本默认读 VERSION
+
+## M-门禁. 终态门禁（编排者亲跑，HEAD=e3d69c88c 后）
+
+- app 6162 用例：6151 pass / **4 fail 全 W1 环境项**（zh-CN locale ×4；M1 基线 5 项中 CRLF 项随 autocrlf=false 转绿）/ 7 pending → **零新增**
+- server unit 6084：5850 pass / **1 fail 环境项**（npm registry E404；M1 基线 EBUSY ×3 转绿）/ 233 pending → **零新增**
+- protocol 全绿；typecheck/oxlint 各卡 pre-commit 钩在案
+- commit 纪律：M1 成对（merge+fixup）/ M2 按轮 / M4 两切片各一 commit；镜像=每链终态同步
+
+## M-结论
+
+**战略链 M1-M4 全部完成**。终态=一条供应链：`paseo-go` 分支 → GitHub Actions（tag 驱动）→ Releases（CLI tarball/APK/desktop）→ 生产 daemon+壳 APK+desktop 更新全指 fork。开放项+3：④APK CI runner 化（资源天花板，self-hosted 候选）⑤desktop 自动更新 prerelease 通道口径（文档化未改）⑥DEPLOY-NOTES diff 待用户点头落笔。
