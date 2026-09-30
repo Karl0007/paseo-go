@@ -36,3 +36,15 @@
 - D1 claude fork-on-send 顺延尾巴卡 —— **Main 裁定：维持顺延**（已排队）。
 - D2 identity-colors.ts 新导出=第 5 个上游文件触点 —— **Main 裁定：接受**（1 行导出+COMPAT 注释），触点台账补记。
 - D3 R4 门与 C24 fork 门双弹叠加 —— **Main 裁定：保留**（各证各风险；嫌吵再裁）。
+
+## 复核庭终局（RevCourt 2026-09-30）
+
+21 CONFIRMED / 1 DOWNGRADE（R4-08→P3：B4-R4OPEN/01-dialog.png 已真机证弹窗，余帧改名+勘误）/ 0 REJECTED / 0 UPGRADE。R4-01 影响修正：主链假态=「外部」徽标（looksActive 被归零不弹窗），stored 竞态变体可达「外部·运行中」；附加=失败轮重复 append 常驻时间线。
+
+## 复核庭新增（待 Main 处置）
+
+R4-26 崩溃残留注册表 pid 回收假活（并入 R4-21 修复面）；R4-27 attach 失败路径抹已有证据（A 批注意）；R4-28 跨主机 agentId 命名空间（记尾 chore）；R4-29 C9 搜索面检索字段缺口（记尾 chore）；R4-30/31 两条路径信任链细节（A 批顺核）。
+
+## 拍板（Main，无人值守授权内）
+
+D1 claude fork-on-send=维持顺延尾卡；D2 identity-colors.ts 第 5 触点=接受入账；D3 双弹窗叠加=保留。R4-08 处置=帧改名+勘误行（B 批带上）。R4-28/29 立尾 chore。
