@@ -853,6 +853,18 @@ export const AgentSnapshotPayloadSchema = z.object({
   attentionTimestamp: z.string().nullable().optional(),
   archivedAt: z.string().nullable().optional(),
   providerUnavailable: z.boolean().optional(),
+  // COMPAT(agentLastMessagePreview): added 2026-09-30 (Paseo Go B4-PREVIEW, batch-4
+  // F4-Q3=b). Pure-add chat-list projection of the newest message: preview text
+  // (whitespace runs collapsed, trimmed, ≤120 chars) plus that message's role.
+  // New daemons always emit both fields (null = the agent has no message items yet);
+  // daemons older than the Paseo Go build omit them, so the schema stays optional
+  // while clients support those hosts — consumers MUST read `undefined` as "not
+  // reported" and `null` as "no messages". Official clients ignore unknown fields.
+  lastMessagePreview: z.string().nullable().optional(),
+  // COMPAT(agentLastMessagePreview): see lastMessagePreview. `other` covers
+  // message-like timeline items that are neither user nor assistant (errors,
+  // notifications).
+  lastMessageRole: z.enum(["user", "assistant", "other"]).nullable().optional(),
 });
 
 export type AgentSnapshotPayload = z.infer<typeof AgentSnapshotPayloadSchema>;
@@ -876,6 +888,11 @@ export const AgentListItemPayloadSchema = z.object({
   attentionTimestamp: z.string().nullable().optional(),
   labels: z.record(z.string(), z.string()).default({}),
   providerUnavailable: z.boolean().optional(),
+  // COMPAT(agentLastMessagePreview): added 2026-09-30 (Paseo Go B4-PREVIEW). Same
+  // pure-add fields and semantics as AgentSnapshotPayloadSchema.lastMessagePreview;
+  // carried through toAgentListItemPayload for MCP list_agents consumers.
+  lastMessagePreview: z.string().nullable().optional(),
+  lastMessageRole: z.enum(["user", "assistant", "other"]).nullable().optional(),
 });
 
 export type AgentListItemPayload = z.infer<typeof AgentListItemPayloadSchema>;

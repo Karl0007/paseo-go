@@ -77,6 +77,7 @@ class InMemoryAgentManager {
       effectiveThinkingOptionId: null,
       createdAt: new Date("2026-05-02T00:00:00.000Z"),
       updatedAt: new Date("2026-05-02T00:00:00.000Z"),
+      lastMessage: { preview: null, role: null, seq: null, messageId: null },
       lastUserMessageAt: null,
       lifecycle: "idle",
       capabilities: {

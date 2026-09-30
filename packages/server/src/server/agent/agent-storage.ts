@@ -74,6 +74,13 @@ const STORED_AGENT_SCHEMA = z.object({
   attentionTimestamp: z.string().nullable().optional(),
   internal: z.boolean().optional(),
   archivedAt: z.string().nullable().optional(),
+  // COMPAT(agentLastMessagePreview): added 2026-09-30 (Paseo Go B4-PREVIEW).
+  // Optional so records written before the build still parse (zod strips unknown
+  // keys, so without these lines the values would be lost on every load). The
+  // chat-list directory for closed agents reads them straight off the record
+  // after a daemon restart; resume paths re-derive from the timeline tail.
+  lastMessagePreview: z.string().nullable().optional(),
+  lastMessageRole: z.enum(["user", "assistant", "other"]).nullable().optional(),
   owner: AgentOwnerSchema.optional(),
 });
 

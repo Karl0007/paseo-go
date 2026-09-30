@@ -105,6 +105,7 @@ function makeManagedAgent(args: {
     },
     historyPrimed: true,
     lastUserMessageAt: null,
+    lastMessage: { preview: null, role: null, seq: null, messageId: null },
     attention: { requiresAttention: false },
     foregroundTurnWaiters: new Set(),
     finalizedForegroundTurnIds: new Set(),

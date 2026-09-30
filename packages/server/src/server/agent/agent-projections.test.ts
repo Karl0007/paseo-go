@@ -94,6 +94,7 @@ function createManagedAgent(overrides: ManagedAgentOverrides = {}): ManagedAgent
     lastError: lastErrorValue,
     historyPrimed: true,
     lastUserMessageAt: now,
+    lastMessage: { preview: null, role: null, seq: null, messageId: null },
     attention: { requiresAttention: false },
   };
 

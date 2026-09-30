@@ -349,6 +349,7 @@ function makeManagedAgent(input: {
     persistence: null,
     historyPrimed: true,
     lastUserMessageAt: null,
+    lastMessage: { preview: null, role: null, seq: null, messageId: null },
     attention: {
       requiresAttention: false,
       attentionReason: null,

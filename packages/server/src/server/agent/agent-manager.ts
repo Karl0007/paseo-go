@@ -57,6 +57,14 @@ import {
 } from "./agent-sdk-types.js";
 import { buildArchivedAgentRecord, type ArchivedStoredAgentRecord } from "./agent-archive.js";
 import type { StoredAgentRecord, AgentStorage } from "./agent-storage.js";
+import {
+  advanceAgentLastMessage,
+  agentLastMessageTouches,
+  deriveAgentLastMessageFromRows,
+  deriveAgentLastMessageFromTimeline,
+  EMPTY_AGENT_LAST_MESSAGE,
+  type AgentLastMessageTrack,
+} from "./agent-last-message.js";
 import type { AgentOwner } from "./agent-owner.js";
 import {
   InMemoryAgentTimelineStore,
@@ -426,6 +434,10 @@ interface ManagedAgentBase {
   persistence: AgentPersistenceHandle | null;
   historyPrimed: boolean;
   lastUserMessageAt: Date | null;
+  // COMPAT(agentLastMessagePreview): Paseo Go B4-PREVIEW chat-list projection.
+  // Maintained at the recordTimeline choke point, re-derived from the timeline
+  // tail on register/hydrate, and persisted on the stored record.
+  lastMessage: AgentLastMessageTrack;
   activeTurnId: string | null;
   activeTurnStartedAt: Date | null;
   lastUsage?: AgentUsage;
@@ -1907,6 +1919,12 @@ export class AgentManager {
         persistence: record.persistence ?? null,
         historyPrimed: true,
         lastUserMessageAt: record.lastUserMessageAt ? new Date(record.lastUserMessageAt) : null,
+        lastMessage: {
+          preview: record.lastMessagePreview ?? null,
+          role: record.lastMessageRole ?? null,
+          seq: null,
+          messageId: null,
+        },
         lastUsage: undefined,
         lastError: record.lastError ?? undefined,
         attention,
@@ -2370,6 +2388,9 @@ export class AgentManager {
       if (event.type === "timeline") {
         this.touchUpdatedAt(agent);
         const row = this.recordTimeline(agent.id, event.item);
+        if (agentLastMessageTouches(event.item)) {
+          this.emitState(agent);
+        }
         this.dispatchStream(agent.id, event, {
           seq: row.seq,
           epoch: this.timelineStore.getEpoch(agent.id),
@@ -2402,6 +2423,11 @@ export class AgentManager {
     item = limitAgentTimelineItemContent(item);
     this.touchUpdatedAt(agent);
     const row = this.recordTimeline(agentId, item);
+    // COMPAT(agentLastMessagePreview): committed messages refresh the directory
+    // too, so non-stream appends reach the chat list like stream events do.
+    if (agentLastMessageTouches(item)) {
+      this.emitState(agent);
+    }
     this.dispatchStream(
       agentId,
       {
@@ -3483,12 +3509,16 @@ export class AgentManager {
         options,
       });
 
+      const lastMessage = await this.resolveRegisterLastMessage(resolvedAgentId, {
+        restoring: options?.restoring,
+      });
       const managed = this.buildManagedAgentForRegister({
         resolvedAgentId,
         session,
         config,
         now,
         durableTimelineHasRows,
+        lastMessage,
         options,
       });
 
@@ -3618,12 +3648,49 @@ export class AgentManager {
     return { durableTimelineHasRows };
   }
 
+  // COMPAT(agentLastMessagePreview): Paseo Go B4-PREVIEW. Rebuild the chat-list
+  // preview when an agent enters memory: seeded/live timeline items win (create
+  // seeds, import rows, reload's preserved timeline), then durable rows when a
+  // durable store is wired, then the persisted record for restores. Records
+  // written before this build simply yield null, and the provider-history
+  // replay that follows registration re-derives the real values.
+  private async resolveRegisterLastMessage(
+    agentId: string,
+    options: { restoring?: boolean } | undefined,
+  ): Promise<AgentLastMessageTrack> {
+    if (this.timelineStore.has(agentId)) {
+      const items = this.timelineStore.getItems(agentId);
+      if (items.length > 0) {
+        return deriveAgentLastMessageFromTimeline(items);
+      }
+    }
+    if (this.durableTimelineStore) {
+      const rows = await this.durableTimelineStore.getCommittedRows(agentId);
+      if (rows.length > 0) {
+        return deriveAgentLastMessageFromRows(rows);
+      }
+    }
+    if (options?.restoring && this.registry) {
+      const record = await this.registry.get(agentId);
+      if (record) {
+        return {
+          preview: record.lastMessagePreview ?? null,
+          role: record.lastMessageRole ?? null,
+          seq: null,
+          messageId: null,
+        };
+      }
+    }
+    return EMPTY_AGENT_LAST_MESSAGE;
+  }
+
   private buildManagedAgentForRegister(params: {
     resolvedAgentId: string;
     session: AgentSession;
     config: AgentSessionConfig;
     now: Date;
     durableTimelineHasRows: boolean;
+    lastMessage: AgentLastMessageTrack;
     options:
       | {
           createdAt?: Date;
@@ -3640,7 +3707,8 @@ export class AgentManager {
         }
       | undefined;
   }): ActiveManagedAgent {
-    const { resolvedAgentId, session, config, now, durableTimelineHasRows, options } = params;
+    const { resolvedAgentId, session, config, now, durableTimelineHasRows, lastMessage, options } =
+      params;
     return {
       id: resolvedAgentId,
       provider: config.provider,
@@ -3672,6 +3740,7 @@ export class AgentManager {
       ),
       historyPrimed: options?.historyPrimed ?? durableTimelineHasRows,
       lastUserMessageAt: options?.lastUserMessageAt ?? null,
+      lastMessage,
       lastUsage: options?.lastUsage,
       lastError: options?.lastError,
       attention: resolveInitialAttention(options?.attention),
@@ -4789,6 +4858,17 @@ export class AgentManager {
     item = limitAgentTimelineItemContent(item);
     const row = this.timelineStore.append(agentId, item, options);
     this.enqueueDurableTimelineAppend(agentId, row);
+    // COMPAT(agentLastMessagePreview): the single choke point every timeline
+    // append flows through (live stream events, submitted prompts, provider
+    // history replays, imports), so the chat-list preview always follows the
+    // newest message without touching any caller.
+    const agent = this.agents.get(agentId);
+    if (agent) {
+      const advanced = advanceAgentLastMessage(agent.lastMessage, item, row.seq);
+      if (advanced) {
+        agent.lastMessage = advanced;
+      }
+    }
     return row;
   }
 

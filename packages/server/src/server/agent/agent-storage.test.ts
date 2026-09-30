@@ -127,6 +127,7 @@ function createManagedAgent(overrides: ManagedAgentOverrides = {}): ManagedAgent
     persistence: overrides.persistence ?? null,
     historyPrimed: overrides.historyPrimed ?? true,
     lastUserMessageAt: overrides.lastUserMessageAt ?? core.now,
+    lastMessage: overrides.lastMessage ?? { preview: null, role: null, seq: null, messageId: null },
     lastUsage: overrides.lastUsage,
     lastError: overrides.lastError,
   };
