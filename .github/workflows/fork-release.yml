@@ -419,6 +419,11 @@ jobs:
         run: |
           set -euo pipefail
           cd art
+          # desktop-windows and desktop-linux each ship a SHA256SUMS.txt; release
+          # asset names are unique, so namespace them per artifact bundle.
+          for d in */; do
+            [ -f "$d/SHA256SUMS.txt" ] && mv "$d/SHA256SUMS.txt" "$d/${d%/}-SHA256SUMS.txt"
+          done
           shopt -s nullglob
           files=(*/*)
           gh release upload "$TAG" "${files[@]}" --repo "$REPO" --clobber
