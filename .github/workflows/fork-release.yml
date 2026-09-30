@@ -166,7 +166,7 @@ jobs:
 
       - name: Assemble release APK
         working-directory: packages/app/android
-        run: ./gradlew :app:assembleRelease --no-daemon --console=plain -PreactNativeArchitectures=arm64-v8a -Dorg.gradle.jvmargs=-Xmx6g
+        run: chmod +x gradlew && ./gradlew :app:assembleRelease --no-daemon --console=plain -PreactNativeArchitectures=arm64-v8a -Dorg.gradle.jvmargs=-Xmx6g
 
       - name: Stage asset + sha256
         shell: bash
@@ -218,6 +218,12 @@ jobs:
       - name: Install Linux smoke display
         if: matrix.key == 'linux'
         run: sudo apt-get update && sudo apt-get install -y xvfb xauth rpm
+      - name: Restore unix exec bits (mirror root came from a tarball, so stored modes lost 100755)
+        if: matrix.key == 'linux'
+        run: |
+          set -euo pipefail
+          chmod +x packages/desktop/bin/paseo
+          test -x packages/desktop/bin/paseo
 
       - name: Stamp desktop package version from tag
         shell: bash
