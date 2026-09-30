@@ -105,9 +105,8 @@ jobs:
     env:
       PASEO_GO: "1"
       EXPO_PUBLIC_PASEO_GO_SHELL: "1"
-      EXPO_PUBLIC_PASEO_GO_UPSTREAM: ${{ env.PASEO_GO_UPSTREAM_SHA }}
       ENTRY_FILE: packages/app/index.ts
-      NODE_OPTIONS: --max-old-space-size=8192
+      EXPO_PUBLIC_PASEO_GO_UPSTREAM: "919c737c"
     steps:
       - uses: actions/checkout@v4
         with:
