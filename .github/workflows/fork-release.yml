@@ -78,7 +78,28 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
+      - name: Prebuild workspace dists (Windows only — upstream build-daemon-web-ui.mjs
+          uses spawn("npm", shell:false) which ENOENTs on Windows; we replicate its
+          export+copy steps, then pack with --ignore-scripts from pre-built dist.
+          The packer's web-ui/native probes still gate the output either way.)
+        if: runner.os == 'Windows'
+        shell: bash
+        env:
+          NODE_OPTIONS: --max-old-space-size=8192
+        run: |
+          set -euo pipefail
+          npm run build --workspace=@getpaseo/protocol
+          npm run build:app-deps
+          npm run build --workspace=@getpaseo/relay
+          npm run build --workspace=@getpaseo/server
+          npm run build --workspace=@getpaseo/cli
+          npm run build:web --workspace=@getpaseo/app
+          node -e 'require("fs").cpSync("packages/app/dist","packages/server/dist/server/web-ui",{recursive:true,force:true})'
+          test -f packages/server/dist/server/web-ui/index.html
+
       - name: Build vendored CLI tarball
+        env:
+          PGO_IGNORE_SCRIPTS: ${{ runner.os == 'Windows' && '1' || '' }}
         run: node paseo-go/release/pack-cli-bundle.mjs --version "${{ needs.meta.outputs.version }}" --out dist-cli
 
       - name: Stage asset (platform-suffixed name + sha256)
