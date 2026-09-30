@@ -6,7 +6,7 @@
  * stamp the exact tree with `EXPO_PUBLIC_PASEO_GO_UPSTREAM=$(git rev-parse --short
  * HEAD)`; the literal is the fallback for bundles built without it.
  */
-export const SHELL_UPSTREAM_REF = process.env.EXPO_PUBLIC_PASEO_GO_UPSTREAM ?? "db4fd334";
+export const SHELL_UPSTREAM_REF = process.env.EXPO_PUBLIC_PASEO_GO_UPSTREAM ?? "919c737c";
 
 /** Shell display version; bumped by release cards (C13). */
 export const SHELL_VERSION = "0.3.0";

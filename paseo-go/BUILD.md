@@ -98,7 +98,7 @@ $env:JAVA_HOME = "C:\java\jdk21.0.11_10"
 # APP_VARIANT 不设 = production；PASEO_GO=1 出壳品牌（app.paseo.shell，与官方共存）
 $env:PASEO_GO = "1"
 $env:EXPO_PUBLIC_PASEO_GO_SHELL = "1"          # 壳模式 bundle 默认开（首启即壳 IA）
-$env:EXPO_PUBLIC_PASEO_GO_UPSTREAM = "db4fd334" # 关于页上游 hash（metro 构建期内联，KI-C8-b）
+$env:EXPO_PUBLIC_PASEO_GO_UPSTREAM = "919c737c" # 关于页上游 hash（metro 构建期内联，KI-C8-b）
 $env:ENTRY_FILE = "packages/app/index.ts"       # 坑①，见下
 $env:NODE_OPTIONS = "--max-old-space-size=8192" # terser minify 需要大 node 堆
 npx expo prebuild --platform android --clean
@@ -129,7 +129,7 @@ npx expo prebuild --platform android --clean
    > 3s 的 input 注入被电源管理静默丢、JS 长按计时链不触发、persist 可丢写、内核 hung_wp_screen wedge 需整机重启。
    > 测前必查 `dumpsys battery` 的 level+充电位；**PC USB 口不保证充电**，长测挂墙充。
    > 另：force-stop 重启 app 可能恢复到上次路由（会话屏）而非列表页——取证脚本第一步必须断言在目标页。
-7. 版本/上游注入：`paseo-go/VERSION`=展示版本源（当前 0.1.0，与 `src/shell/config.ts` `SHELL_VERSION` 常量同步改）；关于页 hash 来自 `EXPO_PUBLIC_PASEO_GO_UPSTREAM` 构建期内联（已证：sentinel 值 export 后 bundle 内恰 1 处命中、无运行时 process.env 查找；终验=关于页实拍）。
+7. 版本/上游注入（M1 改口径）：`paseo-go/VERSION`=上游合流版本系（M1 起 `0.10.2-go.N`，跟上游稳定版走，供 M2/M3 消费）；壳展示版本=`src/shell/config.ts` `SHELL_VERSION` 常量（0.3.0 系，发布卡才动）——两套各管各，不再同步改；关于页 hash 来自 `EXPO_PUBLIC_PASEO_GO_UPSTREAM` 构建期内联（已证：sentinel 值 export 后 bundle 内恰 1 处命中、无运行时 process.env 查找；终验=关于页实拍）。
 
 ## 4. 装机 + 连 daemon + 起 app（对应证据契约 3）
 
