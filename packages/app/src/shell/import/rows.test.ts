@@ -9,6 +9,7 @@ import { describe, expect, it } from "vitest";
 import type { FetchRecentProviderSessionEntry } from "@getpaseo/client/internal/daemon-client";
 import {
   applyImportTreeCollapse,
+  buildBadgeOpenTarget,
   buildImportAgentHandleIndex,
   buildImportRowBadgeMap,
   buildImportToastParts,
@@ -809,5 +810,80 @@ describe("buildImportRowBadgeMap aggregation (裁定 12 父行)", () => {
 
   it("empty index = no badges anywhere (目录未到货维持现状可勾选)", () => {
     expect(buildImportRowBadgeMap(tree, new Map()).size).toBe(0);
+  });
+});
+
+// R4-06（开屏覆盖面收口）：徽标跳转的 opener 目标构造。链本身（R4 门→fork 门→
+// markRead→recordVisit→navigate）由 open-agent.test 钉死；这里钉的是「喂给链的
+// 事实」——分级门的三个输入必须原样来自目录行，缺了=pre-go.7 静默口径。
+describe("buildBadgeOpenTarget (R4-06)", () => {
+  const STAMP = Date.parse("2026-09-28T10:00:00.000Z");
+  function agentSource(
+    overrides: Partial<{
+      workspaceId: string | null;
+      provider: string;
+      labels: Record<string, string> | null;
+      lastActivityAt: Date;
+      attentionTimestamp: Date | null;
+      ownership: string | null;
+      externalLooksActive: boolean | null;
+    }> = {},
+  ) {
+    return {
+      workspaceId: "ws-1",
+      provider: "omp",
+      labels: {},
+      lastActivityAt: new Date(STAMP),
+      attentionTimestamp: new Date(STAMP - 60_000),
+      ownership: "external" as string | null,
+      externalLooksActive: true,
+      ...overrides,
+    };
+  }
+
+  it("maps the directory row into a full open target (key form + gate facts verbatim)", () => {
+    const target = buildBadgeOpenTarget(
+      "srv-1",
+      "agent-9",
+      agentSource({ labels: { "paseo.imported-provider-session": "true" } }),
+    );
+    expect(target).toEqual({
+      key: "srv-1:agent-9",
+      serverId: "srv-1",
+      agentId: "agent-9",
+      workspaceId: "ws-1",
+      // 水位=max(活动, 求 attention)——F4 同族口径。
+      lastEventAt: STAMP,
+      imported: true,
+      ownership: "external",
+      externalLooksActive: true,
+      provider: "omp",
+    });
+  });
+
+  it("a missing directory row opens nothing (竞态=静默，绝不裸 navigate 绕守卫)", () => {
+    expect(buildBadgeOpenTarget("srv-1", "agent-9", undefined)).toBeNull();
+    expect(buildBadgeOpenTarget("srv-1", "agent-9", null)).toBeNull();
+  });
+
+  it("COMPAT: pre-go.7 row (ownership pair absent) passes through as undefined", () => {
+    const target = buildBadgeOpenTarget(
+      "srv-1",
+      "agent-9",
+      agentSource({ ownership: undefined, externalLooksActive: undefined, labels: undefined }),
+    );
+    // undefined 对=open-agent 分流单测钉过的静默同步路径（零弹窗零确认）。
+    expect(target?.ownership).toBeUndefined();
+    expect(target?.externalLooksActive).toBeUndefined();
+    expect(target?.imported).toBe(false);
+  });
+
+  it("R2-14: garbage host dates floor the watermark to 0, never NaN/fake", () => {
+    const target = buildBadgeOpenTarget(
+      "srv-1",
+      "agent-9",
+      agentSource({ lastActivityAt: new Date(NaN), attentionTimestamp: null }),
+    );
+    expect(target?.lastEventAt).toBe(0);
   });
 });

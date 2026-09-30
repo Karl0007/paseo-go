@@ -83,7 +83,7 @@ import {
   type FilterSwipePage,
 } from "@/shell/chats/filter-swipe";
 import { useChatsFilterSwipe } from "@/shell/chats/use-chats-filter-swipe";
-import { consumeChatsFilterIntent, subscribeChatsFilterIntent } from "@/shell/chats/filter-request";
+import { useChatsFilterJump } from "@/shell/chats/use-chats-filter-jump";
 import {
   ACTIVITY_LABEL_KEY,
   ChatListRow,
@@ -363,19 +363,12 @@ export function ChatsScreenBody({ selectedAgentKey = null }: ShellScreenBodyProp
   const [filter, setFilter] = useState<ChatListFilter>("active");
   const archivedOnly = filter === "archived";
 
-  // B4-IMPORT (批次四 F7 裁定 12): 导入屏「已归档」徽标行点主体=跳本 tab 并切
-  // 已归档筛选。意图走模块总线而非路由参数——宽屏 body 挂在 split 左栏(每个
-  // navigator 之外, useFocusEffect/params 都到不了它), 与 subscribeSectionFocus
-  // 同一论证。consume-once: 挂载时也兑现一次(body 未挂载时发出的意图不丢),
-  // 兑现即清空, 之后的手动切页/回访不被旧意图覆写。
-  useEffect(() => {
-    const apply = () => {
-      const intent = consumeChatsFilterIntent();
-      if (intent) setFilter(intent);
-    };
-    apply();
-    return subscribeChatsFilterIntent(apply);
-  }, []);
+  // B4-IMPORT (批次四 F7 裁定 12) + R4-17: 导入屏「已归档」徽标行跳转的消费端
+  // 收拢在 useChatsFilterJump——切页走本屏唯一 setFilter（segment/横滑也是它），
+  // highlightKey 把目标行标成一次性高亮（复用 C31 `selected` 样式，1.2s 自熄），
+  // nonce 折进列表 key=免 ref 的归顶原语（rail 重复点回顶同款；官方 DraggableList
+  // 包装不透出 scroll ref，见头注——这是本列表唯一能把视口放到已知位置的途径）。
+  const jump = useChatsFilterJump(setFilter);
 
   // C9 search mode: the header owns the input, the screen owns the query. The
   // normalised form drives filtering; empty means “no filter” (restore-on-clear).
@@ -636,7 +629,9 @@ export function ChatsScreenBody({ selectedAgentKey = null }: ShellScreenBodyProp
           onDragStart={handleRowDragStart}
           onGestureLockChange={handleGestureLockChange}
           isActive={isActive}
-          selected={item.row.agent.key === selectedAgentKey}
+          selected={
+            item.row.agent.key === selectedAgentKey || item.row.agent.key === jump.highlightKey
+          }
         />
       );
     },
@@ -650,10 +645,18 @@ export function ChatsScreenBody({ selectedAgentKey = null }: ShellScreenBodyProp
       hostsById,
       handleRetryHost,
       selectedAgentKey,
+      jump.highlightKey,
       t,
     ],
   );
 
+  // 虚拟化 cell 的外部行状态：路由派生选中态（C31）+ 跳转一次性高亮（R4-17）。
+  // 两者必须折进 extraData，否则行重渲判定看不到高亮翻转。memo 保引用稳定——
+  // 每次 render 新对象=每次父级 render 全 cell 重渲（react-perf 纪律）。
+  const listExtraData = useMemo(
+    () => ({ selectedAgentKey, highlightKey: jump.highlightKey }),
+    [selectedAgentKey, jump.highlightKey],
+  );
   const keyExtractor = useCallback((item: ChatListItem<ShellChatAgent>) => item.key, []);
   const hasHosts = hosts.length > 0;
   const allHostsOffline =
@@ -727,7 +730,7 @@ export function ChatsScreenBody({ selectedAgentKey = null }: ShellScreenBodyProp
             onLayout={swipe.onSurfaceLayout}
           >
             <DraggableList
-              key={listNonce}
+              key={`${listNonce}:${jump.nonce}`}
               data={items}
               keyExtractor={keyExtractor}
               renderItem={renderItem}
@@ -738,7 +741,7 @@ export function ChatsScreenBody({ selectedAgentKey = null }: ShellScreenBodyProp
               refreshing={gestureBand.refreshing}
               onRefresh={gestureBand.onRefresh}
               ListEmptyComponent={listEmpty}
-              extraData={selectedAgentKey}
+              extraData={listExtraData}
               testID="shell-chats-list"
             />
           </Animated.View>

@@ -53,6 +53,7 @@ import { OFFICIAL, SHELL } from "@/shell/routes";
 import { detailBack } from "@/shell/detail-back";
 import {
   applyImportTreeCollapse,
+  buildBadgeOpenTarget,
   buildImportRowBadgeMap,
   buildImportToastParts,
   buildImportTree,
@@ -73,7 +74,14 @@ import { useImportList } from "@/shell/import/use-import-list";
 import { useImportSelection } from "@/shell/import/use-import-selection";
 import { useImportAgentHandleIndex } from "@/shell/import/use-import-agent-index";
 import { shellNavigateToAgent } from "@/shell/chats/shell-navigate-to-agent";
+import { createChatOpener } from "@/shell/chats/open-agent";
+import { chatLastEventAtFromAgent } from "@/shell/chats/derive";
+import { OWNERSHIP_OPEN_DIALOG_KEYS, OWNERSHIP_SEND_BODY_KEY } from "@/shell/chats/ownership";
 import { requestChatsFilter } from "@/shell/chats/filter-request";
+import { confirmDialog } from "@/utils/confirm-dialog";
+import { useSessionStore } from "@/stores/session-store";
+import { usePaseoGoReadStateStore } from "@/shell/stores/readState";
+import { usePaseoGoForkAckStore } from "@/shell/stores/forkAck";
 
 const IMPORT_LIST_LIMIT = 60;
 // C23: 搜索防抖（对齐官方 import-session-sheet 姿势，卡口径 ~300ms）。
@@ -260,6 +268,7 @@ function ImportOrphanGroupHeader({
       accessibilityLabel={t(expanded ? "import.collapseChildren" : "import.expandChildren", {
         count: childCount,
       })}
+      hitSlop={CHEVRON_HIT_SLOP}
       testID={`shell-import-orphan-group-${index}`}
       style={styles.orphanGroup}
     >
@@ -457,21 +466,66 @@ export default function ShellImportScreen() {
     [badgeMap, rows, selectedSet],
   );
 
-  // B4-IMPORT 裁定 12: 徽标行点主体跳转。已导入→该会话（C4 open-intent，与
-  // 对话行同一 shellNavigateToAgent 通道）；已归档→对话 tab 已归档筛选——
-  // filter 经模块总线投递（宽屏 body 在 navigator 外，路由参数到不了它，
-  // section-focus 同构），导航动词 navigate=回到并激活 chats tab（不新增栈帧）。
+  // R4-06（开屏=危险时刻覆盖面收口）: 徽标行跳转与对话行 tap 走同一条 opener
+  // 链——createChatOpener.open = R4 开屏门 → C24 fork 门 → markRead → recordVisit
+  // → 官方 navigateToAgent。此前「已导入」分支裸 shellNavigateToAgent 绕开了全部
+  // 四职责（无已读戳、首开跳过 fork 警告、更绕过 R4 守卫）。接线与
+  // chats-screen-body 同款（同一对 store、同一个 confirmDialog、同一组文案键）。
+  const markRead = usePaseoGoReadStateStore((state) => state.markRead);
+  const opener = useMemo(
+    () =>
+      createChatOpener({
+        markRead,
+        navigateToAgent: shellNavigateToAgent,
+        lastEventAtOf: (hostId, agentId) => {
+          const agent = useSessionStore.getState().sessions[hostId]?.agents.get(agentId);
+          // R2-14: null（垃圾日期）= undefined=无水线可取，opener 保压快照。
+          return agent ? (chatLastEventAtFromAgent(agent) ?? undefined) : undefined;
+        },
+        confirmFork: () =>
+          confirmDialog({
+            title: t("chats.fork.title"),
+            message: t("chats.fork.message"),
+            confirmLabel: t("chats.fork.confirm"),
+            cancelLabel: t("chats.fork.cancel"),
+          }),
+        forkAcknowledged: (key) => usePaseoGoForkAckStore.getState().ackedKeys.includes(key),
+        acknowledgeFork: (key) => usePaseoGoForkAckStore.getState().ack(key),
+        // B4-R4OPEN (裁定 18) 同款分级门: external·运行中 → 弹「仍要打开」。
+        confirmOwnership: (decision) =>
+          confirmDialog({
+            title: t(OWNERSHIP_OPEN_DIALOG_KEYS.title),
+            message: t(OWNERSHIP_SEND_BODY_KEY[decision]),
+            confirmLabel: t(OWNERSHIP_OPEN_DIALOG_KEYS.confirm),
+            cancelLabel: t(OWNERSHIP_OPEN_DIALOG_KEYS.cancel),
+          }),
+        section: "chats",
+      }),
+    [markRead, t],
+  );
+
+  // B4-IMPORT 裁定 12: 徽标行点主体跳转。已导入→该会话（上面的 opener 全链）；
+  // 已归档→对话 tab 已归档筛选——filter 经模块总线投递（宽屏 body 在 navigator
+  // 外，路由参数到不了它，section-focus 同构），导航动词 navigate=回到并激活
+  // chats tab（不新增栈帧）。R4-17（裁定 12「高亮该行」子句）: 意图随行键一起
+  // 投递，body 消费=切页+归顶+一次性高亮（use-chats-filter-jump）。
   const handleOpenBadge = useCallback(
     (badge: ImportRowBadge) => {
       if (!serverId || !badge.agentId) return;
       if (badge.state === "archived") {
-        requestChatsFilter("archived");
+        requestChatsFilter({
+          filter: "archived",
+          highlightKey: `${serverId}:${badge.agentId}`,
+        });
         router.navigate(SHELL.chats as Href);
-      } else {
-        shellNavigateToAgent({ serverId, agentId: badge.agentId });
+        return;
       }
+      // 目录行直读（徽标本就由它派生）；行没了（删会话/目录清的竞态）= 不开。
+      const agent = useSessionStore.getState().sessions[serverId]?.agents.get(badge.agentId);
+      const target = buildBadgeOpenTarget(serverId, badge.agentId, agent);
+      if (target) void opener.open(target);
     },
-    [serverId],
+    [opener, serverId],
   );
 
   // KI-9 返回：真弹栈回来源（＋菜单在对话 tab，back 即回对话列表）；深链直达时
@@ -573,7 +627,7 @@ export default function ShellImportScreen() {
           badge={badgeMap.get(item.row.key) ?? null}
           childCount={item.childCount}
           rootKey={item.rootKey}
-          expanded={item.depth === 0 && expandedRoots.has(item.rootKey)}
+          expanded={expandedRoots.has(item.rootKey)}
           onToggle={handleToggle}
           onToggleExpand={handleToggleExpand}
           onOpenBadge={handleOpenBadge}

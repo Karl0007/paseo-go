@@ -4,10 +4,21 @@
 // chats.tsx 头注同款论证），params 到不了它；这里与 section-focus/rail-events
 // 同构：React-free、可单测、body 双位置都收得到。
 //
+// R4-17（裁定 12 补全「高亮该行」子句）：意图从裸 filter 扩为对象——已归档徽标
+// 跳转带上目标 agent key（`${serverId}:${agentId}`，与 readState/pins 行键同形），
+// body 消费端据此切页后把该行标成一次性高亮（use-chats-filter-jump）。不带
+// highlightKey 的纯切页意图（若有）行为与旧契约一致。
+//
 // 一次性语义：request 写入 pending 并即时广播；body 订阅回调与**挂载时**都调
 // consume——body 尚未挂载（深链直达导入屏、宽屏 section 首次访问前）时意图不丢，
 // 挂载即兑现；兑现即清空，之后的手动切页/回访不再被旧意图覆写。
-export type ChatsFilterIntent = "active" | "archived";
+export type ChatsFilterName = "active" | "archived";
+
+export interface ChatsFilterIntent {
+  filter: ChatsFilterName;
+  /** 跳转来源要高亮的行键（`serverId:agentId`）；缺省=只切页不高亮。 */
+  highlightKey?: string;
+}
 
 let pending: ChatsFilterIntent | null = null;
 const listeners = new Set<() => void>();
