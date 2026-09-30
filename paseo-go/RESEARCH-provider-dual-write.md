@@ -44,10 +44,24 @@
 
 1. **R2-full「互斥/双写者协议」不值得做**：五家没有任何一家发生字节级损坏或写入失败（opencode 事务化、其余 append-only 行级安全）。危险全部集中在**语义层**（分支被弃/上下文分叉），互斥协议解决不了它。**建议 R2-full 永久关闭**，把预算并回 R2-lite/R3。
 2. **R4「仍要发送」保留，但文案与策略按 provider 分级**（`external+looksActive` 时）：
-   - **claude**：唯一有「活写者分支被下次 resume 弃掉」实锤的 → 弹窗保留且**建议改为「从该会话分叉」= 自动带 `--fork-session` 发送**（R5 路径），双线并存、零丢失，用户无需理解 DAG。
-   - **omp/pi**：paseo 侧本来就以「文件序最后叶」为准，paseo 发送=把活路抢回自己线上，外部支受损而 paseo 支安全 → 现警告文案够用，放行合理。
-   - **codex**：线性日志无丢行，风险=两终端各说各话 → 警告可弱化为「对方看不到你这条」。
-   - **opencode**：共享 DB、互相可见，**建议免弹窗直接放行**（R4 对 opencode 是纯噪音）。
+
+- **claude**：唯一有「活写者分支被下次 resume 弃掉」实锤的 → 弹窗保留且**建议改为「从该会话分叉」= 自动带 `--fork-session` 发送**（R5 路径），双线并存、零丢失，用户无需理解 DAG。
+  **已实施**（批次四 server 卡 4b）：manager 在 `resumeAgentFromPersistence` 里按持久事实判定
+  `provider==="claude" && ownership==="external" && externalLooksActive===true && purpose!=="history"`，
+  经 `AgentResumeSessionOptions.forkOnResume`（runtime-only）传给 provider；claude 侧
+  `buildOptions()` 在全部 `resume` 赋值之后置 SDK `forkSession: true`（CLI `--fork-session`），
+  且**只武装一次**——fork 出的新 id 由 init 帧经 `rebindConversationSession` 顶替 origin 后，
+  后续任何 query 重建（model/thinking/rewind 重启）都就地续用 fork 分支，不会每轮再分叉。
+  钉测：`providers/claude/agent.fork-on-resume.test.ts`（fork 旗标分流 + 普通 resume 不 fork +
+  本地新建会话永不 fork + 一次性）、`agent-manager-fork-on-send.test.ts`（四种记录事实的判定）。
+  边界（未覆盖，如实记）：本单只覆盖**已释放会话的发送路径**（发送→resume→fork）。若 daemon
+  仍持有会话对象而 provider 进程已死（isAlive 直报后 ownership 落 external 的常驻态），
+  发送走 `session.startTurn` 不经 resume，仍是就地续写；要覆盖它需先让常驻会话换代重建，
+  属独立改动，未在此硬塞。
+- **omp/pi**：paseo 侧本来就以「文件序最后叶」为准，paseo 发送=把活路抢回自己线上，外部支受损而 paseo 支安全 → 现警告文案够用，放行合理。
+- **codex**：线性日志无丢行，风险=两终端各说各话 → 警告可弱化为「对方看不到你这条」。
+- **opencode**：共享 DB、互相可见，**建议免弹窗直接放行**（R4 对 opencode 是纯噪音）。
+
 3. **R2-lite 的 looksActive 升级信号**（比 mtime 准）：claude 扫 `~/.claude/sessions/*.json`（sessionId→pid，进程存在=活）；codex/omp 用「独占打开 transcript 失败」探句柄；pi/opencode 维持 mtime 启发。实现均为只读探测，符合 R2-lite 预算。
 4. **格式稳定性**：claude jsonl 含 `last-prompt/mode/queue-operation` 等易变元行且版本活跃（2.1.x）；omp/pi 头部 `type:session` 无 schema 版本字段——R3 watcher 的 tail 解析必须继续「未知 type 跳过」纪律。
 

@@ -109,6 +109,7 @@ import {
   type AgentPersistenceHandle,
   type AgentProviderNotice,
   type AgentPromptInput,
+  type AgentResumeSessionOptions,
   type AgentRunOptions,
   type AgentRunResult,
   type AgentSession,
@@ -418,6 +419,8 @@ interface ClaudeAgentSessionOptions {
   agentId?: string;
   launchEnv?: Record<string, string>;
   persistSession?: boolean;
+  /** Resume-time fork intent (see `AgentResumeSessionOptions.forkOnResume`). */
+  forkOnResume?: boolean;
   logger: Logger;
   queryFactory?: ClaudeQueryFactory;
   resolveBinary: () => Promise<string>;
@@ -1545,6 +1548,7 @@ export class ClaudeAgentClient implements AgentClient {
     handle: AgentPersistenceHandle,
     overrides?: Partial<AgentSessionConfig>,
     launchContext?: AgentLaunchContext,
+    options?: AgentResumeSessionOptions,
   ): Promise<AgentSession> {
     const metadata = coerceSessionMetadata(handle.metadata);
     const merged: Partial<AgentSessionConfig> = { ...metadata, ...overrides };
@@ -1562,6 +1566,7 @@ export class ClaudeAgentClient implements AgentClient {
       runtimeSettings: this.runtimeSettings,
       handle,
       agentId: launchContext?.agentId,
+      forkOnResume: options?.forkOnResume,
       launchEnv: launchContext?.env,
       logger: this.logger,
       queryFactory: this.queryFactory,
@@ -2066,6 +2071,16 @@ class ClaudeAgentSession implements AgentSession {
   private readonly permissionClearingSteerUuids = new Set<string>();
   private claudeSessionId: string | null;
   private persistence: AgentPersistenceHandle | null;
+  /** The native session this launch resumed (`null` when created fresh). */
+  private readonly resumeOriginSessionId: string | null;
+  /**
+   * Armed by `forkOnResume`, and it stays armed until the provider reports a
+   * DIFFERENT session id: the fork's own id arrives on the init frame
+   * (`rebindConversationSession`), and every later rebuild (model / thinking /
+   * rewind restart) must resume THAT session in place — an ever-armed flag would
+   * fork once per restart.
+   */
+  private forkOnResume: boolean;
   private currentMode: PermissionMode;
   private planResumeMode: PermissionMode | null = null;
   private availableModes: AgentMode[] = DEFAULT_MODES;
@@ -2147,6 +2162,8 @@ class ClaudeAgentSession implements AgentSession {
       this.claudeSessionId = null;
       this.persistence = null;
     }
+    this.resumeOriginSessionId = this.claudeSessionId;
+    this.forkOnResume = options.forkOnResume === true && this.resumeOriginSessionId !== null;
 
     // Validate mode if provided
     if (config.modeId && !VALID_CLAUDE_MODES.has(config.modeId)) {
@@ -3357,7 +3374,29 @@ class ClaudeAgentSession implements AgentSession {
         ...this.runtimeSettings.disallowedTools,
       ];
     }
+    this.applyResumeFork(base);
     return base;
+  }
+
+  /**
+   * RESEARCH-provider-dual-write ruling 2 (claude): with `external` + a writer that
+   * still looks alive, resuming in place appends to the shared DAG and the NEXT
+   * resume picks the deepest branch — paseo's own branch can be dropped silently.
+   * Deriving a fork (`--fork-session`) keeps both lines and needs no user
+   * understanding of the DAG. Judged after every `resume` assignment in
+   * `buildOptions`, so the flag is tested against the id actually being resumed,
+   * and it goes inert by itself once the fork's own id replaces the origin
+   * (`rebindConversationSession` from the init frame) — otherwise each query
+   * restart (model / thinking / rewind) would fork again.
+   */
+  private applyResumeFork(base: ClaudeOptions): void {
+    if (
+      this.forkOnResume &&
+      this.resumeOriginSessionId !== null &&
+      base.resume === this.resumeOriginSessionId
+    ) {
+      base.forkSession = true;
+    }
   }
 
   private buildSettingsOptions(

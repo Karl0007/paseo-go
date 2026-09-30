@@ -663,6 +663,16 @@ export type AgentResumePurpose = "interactive" | "history";
 export interface AgentResumeSessionOptions {
   /** Defaults to interactive. History loading may be read-only for archived native sessions. */
   purpose?: AgentResumePurpose;
+  /**
+   * Derive a NEW native session from the transcript being resumed instead of
+   * continuing it (claude `--fork-session`). The manager sets it when the session
+   * is `external` and the external writer still looks alive: for claude that
+   * combination is the measured case where resuming in place lets the DEEPEST
+   * branch win, so paseo's own branch is silently dropped
+   * (paseo-go/RESEARCH-provider-dual-write.md). Forking keeps both lines.
+   * Providers with no fork surface ignore it.
+   */
+  forkOnResume?: boolean;
 }
 
 /**

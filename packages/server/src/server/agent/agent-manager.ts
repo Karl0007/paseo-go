@@ -380,6 +380,27 @@ export type ActiveTurnSteerDispatchResult =
   | { status: "inactive" | "steered" }
   | { status: "replaced"; iterator: AsyncGenerator<AgentStreamEvent> };
 
+/**
+ * RESEARCH-provider-dual-write ruling 2: claude is the one measured provider where
+ * an external writer that still looks alive makes the NEXT resume pick the deepest
+ * branch — paseo's own branch is silently dropped (semantic loss, no byte damage).
+ * So sending into such a session derives a FORKED native session instead of
+ * continuing the shared transcript: both lines survive and the user needs no
+ * understanding of the DAG. The other four keep the plain resume plus the R4
+ * warning — codex interleaves linearly, opencode shares one database, omp/pi
+ * already win by appending last.
+ *
+ * A history-only resume reads an archived transcript and must never fork it.
+ */
+function shouldForkClaudeOnResume(record: StoredAgentRecord, purpose: AgentResumePurpose): boolean {
+  return (
+    record.provider === "claude" &&
+    purpose !== "history" &&
+    record.ownership === "external" &&
+    record.externalLooksActive === true
+  );
+}
+
 function stripSteerOptions(options?: AgentSteerOptions): AgentRunOptions | undefined {
   if (!options) return undefined;
   const { clearPendingPermissions: _, ...runOptions } = options;
@@ -1429,10 +1450,20 @@ export class AgentManager {
     // settled before the config is prepared, because a history load reads an archived
     // agent whose working directory may be gone.
     const record = this.registry ? await this.registry.get(resolvedAgentId) : null;
-    const currentResumeOptions = record
-      ? { purpose: record.archivedAt ? ("history" as const) : ("interactive" as const) }
+    // With a durable record the decision is derived from it (ownership is a
+    // persisted fact); without one the caller's intent stands.
+    let purpose: AgentResumePurpose;
+    if (record) {
+      purpose = record.archivedAt ? "history" : "interactive";
+    } else {
+      purpose = resumeOptions?.purpose ?? "interactive";
+    }
+    const currentResumeOptions: AgentResumeSessionOptions | undefined = record
+      ? {
+          purpose,
+          ...(shouldForkClaudeOnResume(record, purpose) ? { forkOnResume: true } : {}),
+        }
       : resumeOptions;
-    const purpose = currentResumeOptions?.purpose ?? "interactive";
 
     const { storedConfig, launchConfig, paseoToolPolicy } = await this.prepareSessionConfig(
       mergedConfig,
