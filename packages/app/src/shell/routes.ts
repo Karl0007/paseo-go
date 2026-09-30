@@ -30,6 +30,10 @@ export const HOST_WORKSPACE_SEGMENT = "workspace";
 /** Files browse screen's segment under the (detail) group (group-stripped:
  * `/files/…` — the split predicates derive the workspace section from it). */
 export const FILES_ROUTE_SEGMENT = "files";
+// The import screen's route NAME inside the (detail) navigator — the deepest
+// focused route a back press sees there (B4-BACK's frontmost identity; the
+// group folder itself is a nested-navigator route, never the leaf).
+export const IMPORT_ROUTE_NAME = "import";
 
 // Tab screen names for in-navigator jumps (navigation.navigate never pops the root
 // stack, unlike a path navigate). Also the source for the tab pathnames below and

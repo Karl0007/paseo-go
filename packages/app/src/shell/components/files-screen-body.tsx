@@ -52,7 +52,7 @@ import { useFileExplorerActions } from "@/hooks/use-file-explorer-actions";
 import { buildWorkspaceExplorerStateKey } from "@/file-explorer/state-keys";
 import { parentExplorerPath } from "@/utils/explorer-paths";
 import { SHELL_I18N_NAMESPACE } from "@/shell/i18n";
-import { shellPreviewHref } from "@/shell/routes";
+import { FILES_ROUTE_SEGMENT, shellPreviewHref } from "@/shell/routes";
 import {
   useShellAddToChat,
   useShellFileActions,
@@ -65,6 +65,7 @@ import {
   type FilesScreenTab,
 } from "@/shell/files/files-tabs";
 import { SearchModeBar } from "@/shell/components/search/search-mode-bar";
+import { useShellSearchBackPriority } from "@/shell/search/use-shell-search-back-priority";
 import { FileSearchRow } from "@/shell/components/search/file-search-row";
 import { ContentSearchRow } from "@/shell/components/search/content-search-row";
 import { collectBrowsedWorkspaces, type FileSearchHit } from "@/shell/search/file-search";
@@ -391,6 +392,16 @@ export function FilesScreenBody({
     workspaceId,
     workspaceName,
     workspaceRoot: rootPath,
+  });
+
+  // B4-BACK (F9/裁定 15): Android back exits the 页内搜索 first — search.cancel
+  // is the same 取消 path the bar rides (卡原设想的「官方 explorer 搜索态在共享
+  // store」经枚举证伪：官方 FileExplorerPane 无搜索态，本屏搜索=壳自有 KI-6 态,
+  // 零官方文件改动天然成立). The claim only lands while THIS files screen is
+  // the frontmost route (params 区分堆叠的同屏两份；preview 盖上来自持返回).
+  useShellSearchBackPriority(search.active, search.cancel, {
+    namePrefix: `${FILES_ROUTE_SEGMENT}/`,
+    params: { serverId, workspaceId },
   });
 
   // ---- shared file wiring ------------------------------------------------------

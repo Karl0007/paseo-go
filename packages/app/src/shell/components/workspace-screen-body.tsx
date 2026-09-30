@@ -47,7 +47,13 @@ import { useProjects } from "@/hooks/use-projects";
 import { getHostRuntimeStore, useHostRegistryStatus, useHosts } from "@/runtime/host-runtime";
 import { useSessionStore } from "@/stores/session-store";
 import { SHELL_I18N_NAMESPACE } from "@/shell/i18n";
-import { OFFICIAL, shellCommandEditHref, shellFilesHref, shellPreviewHref } from "@/shell/routes";
+import {
+  OFFICIAL,
+  SHELL_TAB,
+  shellCommandEditHref,
+  shellFilesHref,
+  shellPreviewHref,
+} from "@/shell/routes";
 import { useShellHostStatuses } from "@/shell/runtime/use-shell-host-statuses";
 import { WorkspaceHostHeader } from "@/shell/components/workspace-host-header";
 import { WorkspaceProjectRow } from "@/shell/components/workspace-project-row";
@@ -84,6 +90,7 @@ import {
   type FileSearchSource,
 } from "@/shell/search/file-search";
 import { normalizeSearchQuery } from "@/shell/search/query";
+import { useShellSearchBackPriority } from "@/shell/search/use-shell-search-back-priority";
 import {
   buildWorkspaceTree,
   type ShellHostSection,
@@ -526,6 +533,13 @@ export function WorkspaceScreenBody({ selectedAgentKey = null }: ShellScreenBody
     setSearchActive(false);
     setQuery("");
   }, []);
+
+  // B4-BACK (F9/裁定 15): Android back exits the search first — same
+  // handleSearchClose the 取消 button rides; the claim only lands while the
+  // 工作区 tab IS the frontmost route (shell-back-priority.ts).
+  useShellSearchBackPriority(searchActive, handleSearchClose, {
+    name: SHELL_TAB.workspace,
+  });
   // KI-12: the search affordance unified onto the chats tab's icon → morph logic
   // (same 顶栏逻辑 the user asked for); the SearchModeBar behavior is verbatim.
   const searchStyle = useCallback(

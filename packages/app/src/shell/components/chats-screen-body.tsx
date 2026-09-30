@@ -99,8 +99,9 @@ import {
   type ChatSearchFields,
 } from "@/shell/search/chat-filter";
 import { normalizeSearchQuery } from "@/shell/search/query";
+import { useShellSearchBackPriority } from "@/shell/search/use-shell-search-back-priority";
 import { resolveProjectPlacement } from "@/utils/project-placement";
-import { DETAIL, OFFICIAL } from "@/shell/routes";
+import { DETAIL, OFFICIAL, SHELL_TAB } from "@/shell/routes";
 import { usePaseoGoArchiveStore } from "@/shell/stores/archive";
 import { usePaseoGoPinsStore } from "@/shell/stores/pins";
 import { usePaseoGoReadStateStore } from "@/shell/stores/readState";
@@ -590,6 +591,14 @@ export function ChatsScreenBody({ selectedAgentKey = null }: ShellScreenBodyProp
     setSearchActive(false);
     setQuery("");
   }, []);
+
+  // B4-BACK (F9/裁定 15): Android back exits the search first — 清查询+收起 via
+  // the same handleSearchClose the 取消 button rides — and the 对话 tab only
+  // claims the press while it IS the frontmost route (a pushed detail or the
+  // other tab keeps its own back; shell-back-priority.ts owns that check).
+  useShellSearchBackPriority(searchActive, handleSearchClose, {
+    name: SHELL_TAB.chats,
+  });
   const handleImportChat = useCallback(() => router.push(DETAIL.import as Href), []);
   const handleShowActive = useCallback(() => setFilter("active"), []);
 

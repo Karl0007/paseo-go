@@ -48,8 +48,9 @@ import { useHostFeature } from "@/runtime/host-features";
 import { ShellHostPickerSheet } from "@/shell/components/host-picker-sheet";
 import { SearchModeBar } from "@/shell/components/search/search-mode-bar";
 import { normalizeSearchQuery } from "@/shell/search/query";
+import { useShellSearchBackPriority } from "@/shell/search/use-shell-search-back-priority";
 import { SHELL_I18N_NAMESPACE } from "@/shell/i18n";
-import { OFFICIAL, SHELL } from "@/shell/routes";
+import { IMPORT_ROUTE_NAME, OFFICIAL, SHELL } from "@/shell/routes";
 import { detailBack } from "@/shell/detail-back";
 import {
   applyImportTreeCollapse,
@@ -369,6 +370,13 @@ export default function ShellImportScreen() {
     setSearchActive(false);
     setSearchInput("");
   }, []);
+
+  // B4-BACK (F9/裁定 15): Android back exits the C23 搜索态 first — same
+  // handleSearchClose the 取消 button rides (清 input + 收起 morph); the claim
+  // only lands while the import screen is the frontmost route.
+  useShellSearchBackPriority(searchActive, handleSearchClose, {
+    name: IMPORT_ROUTE_NAME,
+  });
 
   // F1 (review): the fetch lifecycle lives in useImportList — its stale-host guard
   // is what stops a mid-import host switch from letting A's closure overwrite B.
