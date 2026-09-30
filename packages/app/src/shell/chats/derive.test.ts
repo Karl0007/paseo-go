@@ -1,4 +1,6 @@
-// C2 acceptance: grouping/sorting/unread pure logic (边界: 空/离线/多 host/等待批准优先).
+// C2 acceptance: grouping/sorting/unread pure logic (边界: 空/离线/多 host).
+// B4-ROW ruling 1 retargets the 等待批准 case: it no longer outranks anything — the
+// list below 置顶 is pure newest-event order and the mark is inline on the row.
 import { describe, expect, it } from "vitest";
 import {
   chatLastEventAt,
@@ -59,7 +61,9 @@ describe("deriveChatSections", () => {
     expect(withPinned[1]!.showHeader).toBe(true);
   });
 
-  it("groups pinned → needs_attention → recent in that order", () => {
+  it("groups pinned → recent; waiting for approval no longer jumps the queue", () => {
+    // B4-ROW ruling 1: 需要处理 is not a group. The waiting row is an ordinary 最近
+    // row ordered by its own last event, and its mark lives on the row itself.
     const sections = derive({
       agents: [
         agent({ key: "plain", lastActivityAt: T0 + 10 * MINUTE }),
@@ -68,8 +72,9 @@ describe("deriveChatSections", () => {
       ],
       pinnedIds: ["star"],
     });
-    expect(kinds(sections)).toEqual(["pinned", "needs_attention", "recent"]);
-    expect(sections.map((s) => s.rows[0]!.agent.key)).toEqual(["star", "waiting", "plain"]);
+    expect(kinds(sections)).toEqual(["pinned", "recent"]);
+    expect(sections[0]!.rows.map((r) => r.agent.key)).toEqual(["star"]);
+    expect(sections[1]!.rows.map((r) => r.agent.key)).toEqual(["plain", "waiting"]);
   });
 
   it("pinned rows follow the pins store order, stale pin ids are ignored", () => {
@@ -82,7 +87,7 @@ describe("deriveChatSections", () => {
     expect(sections[1]!.rows.map((r) => r.agent.key)).toEqual(["second"]);
   });
 
-  it("needs_attention sorts by attention request newest first, oldest attention still outranks fresh activity", () => {
+  it("recent is pure newest-event order — an old attention never outranks fresh activity", () => {
     const sections = derive({
       agents: [
         agent({ key: "busy", bucket: "running", lastActivityAt: T0 + 100 * MINUTE }),
@@ -100,8 +105,14 @@ describe("deriveChatSections", () => {
         }),
       ],
     });
-    expect(kinds(sections)).toEqual(["needs_attention", "recent"]);
-    expect(sections[0]!.rows.map((r) => r.agent.key)).toEqual(["waiting-new", "waiting-old"]);
+    expect(kinds(sections)).toEqual(["recent"]);
+    expect(sections[0]!.rows.map((r) => r.agent.key)).toEqual([
+      "busy",
+      "waiting-new",
+      "waiting-old",
+    ]);
+    // A lone 最近 group still hides its header — nothing outranks it any more.
+    expect(sections[0]!.showHeader).toBe(false);
   });
 
   it("recent sorts newest event first; attention stamp counts as the event", () => {

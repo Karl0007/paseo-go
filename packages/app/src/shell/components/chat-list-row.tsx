@@ -1,10 +1,12 @@
-// Chat list row (DESIGN §4): provider icon | title (bold when unread; C18 badge:
-// dot only on idle rows, count pill only while approvals pend) | shell alias when
-// renamed | subtitle `project · relative time · last activity` |
-// four-state light | ⋯ overflow. Geometry follows the official agent list (§9); the
-// clock state is confined to the subtitle component so a minute tick never re-renders
-// the row. Tapping calls the screen's opener (C4: official navigateToAgent — workspace
-// route + open intent — plus the read stamp; never the parse-stub push).
+// Chat list row (DESIGN §4; WeChat-shaped since B4-ROW / batch-4 F4): project tile |
+// title `项目-worktree[-备注]` with the running spinner and the absolute time on its
+// right | unread badge (C18: dot only on idle rows, count pill only while approvals
+// pend) | subtitle by priority `[草稿] `+draft > `[需要回复] `+preview > preview
+// (`我: ` when the last message is the user's) | four-state light | ⋯ overflow.
+// The clock lives in its own `<Text>` and the draft read in the subtitle, so neither
+// a minute tick nor a keystroke in the composer re-renders the row. Tapping calls the
+// screen's opener (C4: official navigateToAgent — workspace route + open intent —
+// plus the read stamp; never the parse-stub push).
 //
 // C3 interaction layer (card C3): every row wraps the official ContextMenu engine —
 // long press opens the menu, the ⋯ button opens the same menu for accessibility.
@@ -27,10 +29,11 @@
 // only: no ChatRowMenuContent is mounted here anymore, so the engine's Modal
 // never materialises for chat rows.
 import { memo, useCallback, useMemo, useRef } from "react";
-import { Pressable, Text, View, type GestureResponderEvent } from "react-native";
+import { ActivityIndicator, Pressable, Text, View, type GestureResponderEvent } from "react-native";
 import { router } from "expo-router";
-import { StyleSheet } from "react-native-unistyles";
+import { StyleSheet, withUnistyles } from "react-native-unistyles";
 import { useTranslation } from "react-i18next";
+import type { Theme } from "@/styles/theme";
 import { MoreHorizontal } from "lucide-react-native";
 import * as Haptics from "expo-haptics";
 import Animated, { FadeIn, FadeOut } from "react-native-reanimated";
@@ -40,9 +43,16 @@ import {
   type RowMenuController,
 } from "@/shell/components/use-shell-row-drag-menu";
 import { CONTEXT_MENU_DELAY_MS } from "@/shell/components/drag-menu-arbitration";
-import { getProviderIcon } from "@/components/provider-icons";
-import { joinSubtitleParts } from "@/command-center/results";
-import { useCompactTimeAgo } from "@/hooks/use-compact-time-ago";
+import {
+  IDENTITY_COLOR_NAMES,
+  identityColor,
+  type IdentityColorName,
+} from "@/styles/identity-colors";
+import { projectAvatarFor } from "@/shell/chats/project-avatar";
+import { buildChatRowTitle, buildChatSubtitle } from "@/shell/chats/row-title";
+import { useWechatTimeLabel } from "@/shell/chats/use-wechat-time-label";
+import { buildDraftStoreKey } from "@/stores/draft-keys";
+import { useDraftStore } from "@/stores/draft-store";
 import type { AggregatedAgent } from "@/hooks/use-aggregated-agents";
 import { showsUnreadDot, type ChatRow } from "@/shell/chats/derive";
 import { SHELL_I18N_NAMESPACE } from "@/shell/i18n";
@@ -67,12 +77,18 @@ export interface ShellChatAgent {
   agent: AggregatedAgent;
 }
 
-/** Row subtitle AND the C9 search haystack read the same 最后动态 label map. */
+/**
+ * The row's red state words, AND the C9 search haystack's 最后动态 field — what the
+ * user can see stays what they can search. B4-ROW rulings 1/5/8 cut this map down:
+ * needs_input is the subtitle's 「[需要回复]」 prefix, failed keeps a red word
+ * (ruling 8: 失败=红色 activity 词), running became the title-row spinner, and
+ * attention/done never had a subtitle line to occupy — the unread dot carries them.
+ */
 export const ACTIVITY_LABEL_KEY: Record<SidebarStateBucket, string | null> = {
-  needs_input: "chats.activity.needsInput",
+  needs_input: "chats.row.needsReply",
   failed: "chats.activity.failed",
-  running: "chats.activity.running",
-  attention: "chats.activity.finished",
+  running: null,
+  attention: null,
   done: null,
 };
 
@@ -111,6 +127,52 @@ function ChatBadge({
   return null;
 }
 
+// Ruling 3: the tile is the PROJECT, not the provider. The identity palette is
+// scheme-independent by construction (one muted fill per hue, tuned to one contrast
+// band for a light glyph in either theme), so the ten backgrounds are built once here
+// and every render hands Unistyles the SAME object — no inline style prop, no
+// per-frame identity churn. The glyph takes `accentForeground`, the theme's own
+// on-a-filled-chip text token (the unread count pill above pairs the same two), which
+// keeps DESIGN §5's no-literal rule while the hue still reads at a glance.
+const AVATAR_FILL = Object.fromEntries(
+  IDENTITY_COLOR_NAMES.map((name) => [name, { backgroundColor: identityColor(name) }]),
+) as Record<IdentityColorName, { backgroundColor: string }>;
+
+// Ruling 8: running rides a 12dp spinner left of the time. A numeric `size` is what
+// pins it (the official sidebar's archive spinner does the same at 8), and
+// `withUnistyles` + a module-level mapping keeps the theme colour without a new object
+// prop per render — the `size="small"` platform drawable measured ~20dp on the device.
+const RUNNING_SPINNER_SIZE = 12;
+const RunningSpinner = withUnistyles(ActivityIndicator);
+const runningSpinnerColor = (theme: Theme) => ({ color: theme.colors.accent });
+
+function ProjectAvatar({ projectName, rowKey }: { projectName: string; rowKey: string }) {
+  const avatar = useMemo(() => projectAvatarFor(projectName), [projectName]);
+  return (
+    <View
+      style={[styles.avatar, AVATAR_FILL[avatar.colorName]]}
+      testID={`shell-chat-avatar-${rowKey}`}
+    >
+      <Text style={styles.avatarGlyph} numberOfLines={1}>
+        {avatar.initial}
+      </Text>
+    </View>
+  );
+}
+
+// Ruling 6: the time left the subtitle and became WeChat's absolute label, pinned
+// right on the title line. Its state stays in this one `<Text>` — the same discipline
+// the old relative clock used, so a tick never reaches the row.
+function ChatTimestamp({ at }: { at: Date }) {
+  const label = useWechatTimeLabel(at);
+  if (label.length === 0) return null;
+  return (
+    <Text style={styles.time} numberOfLines={1}>
+      {label}
+    </Text>
+  );
+}
+
 const ChatSubtitle = memo(function ChatSubtitle({
   agent,
   bucket,
@@ -119,15 +181,38 @@ const ChatSubtitle = memo(function ChatSubtitle({
   bucket: SidebarStateBucket;
 }) {
   const { t } = useTranslation(SHELL_I18N_NAMESPACE);
-  const timeAgo = useCompactTimeAgo(agent.lastActivityAt);
-  const project = resolveProjectPlacement({
-    projectPlacement: agent.projectPlacement,
-    cwd: agent.cwd,
-  }).projectName;
-  const activityKey = ACTIVITY_LABEL_KEY[bucket];
+  // Ruling 2: the row shows the composer's unsent text. The key is the official
+  // session composer's own (`agent:${serverId}:${agentId}` — buildDraftStoreKey, the
+  // exact call agent-panel.tsx passes to useAgentInputDraft), read through a selector
+  // that returns a primitive: the list only ever READS the draft store.
+  const draftKey = useMemo(
+    () => buildDraftStoreKey({ serverId: agent.serverId, agentId: agent.id }),
+    [agent.serverId, agent.id],
+  );
+  const draftText = useDraftStore((state) => {
+    const record = state.drafts[draftKey];
+    return record?.lifecycle === "active" ? record.input.text : "";
+  });
+  const flagKey = ACTIVITY_LABEL_KEY[bucket];
+  const segments = useMemo(
+    () =>
+      buildChatSubtitle({
+        draftText,
+        flagLabel: flagKey ? t(flagKey) : null,
+        preview: agent.lastMessagePreview,
+        previewRole: agent.lastMessageRole,
+        labels: { draft: t("chats.row.draft"), userPrefix: `${t("chats.row.me")}: ` },
+      }),
+    [draftText, flagKey, t, agent.lastMessagePreview, agent.lastMessageRole],
+  );
+  if (segments.length === 0) return null;
   return (
     <Text style={styles.subtitle} numberOfLines={1}>
-      {joinSubtitleParts([project, timeAgo, activityKey ? t(activityKey) : null])}
+      {segments.map((segment) => (
+        <Text key={segment.tone} style={segment.tone === "flag" ? styles.subtitleFlag : undefined}>
+          {segment.text}
+        </Text>
+      ))}
     </Text>
   );
 });
@@ -231,7 +316,27 @@ function ChatRowInner({
     () => ({ key: agent.key, serverId: agent.serverId, agentId: agent.agent.id }),
     [agent.key, agent.serverId, agent.agent.id],
   );
-  const displayTitle = alias ?? agent.agent.title ?? t("chats.untitled");
+  // Ruling 4: 标题 = 项目-worktree[-备注] (备注 = the manual `agent.title`). The
+  // shell alias still wins outright when set — it is an explicit rename, and C33's
+  // rename screen, the menu title and the delete confirm all read this value.
+  const projectName = useMemo(
+    () =>
+      resolveProjectPlacement({
+        projectPlacement: agent.agent.projectPlacement,
+        cwd: agent.agent.cwd,
+      }).projectName,
+    [agent.agent.projectPlacement, agent.agent.cwd],
+  );
+  const composedTitle = useMemo(
+    () =>
+      buildChatRowTitle({
+        projectName,
+        cwd: agent.agent.cwd,
+        note: agent.agent.title,
+      }),
+    [projectName, agent.agent.cwd, agent.agent.title],
+  );
+  const displayTitle = alias ?? (composedTitle.length > 0 ? composedTitle : t("chats.untitled"));
   // 停止 only acts on an abortable turn: running, or blocked on an approval.
   const stoppable = agent.bucket === "running" || agent.bucket === "needs_input";
   const imported = isImportedProviderSession(agent.agent);
@@ -324,10 +429,13 @@ function ChatRowInner({
   );
 
   const activityLabelKey = ACTIVITY_LABEL_KEY[agent.bucket];
+  // The spinner is invisible to TalkBack, so 运行中 stays a spoken word even though
+  // ruling 8 took it off the screen.
   const rowLabel = [
     displayTitle,
     unread ? t("chats.a11yUnread") : null,
     activityLabelKey ? t(activityLabelKey) : null,
+    agent.bucket === "running" ? t("chats.activity.running") : null,
     dimmed ? t("chats.hostStatus.offline") : null,
   ]
     .filter(Boolean)
@@ -337,7 +445,7 @@ function ChatRowInner({
     ({ pressed }: { pressed: boolean }) => [styles.row, pressed && styles.rowPressed],
     [],
   );
-  const ProviderIcon = getProviderIcon(agent.agent.provider, agent.agent.serverId);
+  const showSpinner = agent.bucket === "running";
   const pendingCount = agent.agent.pendingPermissionCount ?? 0;
 
   return (
@@ -371,14 +479,20 @@ function ChatRowInner({
         onPressOut={draggable ? interaction.handlePressOut : undefined}
         style={triggerStyle}
       >
-        <View style={styles.iconSlot}>
-          <ProviderIcon size={18} color={styles.providerIcon.color} />
-        </View>
+        <ProjectAvatar projectName={projectName} rowKey={agent.key} />
         <View style={styles.body}>
           <View style={styles.titleRow}>
             <Text style={[styles.title, unread && styles.titleUnread]} numberOfLines={1}>
               {displayTitle}
             </Text>
+            {showSpinner ? (
+              <RunningSpinner
+                size={RUNNING_SPINNER_SIZE}
+                uniProps={runningSpinnerColor}
+                testID={`shell-chat-running-${agent.key}`}
+              />
+            ) : null}
+            <ChatTimestamp at={agent.agent.lastActivityAt} />
             <ChatBadge
               bucket={agent.bucket}
               count={pendingCount}
@@ -445,13 +559,19 @@ const styles = StyleSheet.create((theme) => ({
   moreIcon: {
     color: theme.colors.foregroundExtraMuted,
   },
-  iconSlot: {
-    width: 28,
+  // Ruling 3: 40dp rounded tile, WeChat's proportion for a conversation avatar,
+  // filled with the project's hash colour (AVATAR_FILL).
+  avatar: {
+    width: 40,
+    height: 40,
+    borderRadius: theme.borderRadius.lg,
     alignItems: "center",
+    justifyContent: "center",
   },
-  // Static color holder for the dynamic provider icon (the schedule-row glyph idiom).
-  providerIcon: {
-    color: theme.colors.foregroundMuted,
+  avatarGlyph: {
+    fontSize: theme.fontSize.xl,
+    fontWeight: theme.fontWeight.semibold,
+    color: theme.colors.accentForeground,
   },
   body: {
     flex: 1,
@@ -461,6 +581,12 @@ const styles = StyleSheet.create((theme) => ({
     flexDirection: "row",
     alignItems: "center",
     gap: theme.spacing[2],
+  },
+  // Ruling 6: the time sits at the title line's right edge, quiet and small — the
+  // title flexes, this never does.
+  time: {
+    fontSize: theme.fontSize.sm,
+    color: theme.colors.foregroundExtraMuted,
   },
   title: {
     flexShrink: 1,
@@ -493,5 +619,9 @@ const styles = StyleSheet.create((theme) => ({
   subtitle: {
     fontSize: theme.fontSize.sm,
     color: theme.colors.foregroundMuted,
+  },
+  // Rulings 2/5: the bracketed state mark, red on the muted body.
+  subtitleFlag: {
+    color: theme.colors.destructive,
   },
 }));

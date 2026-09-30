@@ -14,9 +14,10 @@
 //
 // --- original screen notes (unchanged behaviour, cards C2-C20) ---
 // 对话 tab (DESIGN §4, cards C2+C3): cross-host flat chat list over every connected
-// host's agents. Groups 已置顶 → 需要处理 → 最近, then one greyed group per offline
-// host with retry; unread comes from the readState store, pin order from the pins
-// store, hiding from the archive store. Cold start shows the official sidebar
+// host's agents. Groups 已置顶 → 最近 (B4-ROW ruling 1: the 需要处理 queue-jump group
+// is gone — waiting-for-approval is an inline red mark on the row), then one greyed
+// group per offline host with retry; unread comes from the readState store, pin order
+// from the pins store, hiding from the archive store. Cold start shows the official sidebar
 // skeleton; pull-to-refresh re-pulls every host directory. Tapping a row enters the
 // official session through the C4 opener (navigateToAgent: workspace route + open
 // intent, never the parse stub) and stamps it read; returning re-stamps the visit.
@@ -98,9 +99,10 @@ import { subscribeSectionFocus } from "@/shell/section-focus";
 import { subscribeRailRetap } from "@/shell/tablet/rail-events";
 import type { ShellScreenBodyProps } from "./shell-screen-body-props";
 
+// B4-ROW ruling 1: 需要处理 is no longer a group (the mark is inline on the row),
+// so the section-title map only covers the two online groups that still exist.
 const SECTION_TITLE_KEY: Record<Exclude<ChatSectionKind, "offline">, string> = {
   pinned: "chats.section.pinned",
-  needs_attention: "chats.section.needsAttention",
   recent: "chats.section.recent",
 };
 

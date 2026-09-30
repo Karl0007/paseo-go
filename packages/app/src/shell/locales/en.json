@@ -65,14 +65,19 @@
     "offlineHint": "Reconnect to see each host's chats here.",
     "section": {
       "pinned": "Pinned",
-      "needsAttention": "Needs attention",
       "recent": "Recent"
     },
     "activity": {
       "running": "Running",
-      "needsInput": "Waiting for approval",
-      "finished": "Finished",
       "failed": "Failed"
+    },
+    "row": {
+      "draft": "Draft",
+      "needsReply": "Needs reply",
+      "me": "Me"
+    },
+    "time": {
+      "yesterday": "Yesterday"
     },
     "untitled": "Untitled chat",
     "a11yUnread": "unread",

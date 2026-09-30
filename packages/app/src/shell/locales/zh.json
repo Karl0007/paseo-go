@@ -65,14 +65,19 @@
     "offlineHint": "重新连接后即可在此查看各主机的对话。",
     "section": {
       "pinned": "置顶",
-      "needsAttention": "需要处理",
       "recent": "最近"
     },
     "activity": {
       "running": "运行中",
-      "needsInput": "等待批准",
-      "finished": "已完成",
       "failed": "出错"
+    },
+    "row": {
+      "draft": "草稿",
+      "needsReply": "需要回复",
+      "me": "我"
+    },
+    "time": {
+      "yesterday": "昨天"
     },
     "untitled": "未命名对话",
     "a11yUnread": "未读",

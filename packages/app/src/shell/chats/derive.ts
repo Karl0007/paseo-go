@@ -1,10 +1,16 @@
 // Pure chat-list derivation for the shell 对话 tab (DESIGN.md §4, card C2). No React,
 // no RN imports — the screen feeds it live data, the vitest suite feeds it fixtures.
 //
-// Group order is fixed: 已置顶 → 需要处理(等待批准) → 最近, then one greyed group per
-// offline host with cached agents. Rows of offline hosts never join the online groups
+// Group order is fixed: 已置顶 → 最近, then one greyed group per offline host with
+// cached agents. Rows of offline hosts never join the online groups
 // (the offline group is their only home), and the 最近 header hides itself when it is
 // the only group on screen.
+//
+// B4-ROW (batch-4 F4 ruling 1): the 需要处理 queue-jump group is GONE. Waiting-for-
+// approval no longer reorders anything — the mark lives inline on the row as the red
+// 「[需要回复]」 subtitle prefix, and the list is pure newest-event-first below 置顶.
+// The `bucket` field stays on the input: the row still needs it (red prefix, spinner,
+// stoppable menu action), only the grouping rule that read it is removed.
 import type { HostRuntimeConnectionStatus } from "@/runtime/host-runtime";
 import type { SidebarStateBucket } from "@/utils/sidebar-agent-state";
 
@@ -28,7 +34,7 @@ export interface ChatRow<T extends ChatAgentInput = ChatAgentInput> {
   dimmed: boolean;
 }
 
-export type ChatSectionKind = "pinned" | "needs_attention" | "recent" | "offline";
+export type ChatSectionKind = "pinned" | "recent" | "offline";
 
 export interface ChatSection<T extends ChatAgentInput = ChatAgentInput> {
   kind: ChatSectionKind;
@@ -124,7 +130,6 @@ export function deriveChatSections<T extends ChatAgentInput>(
   });
 
   const pinned: T[] = [];
-  const needsAttention: T[] = [];
   const recent: T[] = [];
   const offlineByHost = new Map<string, T[]>();
 
@@ -140,10 +145,8 @@ export function deriveChatSections<T extends ChatAgentInput>(
       pinned.push(agent);
       continue;
     }
-    if (agent.bucket === "needs_input") {
-      needsAttention.push(agent);
-      continue;
-    }
+    // B4-ROW: no bucket branch — a chat waiting for approval sorts by its last
+    // event like every other row and carries the red mark inline instead.
     recent.push(agent);
   }
 
@@ -164,23 +167,6 @@ export function deriveChatSections<T extends ChatAgentInput>(
         pinned
           .slice()
           .sort((left, right) => pinnedIndex.get(left.key)! - pinnedIndex.get(right.key)!),
-        false,
-      ),
-    });
-  }
-  if (needsAttention.length > 0) {
-    sections.push({
-      kind: "needs_attention",
-      serverId: null,
-      showHeader: true,
-      rows: toRows(
-        needsAttention
-          .slice()
-          .sort(
-            (left, right) =>
-              (right.attentionTimestamp ?? 0) - (left.attentionTimestamp ?? 0) ||
-              byNewestEvent(left, right),
-          ),
         false,
       ),
     });

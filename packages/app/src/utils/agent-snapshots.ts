@@ -134,5 +134,12 @@ export function normalizeAgentSnapshot(snapshot: AgentSnapshotPayload, serverId:
     archivedAt,
     parentAgentId,
     labels: snapshot.labels,
+    // COMPAT(agentLastMessagePreview): Paseo Go B4-PREVIEW pure-add; old daemons
+    // omit the pair, which normalizes to null = "no preview" (never a crash).
+    // Deliberately NOT projected back out by projectAgentSnapshot: the replica
+    // cache's strict StoredAgentSnapshotSchema does not carry it, so a cold cache
+    // restore shows no preview until the directory re-syncs.
+    lastMessagePreview: snapshot.lastMessagePreview ?? null,
+    lastMessageRole: snapshot.lastMessageRole ?? null,
   };
 }

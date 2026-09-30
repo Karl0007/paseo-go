@@ -112,8 +112,11 @@ describe("filterChatSections", () => {
         ],
       }),
       section({
-        kind: "needs_attention",
-        rows: [{ agent: agent("p1"), unread: false, dimmed: false }],
+        // B4-ROW: 需要处理 is gone as a group; an offline-host group is the other
+        // kind that must disappear when none of its rows match.
+        kind: "offline",
+        serverId: "host-c",
+        rows: [{ agent: agent("p1"), unread: false, dimmed: true }],
       }),
     ];
     const out = filterChatSections(sections, match("beta"));

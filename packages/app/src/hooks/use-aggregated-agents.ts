@@ -98,6 +98,10 @@ export function useAggregatedAgents(options?: {
           createdAt: agent.createdAt,
           labels: agent.labels,
           projectPlacement: agent.projectPlacement,
+          // COMPAT(agentLastMessagePreview): Paseo Go B4-ROW — the shell chat row's
+          // subtitle reads the last-message pair; the official UI ignores it.
+          lastMessagePreview: agent.lastMessagePreview ?? null,
+          lastMessageRole: agent.lastMessageRole ?? null,
         };
         const cacheKey = `${serverId}:${agent.id}`;
         const prev = prevAgentsRef.current.get(cacheKey);

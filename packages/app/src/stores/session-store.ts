@@ -100,6 +100,12 @@ export interface Agent {
   parentAgentId: string | null;
   labels: Record<string, string>;
   projectPlacement?: ProjectPlacementPayload | null;
+  // COMPAT(agentLastMessagePreview): Paseo Go B4-PREVIEW protocol pure-add (see
+  // protocol/messages.ts). Read by the shell chat row's subtitle. Three-state wire
+  // posture: `undefined` = daemon predates the field, `null` = agent has no
+  // messages, string = the preview. Official surfaces ignore both new fields.
+  lastMessagePreview?: string | null;
+  lastMessageRole?: "user" | "assistant" | "other" | null;
 }
 
 export interface WorkspaceDescriptor {
