@@ -19,7 +19,7 @@
 | Android SDK      | `C:\Android\Sdk`（`ANDROID_HOME` 已设；platforms 36 / build-tools 35 / cmake 齐）                                                                                                                                                    |
 | adb（不在 PATH） | `C:\Users\K\AppData\Local\Android\platform-tools\adb.exe`（bash 里 `"$LOCALAPPDATA/Android/platform-tools/adb.exe"`；另有 `C:\Android\Sdk\platform-tools\adb.exe` 版本较旧，二选一，注意两路 adb server 版本不同会互相 kill server） |
 | 验证设备         | 华为 MatePad **BRT-W09**，Android 12，arm64-v8a，serial `AHPEBB1826005071`（USB）/ **`192.168.31.14:5555`（无线，2026-09-29 起主车道）**，屏 1600x2560（竖屏 UI 坐标系 = 1600x2560）                                                 |
-| PC LAN IP        | `192.168.31.190`（以太网 3）；平板 wlan0 = `192.168.31.14`，同网段直通                                                                                                                                                               |
+| PC LAN IP        | **DHCP 易漂移，用前 `ipconfig` 现查**（2026-09-30 实锤 .190→.184 续租；metro hostname/daemon 配方/文档示例全跟着走）；当前=`192.168.31.184`（以太网 3）；平板 wlan0 = `192.168.31.14`，同网段直通                                    |
 | dev 变体包名     | `sh.paseo.debug`（app 名 "Paseo Debug"，与正式 `sh.paseo` 共存）；MainActivity = `sh.paseo.debug.MainActivity`                                                                                                                       |
 | ⚠ 内存坑         | 本机**页面文件被禁用**：commit 上限≈物理内存，且 WSL/Docker/用户进程常年吃掉大半（空闲 commit 常 <5GB）。gradle/vitest 必须按下面的限内存参数跑，且**重型任务串行**，见 §2/§3                                                        |
 | ⚠ 用户真 daemon  | 用户自己的 paseo daemon 跑在 `~/.paseo` home、监听 Tailscale IP:6767（带密码）。开发 daemon 用 `.dev/paseo-home` + `0.0.0.0:6767`，两者共存互不干扰；CLI 操作开发 daemon 时**必须**带 `PASEO_HOME=C:/work/paseo-go/.dev/paseo-home`  |
@@ -142,11 +142,11 @@ $ADB = "$env:LOCALAPPDATA\Android\platform-tools\adb.exe"
 # 4.2 起开发 daemon（Git Bash；隔离 home，监听 LAN 6767）
 #     前台窗口跑，或后台：
 & "C:\Program Files\Git\bin\bash.exe" -c "cd /c/work/paseo-go && PASEO_LISTEN=0.0.0.0:6767 PASEO_SKIP_DEV_SERVER_BUILD=1 ./scripts/dev-daemon.sh"
-# 验证：curl http://192.168.31.190:6767/api/health → 200
+# 验证：curl http://192.168.31.184:6767/api/health → 200
 
 # 4.3 起 metro（改 JS 后免重装 APK，即“改代码→装机”闭环的快路径）
 cd C:\work\paseo-go\packages\app
-$env:APP_VARIANT = "development"; $env:REACT_NATIVE_PACKAGER_HOSTNAME = "192.168.31.190"
+$env:APP_VARIANT = "development"; $env:REACT_NATIVE_PACKAGER_HOSTNAME = "192.168.31.184"
 npx expo start
 
 # 4.4 USB 反代 metro（平板经 adb 直通 PC 8081，绕开 Wi-Fi 配对页）+ 启动 app
@@ -155,7 +155,7 @@ npx expo start
 ```
 
 app 首启是 dev launcher：点 `http://localhost:8081` 行 → 首次 bundle 约 2-4 分钟（"Reloading..." 全屏白）。
-进入欢迎页后连开发 daemon：**直接连接** → Host `192.168.31.190`、Port `6767`、SSL 关、密码留空 → 连接。
+进入欢迎页后连开发 daemon：**直接连接** → Host `192.168.31.184`、Port `6767`、SSL 关、密码留空 → 连接。
 （模拟器替代方案：Host 用 `10.0.2.2`，端口同上。）
 
 给会话列表造真 agent（可选，验证全链路）：
@@ -170,7 +170,7 @@ npx tsx packages/cli/src/index.js delete <agentId> --json   # 用完删
 ### UI 自动化要点（无人值守）
 
 - RN `testID` 在 Android 直接映射 `resource-id`：`adb shell uiautomator dump /sdcard/ui.xml` + `cat` 拉回，按 `resource-id="direct-host-input"` 等找 bounds，`input tap cx cy`
-- 文本输入：先 tap 字段，`adb shell input text "192.168.31.190"`（仅 ASCII），`input keyevent 111` 收键盘
+- 文本输入：先 tap 字段，`adb shell input text "192.168.31.184"`（仅 ASCII），`input keyevent 111` 收键盘
 - ⚠ 软键盘弹出/收起会移动弹层坐标——**提交前重新 dump 一次**再点
 - ⚠ `KEYCODE_BACK` 可能直接退出 app（回桌面/其他 app），导航优先用 app 内 UI 元素
 - 华为实测：`adb install` 无拦截无弹窗；`screencap` 正常
