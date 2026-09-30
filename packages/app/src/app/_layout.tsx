@@ -130,6 +130,7 @@ import {
 import { buildNotificationRoute, resolveNotificationTarget } from "@/utils/notification-routing";
 import { navigateToAgent } from "@/utils/navigate-to-agent";
 import { PluginCatalogSync } from "@/plugins";
+import { usePaseoGoShellActive } from "@/shell/stores/settings";
 import ShellTabletSplitHost from "@/shell/tablet/split-host";
 import {
   ensureOsNotificationPermission,
@@ -875,10 +876,22 @@ const ROOT_STACK_SCREEN_OPTIONS = {
   headerShown: false,
   animation: "none" as const,
 };
+// B4-REGRESS F11: the upstream default above kills every root-stack transition.
+// The shell IA leans on real pushes — the (detail) group (files/import/rename/
+// commands-edit/preview) and the official session screen chats enters via
+// navigateToAgent — so under shell mode those two screens slide in from the
+// right (KI-9's "native slide-in" contract, which the global "none" silently
+// cancelled: KI-9's device round had no mid-transition proof). Every other
+// root screen (welcome/settings/pairing = official flows) keeps "none", and so
+// does every screen when shell mode is off — official behaviour byte-intact.
+const ROOT_STACK_SHELL_PUSH_OPTIONS = { animation: "slide_from_right" as const };
+const ROOT_STACK_NO_PUSH_OPTIONS = {} as const;
 const ROOT_STACK_NESTED_NAVIGATOR_SCREENS = ["h/[serverId]"] as const;
 
 function RootStack() {
   const storeReady = useStoreReady();
+  const shellActive = usePaseoGoShellActive();
+  const shellPushOptions = shellActive ? ROOT_STACK_SHELL_PUSH_OPTIONS : ROOT_STACK_NO_PUSH_OPTIONS;
   return (
     <ThemedStack
       screenOptions={ROOT_STACK_SCREEN_OPTIONS}
@@ -895,7 +908,8 @@ function RootStack() {
         <Stack.Screen name="schedules" />
         <Stack.Screen name="pair-scan" />
       </Stack.Protected>
-      <Stack.Screen name="h/[serverId]" />
+      <Stack.Screen name="(detail)" options={shellPushOptions} />
+      <Stack.Screen name="h/[serverId]" options={shellPushOptions} />
       <Stack.Screen name="settings/hosts/[serverId]/index" />
       <Stack.Screen name="settings/hosts/[serverId]/[hostSection]" />
       <Stack.Screen name="settings/hosts/[serverId]/plugins/[pluginId]/[screenId]" />
