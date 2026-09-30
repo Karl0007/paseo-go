@@ -53,7 +53,10 @@ function flag(name) {
 const VERSION = flag("--version");
 const OUT = path.resolve(flag("--out"));
 
-const FORK_PACKAGES = ["cli", "client", "protocol", "server", "relay", "highlight", "plugin"];
+// dependency order (CI starts from bare npm ci — each prepack must find its
+// workspace deps' dist already built). Same sequence upstream's own
+// docker/base/Dockerfile packs in (proven CI order); cli last.
+const FORK_PACKAGES = ["highlight", "relay", "protocol", "client", "plugin", "server", "cli"];
 const FORK_NAMES = FORK_PACKAGES.map((p) => `@getpaseo/${p}`);
 
 // Node >=18.20 rejects .cmd shims via execFile (EINVAL) on Windows; drive npm
