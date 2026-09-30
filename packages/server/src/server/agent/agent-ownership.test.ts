@@ -7,14 +7,20 @@ import type { AgentSnapshotPayload } from "@getpaseo/protocol/messages";
 import { createTestLogger } from "../../test-utils/test-logger.js";
 import { createTestAgentClient } from "../test-utils/fake-agent-client.js";
 import { AgentManager } from "./agent-manager.js";
-import { AgentStorage } from "./agent-storage.js";
+import { AgentStorage, type StoredAgentRecord } from "./agent-storage.js";
 import { buildStoredAgentPayload, toAgentPayload } from "./agent-projections.js";
-import type { AgentPersistenceHandle } from "./agent-sdk-types.js";
+import type {
+  AgentClient,
+  AgentPersistenceHandle,
+  AgentSession,
+  AgentStreamEvent,
+} from "./agent-sdk-types.js";
 import { claudeProjectDirSync } from "./providers/claude/project-dir.js";
 import {
   INITIAL_AGENT_OWNERSHIP,
   deriveAgentOwnershipValue,
   ownershipOnAcquire,
+  ownershipOnAttachFailure,
   ownershipOnExternalChange,
   ownershipOnRelease,
   ownershipWithExternalActivity,
@@ -172,6 +178,33 @@ describe("externalLooksActive (R4 signal)", () => {
     expect(ownershipWithExternalActivity(external, false)).toMatchObject({
       value: "external",
       externalLooksActive: false,
+    });
+  });
+});
+
+describe("ownershipOnAttachFailure (R4-27: a failed re-attach erases nothing)", () => {
+  it("keeps proven evidence when the transcript cannot be resolved this time", () => {
+    const observed = ownershipWithTranscriptVisibility(
+      ownershipOnRelease(ownershipOnAcquire(INITIAL_AGENT_OWNERSHIP), {
+        transcriptObservable: true,
+        baselineBytes: 4096,
+      }),
+      true,
+      4096,
+    );
+    expect(ownershipOnAttachFailure(observed)).toBe(observed);
+    const pending = ownershipOnExternalChange(observed);
+    expect(ownershipOnAttachFailure(pending)).toBe(pending);
+  });
+
+  it("settles a never-observed session to unobservable (nothing was proven yet)", () => {
+    const released = ownershipOnRelease(ownershipOnAcquire(INITIAL_AGENT_OWNERSHIP), {
+      transcriptObservable: true,
+    });
+    // R4-01: acquiring cleared the cursor, so this session has no evidence.
+    expect(ownershipOnAttachFailure(released)).toMatchObject({
+      transcriptObservable: false,
+      value: "none",
     });
   });
 });
@@ -337,6 +370,249 @@ describe("AgentManager ownership accounting", () => {
     } finally {
       manager.stopTranscriptWatch();
       rmSync(work, { recursive: true, force: true });
+    }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Batch-4 review fix batch A: R4-01 (a failed turn's own bytes must never be
+// attributed to a foreign writer), R4-03 (a discovery attach's baseline must
+// reach storage), R4-04 (a meta-row-only advance must not float the row).
+// ---------------------------------------------------------------------------
+
+async function drainStream(stream: AsyncGenerator<unknown>): Promise<void> {
+  for await (const _event of stream) {
+    // Subscriptions carry the state; draining only advances the fake turn.
+  }
+}
+
+function makeReleasedClaudeRecord(input: {
+  id: string;
+  cwd: string;
+  sessionId: string;
+  updatedAt: string;
+  baselineBytes: number | null;
+}): StoredAgentRecord {
+  return {
+    id: input.id,
+    provider: "claude",
+    cwd: input.cwd,
+    workspaceId: "ws-released",
+    createdAt: "2026-09-01T00:00:00.000Z",
+    updatedAt: input.updatedAt,
+    config: { provider: "claude", cwd: input.cwd },
+    persistence: { provider: "claude", sessionId: input.sessionId },
+    ownership: "none",
+    externalLooksActive: false,
+    ownershipBaselineBytes: input.baselineBytes,
+  };
+}
+
+/**
+ * The fake claude client, wrapped so a test can deliver a spontaneous
+ * `turn_failed` while NO foreground stream is open — the production shape of
+ * "the provider process died" (R4-01's trigger). The fake's own turn_failed
+ * arrives inside the foreground generator, which the manager treats as a
+ * foreground terminal and never observes; only the no-foreground path calls
+ * `observeReleasedTranscript`.
+ */
+function createCrashableClaudeClient(): { client: AgentClient; crash: () => void } {
+  const inner = createTestAgentClient("claude");
+  let emit: ((event: AgentStreamEvent) => void) | null = null;
+  const wrapSession = (session: AgentSession): AgentSession =>
+    new Proxy(session, {
+      get(target, prop, receiver) {
+        if (prop === "subscribe") {
+          return (callback: (event: AgentStreamEvent) => void) => {
+            emit = callback;
+            return target.subscribe(callback);
+          };
+        }
+        const value = Reflect.get(target, prop, receiver);
+        return typeof value === "function" ? value.bind(target) : value;
+      },
+    });
+  const client = new Proxy(inner, {
+    get(target, prop) {
+      if (prop === "createSession") {
+        return async (...args: Parameters<AgentClient["createSession"]>) =>
+          wrapSession(await target.createSession(...args));
+      }
+      if (prop === "resumeSession") {
+        return async (...args: Parameters<AgentClient["resumeSession"]>) =>
+          wrapSession(await target.resumeSession(...args));
+      }
+      const value = Reflect.get(target, prop);
+      return typeof value === "function" ? value.bind(target) : value;
+    },
+  });
+  return {
+    client,
+    crash: () => {
+      emit?.({ type: "turn_failed", provider: "claude", error: "provider process died" });
+    },
+  };
+}
+
+describe("AgentManager transcript byte attribution (R4-01/03/04)", () => {
+  function createHarness(work: string, client?: AgentClient) {
+    const logger = createTestLogger();
+    const storage = new AgentStorage(join(work, "agents"), logger);
+    const manager = new AgentManager({
+      clients: { claude: client ?? createTestAgentClient("claude") },
+      registry: storage,
+      transcriptStatPollIntervalMs: 60 * 60 * 1000,
+      logger,
+    });
+    const configDir = join(work, "claude-config");
+    const previousConfigDir = process.env.CLAUDE_CONFIG_DIR;
+    process.env.CLAUDE_CONFIG_DIR = configDir;
+    const projectDir = claudeProjectDirSync(work, { configDir });
+    mkdirSync(projectDir, { recursive: true });
+    return {
+      storage,
+      manager,
+      projectDir,
+      cleanup: () => {
+        manager.stopTranscriptWatch();
+        if (previousConfigDir === undefined) {
+          delete process.env.CLAUDE_CONFIG_DIR;
+        } else {
+          process.env.CLAUDE_CONFIG_DIR = previousConfigDir;
+        }
+        rmSync(work, { recursive: true, force: true });
+      },
+    };
+  }
+
+  it("does not read a failed turn's own transcript bytes back as an external write (R4-01)", async () => {
+    const work = mkdtempSync(join(tmpdir(), "agent-ownership-failed-turn-"));
+    const { client, crash } = createCrashableClaudeClient();
+    const harness = createHarness(work, client);
+    try {
+      const agent = await harness.manager.createAgent(
+        { provider: "claude", cwd: work },
+        undefined,
+        { workspaceId: undefined },
+      );
+      const transcript = join(harness.projectDir, `${agent.persistence?.sessionId ?? ""}.jsonl`);
+
+      // Turn 1: the provider journal holds the prompt row, then the process
+      // dies outside any foreground stream. The failed-turn observation starts
+      // watching and baselines the transcript as paseo left it.
+      writeFileSync(transcript, claudeLine("user", "first turn", "u1"));
+      crash();
+      await harness.manager.flush();
+
+      // Retry: the provider writes the retry row to its journal, then the retry
+      // turn fails too. Pre-fix, acquire never detached the watcher and never
+      // moved the cursor, so the next check read paseo's OWN retry bytes back
+      // as a foreign writer's work: duplicate timeline rows plus a sticky
+      // pending that flips to `external` the moment the session is released.
+      appendFileSync(transcript, claudeLine("user", "retry — Emit a turn failure", "u2"));
+      await drainStream(
+        harness.manager.streamAgent(agent.id, "retry — Emit a turn failure", {
+          clientMessageId: "cm2",
+        }),
+      );
+      await harness.manager.flush();
+      await harness.manager.sweepTranscriptWatch();
+      await harness.manager.flush();
+
+      const retryRows = harness.manager
+        .getTimeline(agent.id)
+        .filter(
+          (item) => item.type === "user_message" && item.text === "retry — Emit a turn failure",
+        );
+      expect(retryRows).toHaveLength(1);
+
+      await harness.manager.closeAgent(agent.id);
+      await harness.manager.flush();
+
+      const record = await harness.storage.get(agent.id);
+      expect(record?.ownership).toBe("none");
+      expect(record?.ownershipBaselineBytes).toBe(
+        Buffer.byteLength(
+          claudeLine("user", "first turn", "u1") +
+            claudeLine("user", "retry — Emit a turn failure", "u2"),
+        ),
+      );
+    } finally {
+      harness.cleanup();
+    }
+  });
+
+  it("persists the baseline a discovery attach establishes (R4-03)", async () => {
+    const work = mkdtempSync(join(tmpdir(), "agent-ownership-discovery-baseline-"));
+    const harness = createHarness(work);
+    const updatedAt = new Date(Date.now() - 60_000).toISOString();
+    try {
+      await harness.storage.initialize();
+      const content = claudeLine("user", "left from the terminal", "x1");
+      const transcript = join(harness.projectDir, "sid-discovery.jsonl");
+      writeFileSync(transcript, content);
+      await harness.storage.upsert(
+        makeReleasedClaudeRecord({
+          id: "agent-discovery",
+          cwd: work,
+          sessionId: "sid-discovery",
+          updatedAt,
+          baselineBytes: null, // upgraded / crashed record: never observed
+        }),
+      );
+
+      await harness.manager.sweepTranscriptWatch();
+
+      // Pre-fix the sweep discarded `attach`'s return value: the record stayed
+      // null forever and the next restart silently swallowed these bytes as its
+      // baseline — the down-window writes became permanently invisible.
+      const record = await harness.storage.get("agent-discovery");
+      expect(record?.ownershipBaselineBytes).toBe(Buffer.byteLength(content));
+      expect(record?.ownership).toBe("none");
+      expect(record?.updatedAt).toBe(updatedAt);
+
+      // With the baseline durable, growth past it is real foreign evidence.
+      appendFileSync(transcript, claudeLine("assistant", "while daemon down", "x2"));
+      await harness.manager.sweepTranscriptWatch();
+      expect((await harness.storage.get("agent-discovery"))?.ownership).toBe("external");
+    } finally {
+      harness.cleanup();
+    }
+  });
+
+  it("does not bump updatedAt for a meta-row-only transcript advance (R4-04)", async () => {
+    const work = mkdtempSync(join(tmpdir(), "agent-ownership-meta-row-"));
+    const harness = createHarness(work);
+    const updatedAt = new Date(Date.now() - 60_000).toISOString();
+    try {
+      await harness.storage.initialize();
+      const first = claudeLine("user", "real message", "u1");
+      const meta = `${JSON.stringify({ type: "last-prompt", prompt: "volatile control row" })}\n`;
+      const transcript = join(harness.projectDir, "sid-meta.jsonl");
+      writeFileSync(transcript, first);
+      await harness.storage.upsert(
+        makeReleasedClaudeRecord({
+          id: "agent-meta",
+          cwd: work,
+          sessionId: "sid-meta",
+          updatedAt,
+          baselineBytes: Buffer.byteLength(first),
+        }),
+      );
+
+      // claude interleaves volatile meta rows (last-prompt/mode/queue-operation)
+      // per turn: bytes moved, no chat-visible row. The cursor and the ownership
+      // evidence must commit — but the row must not float to the top of the
+      // time-ordered list (same posture as every other derived observation).
+      appendFileSync(transcript, meta);
+      await harness.manager.sweepTranscriptWatch();
+
+      const record = await harness.storage.get("agent-meta");
+      expect(record?.ownershipBaselineBytes).toBe(Buffer.byteLength(first + meta));
+      expect(record?.ownership).toBe("external");
+      expect(record?.updatedAt).toBe(updatedAt);
+    } finally {
+      harness.cleanup();
     }
   });
 });

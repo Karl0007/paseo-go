@@ -68,6 +68,7 @@ import {
 import {
   INITIAL_AGENT_OWNERSHIP,
   ownershipOnAcquire,
+  ownershipOnAttachFailure,
   ownershipOnExternalChange,
   ownershipOnRelease,
   ownershipWithExternalActivity,
@@ -78,6 +79,7 @@ import {
 import {
   DEFAULT_TRANSCRIPT_STAT_POLL_INTERVAL_MS,
   TranscriptWatchService,
+  type TranscriptAttachment,
   type TranscriptChange,
   type TranscriptWatchCandidate,
 } from "./transcript-watch-service.js";
@@ -846,6 +848,10 @@ export class AgentManager {
         options.transcriptStatPollIntervalMs ?? DEFAULT_TRANSCRIPT_STAT_POLL_INTERVAL_MS,
       listCandidates: () => this.listTranscriptWatchCandidates(),
       onChange: (change) => this.applyTranscriptChange(change),
+      // R4-03: a discovery attach that establishes a baseline the record does
+      // not have must reach storage, or the next daemon restart re-baselines
+      // over the very bytes written while the daemon was down.
+      onAttached: (agentId, attachment) => this.persistAttachedBaseline(agentId, attachment),
     });
   }
 
@@ -3924,11 +3930,17 @@ export class AgentManager {
         baselineBytes: agent.ownership.baselineBytes,
         updatedAtMs: agent.updatedAt.getTime(),
       });
-      const next = ownershipWithTranscriptVisibility(
-        agent.ownership,
-        attached !== null,
-        attached?.baselineBytes ?? agent.ownership.baselineBytes,
-      );
+      if (attached === null) {
+        // R4-27: a failed attach is not evidence that the provider has no
+        // transcript; whatever the watcher already proved stays untouched.
+        const kept = ownershipOnAttachFailure(agent.ownership);
+        if (kept === agent.ownership) {
+          return;
+        }
+        await this.commitOwnership(agent.id, kept);
+        return;
+      }
+      const next = ownershipWithTranscriptVisibility(agent.ownership, true, attached.baselineBytes);
       if (
         next.value === agent.ownership.value &&
         next.transcriptObservable === agent.ownership.transcriptObservable &&
@@ -4036,14 +4048,21 @@ export class AgentManager {
     if (live.lifecycle === "running" || live.activeTurnId) {
       return;
     }
-    for (const item of change.items) {
+    // R4-01 belt (the chain itself is broken at acquire: the watcher detaches
+    // and the cursor resets before paseo writes again): a transcript
+    // observation must never re-record rows the resident timeline already
+    // holds. A provider death-flush landing after the release-time baseline,
+    // or an omp/pi journal shrink (which re-reads from byte 0), both replay
+    // rows paseo wrote itself.
+    const foreign = this.dropTimelineTailDuplicates(live.id, change.items);
+    for (const item of foreign) {
       this.recordTimeline(live.id, item);
     }
     const pending = ownershipWithExternalActivity(
       ownershipOnExternalChange(live.ownership, { baselineBytes: change.baselineBytes }),
       change.externalLooksActive,
     );
-    const settled = change.items.length === 0 && pending.value === live.ownership.value;
+    const settled = foreign.length === 0 && pending.value === live.ownership.value;
     live.ownership = pending;
     if (!settled) {
       this.emitState(live);
@@ -4068,7 +4087,10 @@ export class AgentManager {
       seq: null,
       messageId: null,
     };
-    for (const [index, item] of change.items.entries()) {
+    // R4-01 belt: same tail-alignment as the live path — replayed rows are not
+    // new foreign messages.
+    const foreign = this.dropTimelineTailDuplicates(change.agentId, change.items);
+    for (const [index, item] of foreign.entries()) {
       const row = resident ? this.recordTimeline(change.agentId, item) : null;
       const advanced = advanceAgentLastMessage(track, item, row?.seq ?? index + 1);
       if (advanced) {
@@ -4097,11 +4119,11 @@ export class AgentManager {
       ),
       change.externalLooksActive,
     );
-    // Nothing observable changed (a torn line, a control row, a repeated sweep over
-    // the same bytes): writing anyway would bump `updatedAt` and float the row to
-    // the top of the time-ordered chat list on every poll.
+    // Nothing observable changed (a torn line, a control row, a repeated sweep
+    // over the same bytes): writing anyway would bump `updatedAt` and float the
+    // row to the top of the time-ordered chat list on every poll.
     if (
-      change.items.length === 0 &&
+      foreign.length === 0 &&
       record.ownership === escalated.value &&
       record.externalLooksActive === escalated.externalLooksActive &&
       record.ownershipBaselineBytes === escalated.baselineBytes
@@ -4116,8 +4138,10 @@ export class AgentManager {
       lastMessagePreview: track.preview,
       lastMessageRole: track.role,
       // A newly synced message IS activity: the chat list sorts by this, and the
-      // row must float up exactly like a live turn would.
-      updatedAt: this.nextStoredUpdatedAt(record),
+      // row must float up exactly like a live turn would. A cursor-only or
+      // meta-row-only advance (R4-04) is NOT: same posture as `commitOwnership`
+      // — a derived observation must never reorder the time-ordered list.
+      updatedAt: foreign.length > 0 ? this.nextStoredUpdatedAt(record) : record.updatedAt,
     };
     await this.requireRegistry().upsert(nextRecord);
     if (!nextRecord.internal) {
@@ -4161,6 +4185,70 @@ export class AgentManager {
       this.dispatchStoredAgentState(nextRecord);
     }
   }
+
+  /**
+   * R4-03: the sweep's discovery attach established a baseline the record does
+   * not carry. Commit it through the ownership path — a cursor is a derived
+   * observation and must not bump `updatedAt` — so a later daemon restart can
+   * still see the writes that landed while no daemon was watching.
+   */
+  private async persistAttachedBaseline(
+    agentId: string,
+    attachment: TranscriptAttachment,
+  ): Promise<void> {
+    if (attachment.baselineBytes === null) {
+      return;
+    }
+    const live = this.agents.get(agentId);
+    if (live) {
+      if (live.ownership.baselineBytes !== attachment.baselineBytes) {
+        await this.commitOwnership(
+          agentId,
+          ownershipWithTranscriptVisibility(live.ownership, true, attachment.baselineBytes),
+        );
+      }
+      return;
+    }
+    const record = this.registry ? await this.registry.get(agentId) : null;
+    if (!record || (record.ownershipBaselineBytes ?? null) === attachment.baselineBytes) {
+      return;
+    }
+    await this.commitOwnership(
+      agentId,
+      ownershipWithTranscriptVisibility(
+        restoreAgentOwnership({
+          ownership: record.ownership,
+          externalLooksActive: record.externalLooksActive,
+          baselineBytes: record.ownershipBaselineBytes,
+        }),
+        true,
+        attachment.baselineBytes,
+      ),
+    );
+  }
+
+  /**
+   * Drop watcher-reported items the resident timeline already holds (R4-01
+   * belt). A provider death-flush lands journal rows AFTER the release-time
+   * baseline is established, and manager-synthesized rows (the turn-failed
+   * notice) sit between the provider's own tail and the read-back — so match
+   * against a tail window, not a strict suffix. Stream rows and journal rows
+   * carry different ids for the same message (client id vs provider uuid), so
+   * identity here is (type, text) only; a legitimate identical re-send falls
+   * outside the small window.
+   */
+  private dropTimelineTailDuplicates(
+    agentId: string,
+    items: readonly AgentTimelineItem[],
+  ): AgentTimelineItem[] {
+    if (items.length === 0 || !this.timelineStore.has(agentId)) {
+      return [...items];
+    }
+    const existing = this.timelineStore.getItems(agentId);
+    const window = existing.slice(-(items.length + TIMELINE_DEDUP_TRAILING_ROWS));
+    return items.filter((item) => !window.some((row) => sameTranscriptRow(row, item)));
+  }
+
   private subscribeToSession(agent: ActiveManagedAgent): void {
     if (agent.unsubscribeSession) {
       return;
@@ -5017,6 +5105,10 @@ export class AgentManager {
     agent.lifecycle = "running";
     // Paseo's process is appending to the transcript again: any earlier external
     // observation predates this run and must not escalate on the next release.
+    // R4-01: the watcher must also stop reading while our own provider process
+    // writes — a still-attached entry (left by a failed turn) would read these
+    // bytes back and attribute them to a foreign writer.
+    this.transcriptWatch.detach(agent.id);
     agent.ownership = ownershipOnAcquire(agent.ownership);
     this.emitState(agent);
   }
@@ -5122,6 +5214,9 @@ export class AgentManager {
       clientMessageId,
       ...(options?.messageId ? { messageId: options.messageId } : {}),
     };
+    // R4-01: same acquire-time unwatching as turn_started; a prompt means paseo
+    // (or its provider process) is the writer from here on.
+    this.transcriptWatch.detach(agent.id);
     agent.ownership = ownershipOnAcquire(agent.ownership);
     this.recordAndDispatchTimelineItem(agent.id, item, agent.provider, options?.turnId, options);
   }
@@ -5806,4 +5901,26 @@ export function commandMayHaveChangedExternalState(command: string): boolean {
     // ahead/behind counts can drift stale until the next refresh.
     /\bgit\s+fetch\b/.test(normalized)
   );
+}
+
+/** Rows a failed turn synthesizes between the provider's tail and a read-back. */
+const TIMELINE_DEDUP_TRAILING_ROWS = 2;
+
+/**
+ * Identity of a transcript-mapped message row against a resident timeline row
+ * (R4-01 belt for `dropTimelineTailDuplicates`). Non-message rows never match:
+ * the transcript mapper only emits message rows, and a false duplicate drop
+ * would lose real content.
+ */
+function sameTranscriptRow(a: AgentTimelineItem, b: AgentTimelineItem): boolean {
+  if (a.type !== b.type) {
+    return false;
+  }
+  if (a.type === "user_message" && b.type === "user_message") {
+    return a.text === b.text;
+  }
+  if (a.type === "assistant_message" && b.type === "assistant_message") {
+    return a.text === b.text;
+  }
+  return false;
 }

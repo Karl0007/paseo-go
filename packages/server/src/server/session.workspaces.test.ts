@@ -4363,6 +4363,12 @@ test("import_agent_request registers a workspace for a never-seen cwd", async ()
   });
   session.agentManager.listAgents = () => [managed];
   session.agentManager.importProviderSession = async () => managed;
+  // R4-30: fresh imports revalidate the client handle against the provider's
+  // live listing; this mock lists the handle the test imports.
+  session.agentManager.listImportableSessions = async () => ({
+    sessions: [{ provider: "codex", providerHandleId: "session-xyz", cwd: importedCwd }],
+    providerErrors: [],
+  });
   session.agentManager.getTimeline = () => [];
   session.agentManager.setTitle = async () => undefined;
   session.agentStorage.list = async () => [];
@@ -4458,6 +4464,10 @@ test("import_agent_request imports into the workspace that opened the import she
   session.agentStorage.get = async () => null;
   session.agentUpdates.forwardLiveAgent = async () => undefined;
 
+  session.agentManager.listImportableSessions = async () => ({
+    sessions: [{ provider: "codex", providerHandleId: "session-xyz", cwd: REPO_CWD }],
+    providerErrors: [],
+  });
   await session.handleMessage({
     type: "import_agent_request",
     requestId: "req-import-current-workspace",
@@ -4490,6 +4500,10 @@ test("import_agent_request maps an import failure to agent_create_failed", async
     throw new Error("provider session is unavailable");
   };
 
+  session.agentManager.listImportableSessions = async () => ({
+    sessions: [{ provider: "codex", providerHandleId: "stale-session", cwd: REPO_CWD }],
+    providerErrors: [],
+  });
   await session.handleMessage({
     type: "import_agent_request",
     requestId: "req-failed-import",

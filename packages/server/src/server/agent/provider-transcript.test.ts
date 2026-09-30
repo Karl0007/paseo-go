@@ -1,4 +1,4 @@
-import { mkdirSync, mkdtempSync, rmSync, utimesSync, writeFileSync } from "node:fs";
+import { chmodSync, mkdirSync, mkdtempSync, rmSync, utimesSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
@@ -116,6 +116,80 @@ describe("resolveProviderTranscriptPath", () => {
     await expect(
       findCodexRolloutFile({ codexHome, threadId: "00000000-0000-0000-0000-000000000000" }),
     ).resolves.toBeNull();
+  });
+
+  it("bounds the codex rollout walk by total directories walked, not the year list (R4-10)", async () => {
+    const codexHome = join(work, "codex-home-deep");
+    const threadId = "01a0f299-9662-71f1-ae65-cd8b0382dee0";
+    // One year, one month, 70 day dirs. `years.slice(0, 64)` never cut
+    // anything (real trees hold a handful of years), so the "bounded" walk
+    // re-opened the whole tree on every resolve. The budget now counts EVERY
+    // directory the walk opens, and a hit past it is genuinely not reached.
+    for (let day = 1; day <= 70; day += 1) {
+      mkdirSync(join(codexHome, "sessions", "2026", "10", String(day).padStart(2, "0")), {
+        recursive: true,
+      });
+    }
+    writeFileSync(
+      join(
+        codexHome,
+        "sessions",
+        "2026",
+        "10",
+        "01",
+        `rollout-2026-10-01T00-00-00-${threadId}.jsonl`,
+      ),
+      "",
+    );
+    // Newest-first (lexicographic): day 70 … day 01 — the hit sits past the
+    // 64-directory budget.
+    await expect(findCodexRolloutFile({ codexHome, threadId })).resolves.toBeNull();
+
+    // A hit inside the budget is still found.
+    const nearId = "01a0f299-9662-71f1-ae65-cd8b0382near";
+    writeFileSync(
+      join(
+        codexHome,
+        "sessions",
+        "2026",
+        "10",
+        "69",
+        `rollout-2026-10-69T00-00-00-${nearId}.jsonl`,
+      ),
+      "",
+    );
+    await expect(findCodexRolloutFile({ codexHome, threadId: nearId })).resolves.toContain(nearId);
+  });
+
+  it("refuses handle identities that could escape the provider directory (R4-31)", async () => {
+    // Handle fields reach this funnel from the import RPC verbatim; ids joined
+    // into provider paths must be single, traversal-free segments, and omp/pi
+    // native handles must be clean absolute file paths before anything tails
+    // or `open`s them.
+    const configDir = join(work, "claude-config-gate");
+    expect(
+      resolveClaudeTranscriptPath({ cwd: work, sessionId: "../escape", configDir }),
+    ).toBeNull();
+    expect(resolveClaudeTranscriptPath({ cwd: work, sessionId: "a/b", configDir })).toBeNull();
+    await expect(findCodexRolloutFile({ codexHome: work, threadId: "a/b" })).resolves.toBeNull();
+
+    // `path.join` would normalize these away; the handle is a raw client string.
+    for (const nativeHandle of ["sessions/relative.jsonl", `${work}/nested/../s.jsonl`]) {
+      await expect(
+        resolveProviderTranscriptPath({
+          provider: "omp",
+          cwd: work,
+          persistence: { provider: "omp", sessionId: "s", nativeHandle },
+        }),
+      ).resolves.toBeNull();
+    }
+    await expect(
+      resolveProviderTranscriptPath({
+        provider: "omp",
+        cwd: work,
+        persistence: { provider: "omp", sessionId: "s", nativeHandle: join(work, "s.jsonl") },
+      }),
+    ).resolves.toBe(join(work, "s.jsonl"));
   });
 
   it("has no transcript for opencode: a shared DB is not a per-session transcript", async () => {
@@ -321,4 +395,67 @@ describe("external activity probes", () => {
     await expect(transcriptLooksFresh(missing, Date.now())).resolves.toBe(false);
     await expect(statTranscriptBytes(missing)).resolves.toBeNull();
   });
+
+  it("rejects invalid and stale claude registry rows (R4-21/26)", async () => {
+    const configDir = join(work, "claude-registry-gates");
+    const registryDir = join(configDir, "sessions");
+    mkdirSync(registryDir, { recursive: true });
+    const writeRow = (name: string, body: unknown, ageMs = 0) => {
+      const file = join(registryDir, name);
+      writeFileSync(file, JSON.stringify(body));
+      if (ageMs > 0) {
+        const past = new Date(Date.now() - ageMs);
+        utimesSync(file, past, past);
+      }
+    };
+    // The registry is external-CLI input: pid 0 / negative pids address
+    // process GROUPS on POSIX (signal-0 succeeds against ourselves), and a
+    // crash leftover whose pid was recycled by an unrelated process would
+    // otherwise read as a live external session forever.
+    writeRow("zero.json", { pid: 0, sessionId: "zero" });
+    writeRow("negative.json", { pid: -12345, sessionId: "negative" });
+    writeRow("fractional.json", { pid: 1.5, sessionId: "fractional" });
+    writeRow(
+      "recycled.json",
+      { pid: process.pid, sessionId: "recycled" },
+      LOOKS_ACTIVE_MTIME_WINDOW_MS * 3,
+    );
+
+    await expect(claudeRegistryLooksActive({ sessionId: "zero", configDir })).resolves.toBe(false);
+    await expect(claudeRegistryLooksActive({ sessionId: "negative", configDir })).resolves.toBe(
+      false,
+    );
+    await expect(claudeRegistryLooksActive({ sessionId: "fractional", configDir })).resolves.toBe(
+      false,
+    );
+    // A live pid is not enough when the row itself is an old leftover.
+    await expect(claudeRegistryLooksActive({ sessionId: "recycled", configDir })).resolves.toBe(
+      false,
+    );
+    // The same live pid with a fresh row still reports active (the gate must
+    // not blind the probe for the normal case).
+    writeRow("live.json", { pid: process.pid, sessionId: "recycled" });
+    await expect(claudeRegistryLooksActive({ sessionId: "recycled", configDir })).resolves.toBe(
+      true,
+    );
+  });
+
+  it.skipIf(process.platform !== "win32")(
+    "reads permission errors as unknown, never as a sharing violation (R4-20)",
+    async () => {
+      // Windows-only surface (POSIX short-circuits to null): a read-only
+      // transcript answers `open("r+")` with EPERM/EACCES while NO writer
+      // holds it. Reading that as "held" manufactured a permanent false
+      // `externalLooksActive`; it must fall through to the freshness signal.
+      const readOnly = join(work, "read-only-transcript.jsonl");
+      writeFileSync(readOnly, ompLine("user", "hi", "1"));
+      chmodSync(readOnly, 0o444);
+      try {
+        await expect(transcriptHandleIsHeld(readOnly)).resolves.toBeNull();
+      } finally {
+        chmodSync(readOnly, 0o644);
+        rmSync(readOnly, { force: true });
+      }
+    },
+  );
 });

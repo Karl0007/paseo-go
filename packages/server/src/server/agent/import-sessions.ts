@@ -37,6 +37,7 @@ export type ImportSessionAgentManager = AgentLoaderManager &
     | "closeAgent"
     | "getTimeline"
     | "importProviderSession"
+    | "listImportableSessions"
     | "notifyAgentState"
     | "unarchiveSnapshot"
   >;
@@ -255,6 +256,26 @@ async function importProviderSessionNow(
     }
   }
 
+  // R4-30: `providerHandleId` is a client string that becomes the persisted
+  // handle the transcript watcher tails for the life of the agent (watcher
+  // tail + content echo is this batch's extension of the one-shot import read).
+  // Accept only handles the provider itself lists right now: the import UI
+  // picks from exactly this listing, so a legitimate selection always passes,
+  // while a planted handle (arbitrary .jsonl path) never reaches storage.
+  const revalidation = await input.agentManager.listImportableSessions({
+    limit: IMPORT_SESSION_SEARCH_SCAN_LIMIT,
+    providerFilter: new Set([provider]),
+    cwd,
+  });
+  if (
+    revalidation.providerErrors.some((error) => error.provider === provider) ||
+    !revalidation.sessions.some((session) => session.providerHandleId === providerHandleId)
+  ) {
+    throw new ImportSessionsRequestError(
+      "not_importable",
+      `Provider session is not currently importable: ${providerHandleId}`,
+    );
+  }
   const snapshot = await input.agentManager.importProviderSession({
     provider,
     providerHandleId,

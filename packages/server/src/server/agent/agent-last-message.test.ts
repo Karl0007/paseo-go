@@ -61,8 +61,67 @@ describe("normalizeLastMessagePreview", () => {
     expect(normalizeLastMessagePreview(exact)).toBe(exact);
   });
 
+  it("never splits a surrogate pair at the cap (R4-02)", () => {
+    // 119 BMP chars + two astral emoji: a code-unit slice at 120 would end on
+    // the lone high surrogate of the first emoji and ship `\ud83d` on the wire.
+    const capped = normalizeLastMessagePreview(`${"a".repeat(119)}\u{1F600}\u{1F600}`);
+    expect(Array.from(capped)).toHaveLength(LAST_MESSAGE_PREVIEW_MAX_CHARS);
+    const tail = capped.charCodeAt(capped.length - 1);
+    expect(tail >= 0xd800 && tail <= 0xdbff).toBe(false);
+    expect(capped).toBe(`${"a".repeat(119)}\u{1F600}`);
+  });
+
   it("reports blank text as an empty preview", () => {
     expect(normalizeLastMessagePreview("  \n\t ")).toBe("");
+  });
+});
+
+describe("live/replay preview parity (R4-02)", () => {
+  const blankRunCases: Array<{ label: string; items: AgentTimelineItem[] }> = [
+    {
+      label: "same messageId",
+      items: [
+        { type: "assistant_message", messageId: "m1", text: "Alpha" },
+        { type: "assistant_message", messageId: "m1", text: "  \n " },
+        { type: "assistant_message", messageId: "m1", text: "beta tail" },
+      ],
+    },
+    {
+      label: "no messageIds",
+      items: [
+        { type: "assistant_message", text: "Alpha" },
+        { type: "assistant_message", text: "" },
+        { type: "assistant_message", text: "beta tail" },
+      ],
+    },
+  ];
+
+  it.each(blankRunCases)(
+    "folds a blank mid-run chunk exactly like replay joins it ($label)",
+    ({ items }) => {
+      let track = EMPTY_TRACK;
+      items.forEach((item, index) => {
+        track = advanceAgentLastMessage(track, item, index + 1) ?? track;
+      });
+      // The subtitle must survive a restart: live fold and replay re-derive
+      // agree, and the blank chunk neither truncates the run nor floats it.
+      expect(track.preview).toBe(deriveAgentLastMessageFromTimeline(items).preview);
+      expect(track.preview).toBe("Alphabeta tail");
+    },
+  );
+
+  it("keeps a blank chunk with a conflicting id from bridging two messages", () => {
+    const items: AgentTimelineItem[] = [
+      { type: "assistant_message", messageId: "m1", text: "Alpha" },
+      { type: "assistant_message", messageId: "m2", text: "" },
+      { type: "assistant_message", messageId: "m2", text: "beta" },
+    ];
+    let track = EMPTY_TRACK;
+    items.forEach((item, index) => {
+      track = advanceAgentLastMessage(track, item, index + 1) ?? track;
+    });
+    expect(track.preview).toBe(deriveAgentLastMessageFromTimeline(items).preview);
+    expect(track.preview).toBe("beta");
   });
 });
 

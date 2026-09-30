@@ -7,6 +7,7 @@ import { createTestLogger } from "../../test-utils/test-logger.js";
 import type { AgentPersistenceHandle, AgentProvider } from "./agent-sdk-types.js";
 import {
   TranscriptWatchService,
+  type TranscriptAttachment,
   type TranscriptChange,
   type TranscriptWatchCandidate,
 } from "./transcript-watch-service.js";
@@ -85,6 +86,7 @@ function createHarness(
     baselineBytes?: number | null;
     maxWatchers?: number;
     candidates?: () => Promise<TranscriptWatchCandidate[]>;
+    onAttached?: (agentId: string, attachment: TranscriptAttachment) => Promise<void>;
   } = {},
 ): Harness {
   const file = join(work, "sessions", "--proj--", "2026-09-30_uuid.jsonl");
@@ -113,6 +115,7 @@ function createHarness(
     maxWatchers: input.maxWatchers ?? 8,
     listCandidates: input.candidates ?? (async () => [candidate]),
     onChange: recorder.push,
+    onAttached: input.onAttached,
   });
   services.push(service);
   return { file, recorder, service, candidate };
@@ -286,4 +289,102 @@ describe("sweep lifecycle", () => {
       harness.service.attach({ ...harness.candidate, agentId: "agent-2" }),
     ).resolves.toBeNull();
   });
+});
+
+describe("discovery attach baseline handoff (R4-03)", () => {
+  it("hands the sweep's freshly established baseline to the caller for persistence", async () => {
+    const first = ompLine("user", "one", "1");
+    const handed: { agentId: string; baselineBytes: number | null }[] = [];
+    const harness = createHarness({
+      transcript: first,
+      onAttached: async (agentId, attachment) => {
+        handed.push({ agentId, baselineBytes: attachment.baselineBytes });
+      },
+    });
+    // Discovery attach with no persisted cursor: the baseline it establishes
+    // must reach the caller — dropped on the floor, every restart would
+    // re-baseline over the bytes written while the daemon was down.
+    await harness.service.sweep();
+    expect(handed).toEqual([{ agentId: "agent-1", baselineBytes: Buffer.byteLength(first) }]);
+
+    // Already-tracked entries do not re-hand on every sweep.
+    handed.length = 0;
+    await harness.service.sweep();
+    expect(handed).toEqual([]);
+  });
+
+  it("does not fire for a direct attach — the release path persists what it learned", async () => {
+    const handed: string[] = [];
+    const harness = createHarness({
+      onAttached: async (agentId) => {
+        handed.push(agentId);
+      },
+    });
+    await harness.service.attach(harness.candidate);
+    expect(handed).toEqual([]);
+  });
+});
+
+describe("watcher slot fairness (R4-22)", () => {
+  it("gives the slot to a fresh release and keeps the demoted entry on the sweep", async () => {
+    const harness = createHarness({ maxWatchers: 1 });
+    const fileB = join(work, "sessions", "b.jsonl");
+    writeFileSync(fileB, ompLine("user", "second session", "s0"));
+    await harness.service.attach(harness.candidate);
+    expect(harness.service.fastPathAgentIds).toEqual(["agent-1"]);
+
+    await harness.service.attach({
+      ...harness.candidate,
+      agentId: "agent-2",
+      persistence: { provider: OMP_PROVIDER, sessionId: "b", nativeHandle: fileB },
+    });
+    // Insertion order used to mean the NEWEST release starves on the 60s slow
+    // path forever once the cap is full. LRU: the newcomer (most recent
+    // activity by definition) takes the slot; the older holder steps down to
+    // the stat sweep with its entry and cursor intact.
+    expect(harness.service.fastPathAgentIds).toEqual(["agent-2"]);
+    expect(harness.service.watchedAgentIds).toEqual(["agent-1", "agent-2"]);
+
+    appendFileSync(harness.file, ompLine("assistant", "still detected", "s2"));
+    await harness.service.sweep();
+    const [change] = await harness.recorder.waitFor(1);
+    expect(change.agentId).toBe("agent-1");
+    expect(change.items).toEqual([
+      { type: "assistant_message", text: "still detected", messageId: "s2" },
+    ]);
+  });
+});
+
+describe("tail read bound (R4-23)", () => {
+  it("digests a burst beyond the cap across checks instead of one unbounded read", async () => {
+    const base = ompLine("user", "from paseo", "p1");
+    const harness = createHarness({
+      maxWatchers: 0,
+      baselineBytes: Buffer.byteLength(base),
+    });
+    const line = (index: number) =>
+      ompLine("user", `burst ${index} ${"x".repeat(2048)}`, `b${index}`);
+    const count = 2_200; // ≈ 4.7 MB appended at once — past the 4 MiB cap
+    const burst = Array.from({ length: count }, (_, index) => line(index)).join("");
+    expect(Buffer.byteLength(burst)).toBeGreaterThan(4 * 1024 * 1024);
+    const baseBytes = Buffer.byteLength(base);
+    appendFileSync(harness.file, burst);
+
+    await harness.service.sweep();
+    // Pre-fix the whole 4.7 MB burst came back as ONE change with ONE buffer
+    // read. Now every reported cursor step stays under the cap...
+    let previous = baseBytes;
+    for (const change of harness.recorder.changes) {
+      expect(change.baselineBytes - previous).toBeLessThanOrEqual(4 * 1024 * 1024);
+      previous = change.baselineBytes;
+    }
+    expect(harness.recorder.changes[0].items.length).toBeLessThan(count);
+    // ...and the digest across checks loses nothing.
+    const total = harness.recorder.changes.reduce((sum, change) => sum + change.items.length, 0);
+    expect(total).toBe(count);
+    await harness.service.sweep();
+    expect(harness.recorder.changes.reduce((sum, change) => sum + change.items.length, 0)).toBe(
+      count,
+    );
+  }, 20_000);
 });

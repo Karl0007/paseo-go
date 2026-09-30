@@ -31,11 +31,16 @@ import { LOOKS_ACTIVE_MTIME_WINDOW_MS } from "./provider-transcript.js";
  * renders as a plain `external` row rather than a warning.
  */
 
-/** Errno codes a Windows sharing violation surfaces as (measured: EBUSY). */
+/**
+ * Errno codes a Windows sharing violation surfaces as (measured: EBUSY).
+ * R4-20: EPERM/EACCES deliberately do NOT belong here — a read-only attribute,
+ * an ACL, or a read-only mount also answers `open("r+")` with them without any
+ * writer holding the file. Reading them as "held" manufactures a permanent
+ * `externalLooksActive`; they mean "the platform could not answer" (null), and
+ * the caller falls back to the mtime signal like on POSIX.
+ */
 const SHARING_VIOLATION_CODES: Record<string, true> = {
   EBUSY: true,
-  EPERM: true,
-  EACCES: true,
 };
 
 export interface ExternalActivityProbeInput {
@@ -84,6 +89,8 @@ export async function probeExternalTranscriptActivity(
 export async function claudeRegistryLooksActive(input: {
   sessionId: string;
   configDir: string;
+  /** Injectable clock for tests (registry-file freshness gate). */
+  now?: number;
 }): Promise<boolean> {
   if (!input.sessionId) {
     return false;
@@ -94,11 +101,27 @@ export async function claudeRegistryLooksActive(input: {
     if (!name.endsWith(".json")) {
       continue;
     }
-    const entry = await readJsonRecord(path.join(registryDir, name));
+    const entryPath = path.join(registryDir, name);
+    const entry = await readJsonRecord(entryPath);
     if (!entry || entry.sessionId !== input.sessionId) {
       continue;
     }
-    if (typeof entry.pid === "number" && isPidRunning(entry.pid)) {
+    // R4-21/26: `~/.claude/sessions/*.json` is written by an external CLI and
+    // left behind when claude crashes — untrusted input. `pid: 0` addresses the
+    // caller's own process group on POSIX and negatives address process groups
+    // too, so only a positive integer pid may be probed at all.
+    const pid = entry.pid;
+    if (typeof pid !== "number" || !Number.isInteger(pid) || pid <= 0) {
+      continue;
+    }
+    // A crash leftover whose pid was later recycled would answer signal-0 from
+    // an unrelated process: a registry file the CLI has not touched inside the
+    // shared freshness window is a leftover, not liveness evidence.
+    const info = await stat(entryPath).catch(() => null);
+    if (!info || (input.now ?? Date.now()) - info.mtimeMs >= LOOKS_ACTIVE_MTIME_WINDOW_MS) {
+      continue;
+    }
+    if (isPidRunning(pid)) {
       return true;
     }
   }
@@ -121,8 +144,10 @@ function isPidRunning(pid: number): boolean {
 
 /**
  * True = a live process holds the transcript without sharing write.
- * Null = the platform cannot express the question (POSIX opens never conflict),
- * so the caller must fall back to a weaker signal rather than read false as proof.
+ * Null = the question could not be asked: the platform cannot express it
+ * (POSIX opens never conflict) or the OS answered with a permission error
+ * (read-only file/ACL/mount). The caller must fall back to a weaker signal
+ * rather than read either answer as proof of a writer.
  */
 export async function transcriptHandleIsHeld(filePath: string | null): Promise<boolean | null> {
   if (!filePath || process.platform !== "win32") {
@@ -134,7 +159,15 @@ export async function transcriptHandleIsHeld(filePath: string | null): Promise<b
     return false;
   } catch (error) {
     const code = (error as NodeJS.ErrnoException).code ?? "";
-    return code in SHARING_VIOLATION_CODES;
+    // R4-20: only a measured sharing violation proves a holder. EPERM/EACCES
+    // are permission answers (read-only file/ACL/mount), not sharing answers —
+    // the platform could not tell whether a writer holds the file, so null
+    // routes the caller to the freshness fallback like on POSIX instead of
+    // inventing an alive external writer.
+    if (code in SHARING_VIOLATION_CODES) {
+      return true;
+    }
+    return code === "EPERM" || code === "EACCES" ? null : false;
   } finally {
     await handle?.close().catch(() => undefined);
   }

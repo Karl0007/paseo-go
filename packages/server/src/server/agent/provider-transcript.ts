@@ -33,8 +33,8 @@ import { claudeConfigDir, claudeProjectDirSync } from "./providers/claude/projec
  *              mtime would fire for unrelated sessions). Deliberately unobservable.
  */
 
-/** Date directories the codex rollout scan walks before giving up. */
-const CODEX_ROLLOUT_SCAN_DAY_DIRS = 64;
+/** Directories the codex rollout scan walks (years + months + days together). */
+const CODEX_ROLLOUT_SCAN_DIR_BUDGET = 64;
 
 /**
  * Freshness window for every "does this session look alive" heuristic in the agent
@@ -57,8 +57,10 @@ export interface ProviderTranscriptInput {
 
 /**
  * Absolute path of the transcript file paseo can tail, or null when the provider
- * exposes none. Null is a permanent answer for opencode and for any handle that
- * lacks the identity the provider needs (no session id, no cwd).
+ * exposes none. Null is a permanent answer for opencode, for any handle that
+ * lacks the identity the provider needs (no session id, no cwd), and for a
+ * persisted handle whose identity cannot be a clean transcript path — handle
+ * fields reach this funnel through the import RPC and are untrusted (R4-31).
  */
 export async function resolveProviderTranscriptPath(
   input: ProviderTranscriptInput,
@@ -90,7 +92,34 @@ export async function resolveProviderTranscriptPath(
 }
 
 function looksLikeTranscriptFile(value: unknown): value is string {
-  return typeof value === "string" && value.trim().length > 0 && value.endsWith(".jsonl");
+  if (typeof value !== "string" || !value.endsWith(".jsonl") || value.includes("\0")) {
+    return false;
+  }
+  // R4-31 (sink belt): an omp/pi handle is persisted verbatim from an import
+  // RPC, and the watcher tails whatever this funnel returns. Provider-issued
+  // handles are clean absolute paths; reject traversal segments, relative
+  // spellings, and (on Windows) UNC/device spellings before `fs.watch`/`open`
+  // ever sees them. Provenance is gated at the source (R4-30 revalidation).
+  if (process.platform === "win32" && value.startsWith("\\\\")) {
+    return false;
+  }
+  return path.isAbsolute(value) && path.normalize(value) === value;
+}
+
+/**
+ * R4-31: ids that become path components (`${sessionId}.jsonl`, the rollout
+ * filename suffix) are untrusted once persisted from a client handle. Only a
+ * single, traversal-free path segment may be joined into a provider directory.
+ */
+function isSinglePathSegment(value: string): boolean {
+  return (
+    value.length > 0 &&
+    !value.includes("\0") &&
+    !value.includes("/") &&
+    !value.includes("\\") &&
+    value !== "." &&
+    value !== ".."
+  );
 }
 
 /**
@@ -103,7 +132,7 @@ export function resolveClaudeTranscriptPath(input: {
   sessionId: string;
   configDir?: string;
 }): string | null {
-  if (!input.cwd || !input.sessionId) {
+  if (!input.cwd || !isSinglePathSegment(input.sessionId)) {
     return null;
   }
   const configDir = input.configDir ?? claudeConfigDir(process.env);
@@ -134,24 +163,39 @@ export function resolveClaudeTranscriptPath(input: {
  * Locate `rollout-*-<threadId>.jsonl` under `<codexHome>/sessions/YYYY/MM/DD`.
  * Walks day directories newest-first (lexicographic == chronological for this
  * layout) and stops at the first match, bounded by
- * {@link CODEX_ROLLOUT_SCAN_DAY_DIRS} so a long-lived ~/.codex never turns
- * ownership bookkeeping into an unbounded walk.
+ * {@link CODEX_ROLLOUT_SCAN_DIR_BUDGET} — counted over EVERY directory the walk
+ * opens (R4-10: slicing the year list left the month/day loops unbounded, so a
+ * real ~/.codex re-walked its whole tree on every resolve) — so a long-lived
+ * ~/.codex never turns ownership bookkeeping into an unbounded walk.
  */
 export async function findCodexRolloutFile(input: {
   codexHome: string;
   threadId: string;
 }): Promise<string | null> {
-  if (!input.threadId) {
+  if (!isSinglePathSegment(input.threadId)) {
     return null;
   }
   const suffix = `-${input.threadId}.jsonl`;
   const root = path.join(input.codexHome, "sessions");
+  let budget = CODEX_ROLLOUT_SCAN_DIR_BUDGET;
   const years = await readSortedDirectories(root);
-  for (const year of years.slice(0, CODEX_ROLLOUT_SCAN_DAY_DIRS)) {
+  for (const year of years) {
+    if (budget <= 0) {
+      return null;
+    }
+    budget -= 1;
     const months = await readSortedDirectories(path.join(root, year));
     for (const month of months) {
+      if (budget <= 0) {
+        return null;
+      }
+      budget -= 1;
       const days = await readSortedDirectories(path.join(root, year, month));
       for (const day of days) {
+        if (budget <= 0) {
+          return null;
+        }
+        budget -= 1;
         const dayDir = path.join(root, year, month, day);
         const names = await readdir(dayDir).catch(() => [] as string[]);
         const hit = names.find((name) => name.endsWith(suffix));

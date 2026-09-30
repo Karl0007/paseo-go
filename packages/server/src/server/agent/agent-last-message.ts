@@ -72,10 +72,14 @@ function describeMessageItem(
  */
 export function normalizeLastMessagePreview(text: string): string {
   const collapsed = text.replace(/\s+/g, " ").trim();
-  if (collapsed.length <= LAST_MESSAGE_PREVIEW_MAX_CHARS) {
+  // Truncate on code points, never UTF-16 code units: a `slice` boundary inside
+  // a surrogate pair emits a lone surrogate, which JSON.stringify forwards to
+  // the wire as an invalid `\udXXX` escape the client cannot render.
+  const characters = Array.from(collapsed);
+  if (characters.length <= LAST_MESSAGE_PREVIEW_MAX_CHARS) {
     return collapsed;
   }
-  return collapsed.slice(0, LAST_MESSAGE_PREVIEW_MAX_CHARS);
+  return characters.slice(0, LAST_MESSAGE_PREVIEW_MAX_CHARS).join("");
 }
 
 /** True when appending this item must refresh the directory (push gate). */
@@ -100,10 +104,6 @@ export function advanceAgentLastMessage(
   if (message === null) {
     return null;
   }
-  const preview = normalizeLastMessagePreview(message.text);
-  if (preview.length === 0) {
-    return null;
-  }
   const continuesRun =
     message.role === "assistant" &&
     current.role === "assistant" &&
@@ -113,6 +113,18 @@ export function advanceAgentLastMessage(
       message.messageId !== null &&
       current.messageId !== message.messageId
     );
+  const preview = normalizeLastMessagePreview(message.text);
+  if (preview.length === 0) {
+    // A blank assistant chunk is a stream artifact of the run around it, not a
+    // message of its own: replay (deriveAgentLastMessageFromTimeline) joins
+    // across it, so live must keep the run's cursor adjacent or the next chunk
+    // of the same message starts a fresh run and the preview diverges after a
+    // restart (R4-02). Non-assistant blanks, and blanks outside a continuing
+    // assistant run, never touch the tracker.
+    return continuesRun
+      ? { ...current, seq: rowSeq, messageId: message.messageId ?? current.messageId }
+      : null;
+  }
   return {
     preview: continuesRun
       ? normalizeLastMessagePreview(`${current.preview ?? ""}${message.text}`)
@@ -140,6 +152,7 @@ export function deriveAgentLastMessageFromTimeline(
     let text = message.text;
     if (message.role === "assistant") {
       let headId = message.messageId;
+      const run: string[] = [message.text];
       for (let prior = index - 1; prior >= 0; prior -= 1) {
         const chunk = items[prior];
         if (chunk.type !== "assistant_message") {
@@ -149,9 +162,15 @@ export function deriveAgentLastMessageFromTimeline(
         if (chunkId !== null && headId !== null && chunkId !== headId) {
           break;
         }
-        text = `${chunk.text}${text}`;
+        run.unshift(chunk.text);
         headId = chunkId ?? headId;
       }
+      // Fold with the live rule (`advanceAgentLastMessage` normalizes after
+      // every join because only the normalized prefix survives in the track).
+      // Concatenating raw chunks and normalizing once instead would keep
+      // whitespace the streamed fold had already collapsed — the subtitle
+      // would change on restart (R4-02).
+      text = run.reduce((joined, chunkText) => normalizeLastMessagePreview(joined + chunkText), "");
     }
     const preview = normalizeLastMessagePreview(text);
     if (preview.length > 0) {

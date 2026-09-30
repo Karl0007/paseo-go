@@ -629,6 +629,8 @@ class ProviderImportHarness {
   readonly snapshot: ManagedAgent;
   readonly freshImports: unknown[] = [];
   readonly closedAgentIds: string[] = [];
+  /** R4-30: the handles this fake provider currently lists as importable. */
+  importableHandleIds: string[];
   timeline: AgentTimelineItem[] = [];
   activeAgent: ManagedAgent | null = null;
   resumeError: Error | null = null;
@@ -639,6 +641,7 @@ class ProviderImportHarness {
   private constructor(input: { storage: AgentStorage; snapshot: ManagedAgent }) {
     this.storage = input.storage;
     this.snapshot = input.snapshot;
+    this.importableHandleIds = [input.snapshot.persistence?.sessionId ?? ""];
     this.manager = {
       importProviderSession: async (request: unknown) => {
         this.freshImports.push(request);
@@ -707,6 +710,16 @@ class ProviderImportHarness {
         await this.storage.upsert(archived);
         return archived;
       },
+      listImportableSessions: async () =>
+        makeImportableSessionsResult(
+          this.importableHandleIds.map((handleId) =>
+            makeImportableSession({
+              sessionId: handleId,
+              cwd: this.snapshot.cwd,
+              lastActivityAt: "2026-04-30T00:00:00.000Z",
+            }),
+          ),
+        ),
     } satisfies ImportSessionAgentManager;
   }
 
@@ -793,6 +806,30 @@ test("importProviderSession uses the provider import path with the requested lab
     timelineSize: 2,
     createdWorkspace: null,
   });
+});
+
+test("importProviderSession refuses a handle the provider does not list (R4-30)", async () => {
+  // `providerHandleId` is a client string that becomes the persisted handle
+  // the transcript watcher tails for the agent's whole life. Only handles the
+  // provider itself lists right now may reach storage.
+  const harness = await ProviderImportHarness.create();
+  await expect(
+    harness.import({
+      providerHandleId: "/home/victim/.omp/sessions/planted.jsonl",
+      cwd: "/tmp/imported-agent",
+    }),
+  ).rejects.toThrow("Provider session is not currently importable");
+  expect(harness.freshImports).toEqual([]);
+
+  // Once the provider lists it, the same import proceeds.
+  harness.importableHandleIds.push("/home/victim/.omp/sessions/planted.jsonl");
+  await expect(
+    harness.import({
+      providerHandleId: "/home/victim/.omp/sessions/planted.jsonl",
+      cwd: "/tmp/imported-agent",
+    }),
+  ).resolves.toMatchObject({ snapshot: { id: harness.snapshot.id } });
+  expect(harness.freshImports).toHaveLength(1);
 });
 
 test("importProviderSession rejects a provider session with an active stored owner", async () => {

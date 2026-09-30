@@ -1,5 +1,6 @@
-import { chmodSync, mkdtempSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { chmodSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
+import { fileURLToPath } from "node:url";
 import path from "node:path";
 import { describe, expect, test } from "vitest";
 
@@ -837,5 +838,36 @@ describe.skipIf(process.platform === "win32")("persisted config file permissions
     } finally {
       rmSync(parent, { recursive: true, force: true });
     }
+  });
+});
+
+// COMPAT(agentOwnership): R4-25 — the published JSON schema is what $schema-
+// aware editors validate against; it ships `additionalProperties: false`, so a
+// key the zod schema (and docs/data-model.md) accepts must exist here too or
+// documented configs are flagged invalid.
+describe("published config schema parity", () => {
+  test("agents.transcriptStatPollIntervalMs is present in paseo.config.v1.json", () => {
+    const schemaPath = fileURLToPath(
+      new URL("../../../website/public/schemas/paseo.config.v1.json", import.meta.url),
+    );
+    const schema = JSON.parse(readFileSync(schemaPath, "utf8")) as {
+      definitions?: {
+        PaseoConfigV1?: {
+          properties?: {
+            agents?: {
+              additionalProperties?: unknown;
+              properties?: Record<string, unknown>;
+            };
+          };
+        };
+      };
+    };
+    const agents = schema.definitions?.PaseoConfigV1?.properties?.agents;
+    expect(agents?.additionalProperties).toBe(false);
+    expect(agents?.properties?.["transcriptStatPollIntervalMs"]).toEqual({
+      type: "integer",
+      exclusiveMinimum: 0,
+      maximum: 2147483647,
+    });
   });
 });

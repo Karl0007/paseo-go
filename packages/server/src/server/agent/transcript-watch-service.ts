@@ -48,6 +48,13 @@ export const DEFAULT_TRANSCRIPT_STAT_POLL_INTERVAL_MS = 60_000;
 const DEFAULT_MAX_WATCHERS = 64;
 /** Agents untouched for longer than this stop being watched (opening them replays history). */
 const WATCH_RETENTION_MS = 30 * 24 * 60 * 60 * 1000;
+/**
+ * R4-23: upper bound on one tail read. A watcher-failure window (network mount
+ * — the reason this service exists) can pile 60s of growth behind one cursor;
+ * the sweep digests at most this many bytes per check and continues from the
+ * aligned cursor on the next one instead of spiking the heap.
+ */
+const MAX_TAIL_READ_BYTES = 4 * 1024 * 1024;
 
 export interface TranscriptWatchCandidate {
   agentId: string;
@@ -89,9 +96,16 @@ export interface TranscriptWatchServiceOptions {
   maxWatchers?: number;
   /** Injectable for tests (CLAUDE_CONFIG_DIR / CODEX_HOME redirection). */
   env?: NodeJS.ProcessEnv;
-  /** Called on the sweep tick; the manager answers from its agent storage. */
   listCandidates: () => Promise<TranscriptWatchCandidate[]>;
   onChange: (change: TranscriptChange) => Promise<void>;
+  /**
+   * R4-03: called after a discovery attach in `sweep()` resolved a baseline the
+   * candidate did not carry. The service persists nothing — the caller owns
+   * storage; without this hop a first-established baseline dies with the
+   * process and writes landing while the daemon is down are re-baselined away
+   * on every restart.
+   */
+  onAttached?: (agentId: string, attachment: TranscriptAttachment) => Promise<void>;
 }
 
 interface WatchEntry {
@@ -101,6 +115,10 @@ interface WatchEntry {
   watcher: FSWatcher | null;
   debounce: ReturnType<typeof setTimeout> | null;
   checking: boolean;
+  /** Monotonic attach order; tie-breaks the LRU slot choice (R4-22). */
+  attachSeq: number;
+  /** Last time this entry's file was examined or moved (drives R4-22 LRU). */
+  lastActiveMs: number;
 }
 
 export class TranscriptWatchService {
@@ -111,6 +129,11 @@ export class TranscriptWatchService {
   private readonly env: NodeJS.ProcessEnv;
   private readonly listCandidates: () => Promise<TranscriptWatchCandidate[]>;
   private readonly onChange: (change: TranscriptChange) => Promise<void>;
+  private readonly onAttached?: (
+    agentId: string,
+    attachment: TranscriptAttachment,
+  ) => Promise<void>;
+  private entrySeq = 0;
   private readonly entries = new Map<string, WatchEntry>();
   private sweepTimer: ReturnType<typeof setInterval> | null = null;
   private sweepInFlight = false;
@@ -125,6 +148,7 @@ export class TranscriptWatchService {
     this.env = options.env ?? process.env;
     this.listCandidates = options.listCandidates;
     this.onChange = options.onChange;
+    this.onAttached = options.onAttached;
   }
 
   /**
@@ -184,11 +208,11 @@ export class TranscriptWatchService {
       watcher: null,
       debounce: null,
       checking: false,
+      attachSeq: (this.entrySeq += 1),
+      lastActiveMs: Date.now(),
     };
     this.entries.set(candidate.agentId, entry);
-    if (this.countWatchers() < this.maxWatchers) {
-      this.openWatcher(entry);
-    }
+    this.acquireWatcherSlot(entry);
     // Don't wait a whole poll interval to learn what already happened. A first
     // observation with no persisted cursor just establishes the baseline, which is
     // returned so the caller can persist it as "the transcript as paseo left it".
@@ -226,7 +250,17 @@ export class TranscriptWatchService {
         }
         eligible.add(candidate.agentId);
         if (!this.entries.has(candidate.agentId)) {
-          await this.attach(candidate);
+          const attached = await this.attach(candidate);
+          // R4-03: hand a freshly established baseline to the caller for
+          // persistence; `attach()` callers that already persist (the manager's
+          // release path) go through their own commit, not this hook.
+          if (
+            attached &&
+            attached.baselineBytes !== null &&
+            attached.baselineBytes !== candidate.baselineBytes
+          ) {
+            await this.onAttached?.(candidate.agentId, attached);
+          }
         }
       }
       for (const agentId of Array.from(this.entries.keys())) {
@@ -249,6 +283,13 @@ export class TranscriptWatchService {
     return Array.from(this.entries.keys());
   }
 
+  /** Exposed for tests (R4-22): entries currently holding an `fs.watch` slot. */
+  get fastPathAgentIds(): string[] {
+    return Array.from(this.entries.values())
+      .filter((entry) => entry.watcher !== null)
+      .map((entry) => entry.candidate.agentId);
+  }
+
   private countWatchers(): number {
     let count = 0;
     for (const entry of this.entries.values()) {
@@ -257,6 +298,42 @@ export class TranscriptWatchService {
       }
     }
     return count;
+  }
+
+  /**
+   * R4-22: watcher slots are shared fairly. A fresh release takes a free slot;
+   * when every slot is busy the least-recently-active holder steps down to the
+   * stat sweep — it keeps its entry and cursor, only the fast path moves — so
+   * the newest released session is never permanently starved behind a wall of
+   * older watchers (insertion order made exactly that the default).
+   */
+  private acquireWatcherSlot(entry: WatchEntry): void {
+    if (this.maxWatchers <= 0) {
+      return;
+    }
+    if (this.countWatchers() < this.maxWatchers) {
+      this.openWatcher(entry);
+      return;
+    }
+    let victim: WatchEntry | null = null;
+    for (const other of this.entries.values()) {
+      if (other === entry || !other.watcher) {
+        continue;
+      }
+      if (
+        victim === null ||
+        other.lastActiveMs < victim.lastActiveMs ||
+        (other.lastActiveMs === victim.lastActiveMs && other.attachSeq < victim.attachSeq)
+      ) {
+        victim = other;
+      }
+    }
+    if (victim === null) {
+      return;
+    }
+    victim.watcher?.close();
+    victim.watcher = null;
+    this.openWatcher(entry);
   }
 
   private openWatcher(entry: WatchEntry): void {
@@ -310,6 +387,7 @@ export class TranscriptWatchService {
       return;
     }
     entry.checking = true;
+    entry.lastActiveMs = Date.now();
     try {
       const size = await statTranscriptBytes(entry.transcriptPath);
       if (size === null) {
@@ -363,9 +441,17 @@ export class TranscriptWatchService {
     if (size === from) {
       return { items: [], cursor: from };
     }
-    const buffer = await readTranscriptRange(entry.transcriptPath, from, size - from);
+    const length = Math.min(size - from, MAX_TAIL_READ_BYTES);
+    const buffer = await readTranscriptRange(entry.transcriptPath, from, length);
     const lastNewline = buffer.lastIndexOf(0x0a);
     if (lastNewline < 0) {
+      if (length < size - from) {
+        // R4-23: the read hit the cap before any newline — a single row longer
+        // than the cap never completes line-wise. Skip it as unparseable meta
+        // (bytes changed, no visible message); the next check continues from
+        // the cap boundary instead of re-reading the same prefix forever.
+        return { items: [], cursor: from + length };
+      }
       // No complete row yet; keep the cursor and wait for the rest of the line.
       return { items: [], cursor: from };
     }

@@ -103,6 +103,11 @@ function withValue(state: AgentOwnershipState): AgentOwnershipState {
  * R5: resume succeeded (or the session was created here) — paseo owns the session
  * again. The external-change observation is cleared: from now on every transcript
  * byte is paseo's own work, and the watcher re-baselines on the next release.
+ * The byte cursor goes with the observation (R4-01): a cursor taken before paseo
+ * started writing would attribute paseo's own new rows to an external writer the
+ * moment the failed-turn/release attach replays from it. `null` = "no usable
+ * cursor; the next attach establishes the baseline at the current size", which is
+ * exactly "the transcript as paseo left it".
  */
 export function ownershipOnAcquire(state: AgentOwnershipState): AgentOwnershipState {
   return withValue({
@@ -110,6 +115,7 @@ export function ownershipOnAcquire(state: AgentOwnershipState): AgentOwnershipSt
     processAlive: true,
     externalChangeObserved: false,
     externalLooksActive: false,
+    baselineBytes: null,
   });
 }
 
@@ -163,6 +169,21 @@ export function ownershipWithTranscriptVisibility(
   baselineBytes: number | null = state.baselineBytes,
 ): AgentOwnershipState {
   return withValue({ ...state, transcriptObservable, baselineBytes });
+}
+
+/**
+ * R4-27: an attach that could not resolve the transcript is NOT evidence that
+ * the provider has no transcript — resolution fails transiently (mount not up,
+ * provider dir mid-rewrite). A session whose watcher already proved something
+ * (a pending external change, a persisted cursor) keeps that evidence
+ * untouched; only a session that was never observed at all settles to
+ * `transcriptObservable: false`.
+ */
+export function ownershipOnAttachFailure(state: AgentOwnershipState): AgentOwnershipState {
+  if (state.externalChangeObserved || state.baselineBytes !== null) {
+    return state;
+  }
+  return withValue({ ...state, transcriptObservable: false });
 }
 
 /**
