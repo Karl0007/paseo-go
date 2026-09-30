@@ -2,14 +2,14 @@
 // 应该都是固定一致高度，不会随着上下滚动移动」）。对话/工作区/我的三个 tab 的顶栏
 // 全部换成这里——一个组件 = 一份高度、一份 inset、一份 token。
 //
-// 高度口径（读码后定值，KI-12 报告在册）：
-// - 定高 = bar(44) + gap(8) + accessory 带(36) + 底衬(8) = 96dp 内容高。取「现三屏
-//   最高者取齐」一侧：现状工作区头（标题 + 44 搜索条 + 节奏）内容高 ≈100，压到 96；
-//   三屏恒等——accessory 带为空也保留占位，底边线与列表起点三 tab 同 y。
-// - 单行 52~56 方案否决（读码实据）：对话顶栏控件（标题 + 主机胶囊 + 进行中/已归档
-//   segment + 搜索 + ＋）单行最小内容宽 ≈340dp，宽屏列表列 260/300dp 下会把 ＋ 挤出
-//   列缘（C32 的胶囊收缩兜不住标题进栏后的缺口）→ 胶囊留 bar 右槽、segment 进
-//   accessory 带。
+// 高度口径（B4-F1 裁定 1，2026-09-30 翻案 KI-12 的两带 96dp 方案）：
+// - 单行定高 = 顶衬(8) + bar(44) + 底衬(8) = 60dp 内容高。accessory 带废除
+//   （用户：「太高了，工作区空白一大块」）；对话的 进行中/已归档 segment 上移进
+//   bar 行右槽，窄列溢出走三级降级（见 chats-header 的 tier 断点）。
+// - KI-12 当年否决单行的理由（≈340dp 最小内容宽挤掉 ＋）由新机制承接：标题
+//   flexShrink+截断、胶囊收缩到圆点、segment 全称→短称→纯图标三档。
+// - 等高契约不变：三 tab 渲染同一容器 ⇒ 等高 == 同一常量，与内容无关；
+//   顶栏高度是常量 = 列表容器不随头栏重挂（B4-REGRESS 勘误的 remount 纪律）。
 // - inset 只加一次：status-bar inset 在容器内以 paddingTop 上（原三屏各自的
 //   insets.top / insets.top+12 全部拆除）；宿主屏一律不再自加。
 // - 固定不滚动：容器渲染在 ScrollView/FlatList 之外（各 body 结构 = header 与列表
@@ -21,13 +21,11 @@ import { Text, View } from "react-native";
 import { StyleSheet } from "react-native-unistyles";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
-/** bar 行高（标题 + 右槽；32dp 图标钮 + 呼吸）。 */
+/** bar 行高（标题 + 右槽控件；C12 的 44dp 触达带）。 */
 export const SHELL_TAB_HEADER_BAR_HEIGHT_DP = 44;
-/** accessory 带高（对话筛选 segment 等次级控件；空也保留 → 三 tab 等高）。 */
-export const SHELL_TAB_HEADER_ACCESSORY_HEIGHT_DP = 36;
-/** bar ↔ accessory 带间距。 */
-export const SHELL_TAB_HEADER_GAP_DP = 8;
-/** 带 ↔ 底边线衬距。 */
+/** 顶衬（status-bar inset 之下、bar 之上；B4-F1 单行的呼吸位）。 */
+export const SHELL_TAB_HEADER_TOP_PADDING_DP = 8;
+/** 底衬（bar ↔ 底边线）。 */
 export const SHELL_TAB_HEADER_BOTTOM_PADDING_DP = 8;
 
 /**
@@ -36,9 +34,8 @@ export const SHELL_TAB_HEADER_BOTTOM_PADDING_DP = 8;
  */
 export function shellTabHeaderContentHeightDp(): number {
   return (
+    SHELL_TAB_HEADER_TOP_PADDING_DP +
     SHELL_TAB_HEADER_BAR_HEIGHT_DP +
-    SHELL_TAB_HEADER_GAP_DP +
-    SHELL_TAB_HEADER_ACCESSORY_HEIGHT_DP +
     SHELL_TAB_HEADER_BOTTOM_PADDING_DP
   );
 }
@@ -51,20 +48,20 @@ export function shellTabHeaderTotalHeightDp(statusBarInsetDp: number): number {
 export interface ShellTabHeaderProps {
   /** 左侧标题（「我的」仅标题即此形态）。省略 = 槽位吃满整行（搜索态变形）。 */
   title?: string;
-  /** accessory 带内容（对话 进行中/已归档 segment）；不传则带高照样保留。
-   *  react-perf(jsx-no-jsx-as-prop)：调用方以 useMemo 稳引用传入。 */
-  accessory?: ReactNode;
-  /** 右槽内容：本屏控件（主机胶囊/搜索/＋…），横向同 gap；无 `title` 时吃满
-   *  整行 = 顶栏搜索态变形（C9 姿势），总高不变、列表不跳位。 */
+  /** 右槽内容：本屏控件（主机胶囊/筛选 segment/搜索/＋…），横向同 gap；无
+   *  `title` 时吃满整行 = 顶栏搜索态变形（C9 姿势），总高不变、列表不跳位。 */
   children?: ReactNode;
 }
 
-export function ShellTabHeader({ title, accessory, children }: ShellTabHeaderProps) {
-  // inset 只加一次：三个 body 不再自叠 paddingTop。
+export function ShellTabHeader({ title, children }: ShellTabHeaderProps) {
+  // inset 只加一次：三个 body 不再自叠 paddingTop。顶衬是常量，inset 带随设备。
   const insets = useSafeAreaInsets();
   const fullRow = title == null;
   return (
-    <View testID="shell-tab-header" style={[styles.container, { paddingTop: insets.top }]}>
+    <View
+      testID="shell-tab-header"
+      style={[styles.container, { paddingTop: insets.top + SHELL_TAB_HEADER_TOP_PADDING_DP }]}
+    >
       <View style={styles.bar}>
         {fullRow ? null : (
           <>
@@ -76,7 +73,6 @@ export function ShellTabHeader({ title, accessory, children }: ShellTabHeaderPro
         )}
         <View style={fullRow ? styles.slotFull : styles.slot}>{children}</View>
       </View>
-      <View style={styles.accessory}>{accessory}</View>
     </View>
   );
 }
@@ -95,7 +91,7 @@ const styles = StyleSheet.create((theme) => ({
     alignItems: "center",
   },
   // 右槽（有标题时）：窄列（260/300dp）溢出的第一责任人；内部胶囊自带
-  // flexShrink 承接。
+  // flexShrink 承接（segment 保最小可点宽，不缩）。
   slot: {
     flexDirection: "row",
     alignItems: "center",
@@ -112,16 +108,11 @@ const styles = StyleSheet.create((theme) => ({
     fontSize: theme.fontSize["2xl"],
     fontWeight: theme.fontWeight.semibold,
     color: theme.colors.foreground,
-    // 标题恒完整（三 tab 标题都是 2~3 个 CJK 字）；溢出全走右槽收缩。
-    flexShrink: 0,
+    // B4-F1 裁定 1：窄列溢出链=标题截断 → 胶囊收缩 → segment 三档降级；
+    // 标题排第二顺位（spacer 先吃 0，slot 基数大先缩到内容底线后才轮到标题）。
+    flexShrink: 1,
   },
   spacer: {
     flex: 1,
-  },
-  accessory: {
-    height: SHELL_TAB_HEADER_ACCESSORY_HEIGHT_DP,
-    marginTop: SHELL_TAB_HEADER_GAP_DP,
-    flexDirection: "row",
-    alignItems: "center",
   },
 }));

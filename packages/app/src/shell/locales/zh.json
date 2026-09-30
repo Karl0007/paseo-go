@@ -48,7 +48,7 @@
     "title": "对话",
     "noHosts": "尚未配置任何主机。",
     "noHostsShort": "无主机",
-    "hostsOnline": "{{online}}/{{total}} 主机在线",
+    "hostsOnlineCount": "{{online}}/{{total}}",
     "hostsMenu": "主机状态",
     "hostStatus": {
       "idle": "未连接",
@@ -88,8 +88,11 @@
     "connectHost": "连接主机",
     "filter": {
       "active": "进行中",
+      "activeShort": "活跃",
       "archived": "已归档",
-      "archivedCount": "已归档 {{count}}"
+      "archivedShort": "归档",
+      "archivedCount": "已归档 {{count}}",
+      "archivedShortCount": "归档 {{count}}"
     },
     "emptyArchived": "没有已归档的对话。",
     "emptyArchivedAction": "切回进行中",

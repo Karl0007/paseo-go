@@ -48,7 +48,7 @@
     "title": "Chats",
     "noHosts": "No hosts configured yet.",
     "noHostsShort": "No hosts",
-    "hostsOnline": "{{online}}/{{total}} hosts online",
+    "hostsOnlineCount": "{{online}}/{{total}}",
     "hostsMenu": "Host status",
     "hostStatus": {
       "idle": "Not connected",
@@ -87,9 +87,12 @@
     "emptyHostsHint": "No host to connect to yet — pair or add a daemon first.",
     "connectHost": "Connect a host",
     "filter": {
-      "active": "Active",
+      "active": "In progress",
+      "activeShort": "Active",
       "archived": "Archived",
-      "archivedCount": "Archived {{count}}"
+      "archivedShort": "Archived",
+      "archivedCount": "Archived {{count}}",
+      "archivedShortCount": "Archived {{count}}"
     },
     "emptyArchived": "No archived chats.",
     "emptyArchivedAction": "Back to active",
