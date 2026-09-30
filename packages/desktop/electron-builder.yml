@@ -33,8 +33,17 @@ extraResources:
     to: editor-target-icons
 publish:
   provider: github
-  owner: getpaseo
-  repo: paseo
+  # COMPAT(paseoGoUpdateFeed): upstream touchpoint (paseo-go fork M4, 2026-09-30).
+  # The auto-update feed points at our fork's Releases — user ruling 2026-09-29:
+  # every client update ships through Karl0007/paseo-go. fork-release.yml also
+  # overrides owner/repo from the repository context (mirror builds are
+  # self-consistent); this default additionally bakes the fork feed into
+  # app-update.yml for local/ad-hoc builds. NOTE: fork releases are tagged
+  # prerelease, which electron-updater's stable channel (allowPrerelease=false,
+  # src/features/auto-updater.ts) skips until the release is promoted or the
+  # in-app channel is beta — see paseo-go BUILD.md §7 (M4 update-pointer notes).
+  owner: Karl0007
+  repo: paseo-go
 mac:
   artifactName: "Paseo-${version}-${arch}.${ext}"
   minimumSystemVersion: "13.0.0"

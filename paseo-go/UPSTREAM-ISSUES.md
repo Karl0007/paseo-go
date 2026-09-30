@@ -49,3 +49,10 @@
 - 现象：envelope 漂移（schema 演进/版本回退）时读侧清店、写侧失败清店=全量本地态静默蒸发；仓内 panel-store 三处"墓碑键"注释=既成伤害自证。
 - 本地修：保留原文+拒该次+warn（`5e01f2b9`，测试 9 例）。
 - 建议：上游对齐（该文件为官方 storage 面）。
+
+## 9. desktop「纯客户端模式」缺默认档：`keepRunningAfterQuit` 默认 false（P2 产品建议，fork 侧仅评估未改行为）
+
+- 现象/背景：Paseo Go 的目标形态是「壳 APK(客户端) + 远端主机 daemon」。desktop 装到第二台机器时，其内建 daemon 语义（`manageBuiltInDaemon` 默认 true、退出即停 daemon `keepRunningAfterQuit` 默认 false，`src/daemon/quit-lifecycle.ts`）与「只是想要一个 UI」冲突：关掉 desktop 窗口=顺手停掉本机被连的 daemon，其它客户端(壳 APK/官方手机 app)连接随之断。
+- 现状：两开关都在 desktop 设置里可改（`desktop-settings.ts` daemon 段），但默认组合面向「desktop 即宿主」场景；纯客户端用法要求每次装后手改两处。
+- 建议：给 desktop 出一个「纯客户端模式」预设（默认 `keepRunningAfterQuit=true`，或一个模式开关一次翻齐），并让 `autoUpdater` 的更新检查在该模式下不依赖 daemon 存活。
+- 处置（M4 拍板）：fork 侧本轮**不改行为**（本机禁忌#1：desktop 不装不跑，改默认档无本机证据链）；desktop 更新源触点已单独落地（`electron-builder.yml` publish 指 fork Releases，COMPAT(paseoGoUpdateFeed)）。若未来「其他机器装 desktop」成为常态，再按本条出补丁。
