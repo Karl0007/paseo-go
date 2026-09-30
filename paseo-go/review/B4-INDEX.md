@@ -54,3 +54,6 @@ D1 claude fork-on-send=维持顺延尾卡；D2 identity-colors.ts 第 5 触点=�
 - B4-LANG（语言传播断链查证，RevUI 现场，pre-existing）→ FixB 后派；R4-05 en 帧复验并入其尾项。
 
 - C 批口径扩：R4-06+R4-32 并案「开屏=危险时刻覆盖面收口」——import 徽标跳转走 createChatOpener 全链（构造清单见 agent://B4R4Open 转案），通知 tap 挂 decideOwnershipSendWarning 纯函数门（取消=不 navigate 不 dismiss）。
+
+- R4-01 复审=PASS 销卡（三查全过；.tmp/b4r01-recheck-probe.mts 主链已断实锤）；残余窄竞态=R4-33 转 FixA 补手。
+- FixA 报的 protocol 收集期全灭=Main 现场复跑 739/740 不复现（唯一失败=已知 providers-snapshot 冷 AOT 超时），判 FixA 会话环境瞬态，结案。
