@@ -142,3 +142,10 @@
   2. 挤：缩短文案「活跃 / 归档 N」；
   3. 仍放不下：**纯图标**（进行中=播放/圆点类、归档=箱形，archive 侧带计数徽标）。
      计数 N 三档都保留（C3"隐藏堆可见"理由不变）；档位切换按测得列宽断点（拆卡时实测 MatePad 分栏列宽定值），验收=三档各一帧。
+
+## 勘误与翻案（B4-REGRESS 轮，2026-09-30）
+
+- **F11 翻案**：转场动画**从未在真机证明过**——根栈 `animation:"none"` 自上游 0.9.2 种子即存在；KI-9 当时交付为 partial（e9486592e 自记「no screenrecord on ROM」，04-push-mid 为静态帧）。用户「还是没有动画」= 从未有过，非 merge 回归。修复=c672e8d2c（shell 模式 (detail)+h/[serverId] slide_from_right）。KI-9 归档卡不动，本行为准。
+- **drag-drop.test.ts 旧用例曾钉死 remount bug**：F10 根因=gestureLock 带翻转列表 props（onRefresh 卸载/containerStyle 塌陷）→ 整表重挂 → 行 unmount cleanup 抹掉菜单。旧用例把「重挂」当契约钉；已改钉 keep-mounted 新契约（6ec69b112）。教训入证据契约意识：**测试钉住的现象本身可能是 bug**。
+- **设备 debug 通道历史读数作废**：装机 debug 包曾是 09-28 非 debuggable 内嵌包（从不连 metro），此前「debug 道也失败」类读数全部无效；已换真 debuggable 包。
+- **F5 牵连结论**：SWIPE 卡必须复用「控件常驻+稳定 containerStyle」，任何翻转 DraggableList props 的状态带都=重挂面。
