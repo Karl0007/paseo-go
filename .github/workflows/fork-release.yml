@@ -23,6 +23,11 @@ on:
         description: "Existing v*.*.*-go.* tag to build (e.g. v0.10.2-go.1)"
         required: true
         type: string
+      run_id:
+        description: "Set to an existing successful run id to ONLY assemble its artifacts into the release (skips all build jobs)"
+        required: false
+        default: ""
+        type: string
 
 permissions:
   contents: write
@@ -53,6 +58,7 @@ jobs:
 
   cli:
     needs: meta
+    if: ${{ github.event_name != 'workflow_dispatch' || inputs.run_id == '' }}
     strategy:
       fail-fast: false
       matrix:
@@ -120,6 +126,7 @@ jobs:
 
   apk:
     needs: meta
+    if: ${{ github.event_name != 'workflow_dispatch' || inputs.run_id == '' }}
     name: Shell APK (arm64-v8a)
     runs-on: ubuntu-latest
     timeout-minutes: 90
@@ -206,6 +213,7 @@ jobs:
 
   desktop:
     needs: meta
+    if: ${{ github.event_name != 'workflow_dispatch' || inputs.run_id == '' }}
     strategy:
       fail-fast: false
       matrix:
@@ -296,6 +304,7 @@ jobs:
 
   release:
     needs: [meta, cli, apk, desktop]
+    if: ${{ github.event_name != 'workflow_dispatch' || inputs.run_id == '' }}
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
@@ -364,3 +373,65 @@ jobs:
           shopt -s nullglob
           files=(*)
           gh release upload "$TAG" --repo "$REPO" "${files[@]}" --clobber
+
+  assemble-release:
+    # Bandwidth-redirect entry (Main ruling 2026-09-30): assemble a release from
+    # an existing run's artifacts IN-CLUSTER (local download of ~1.3GB artifacts
+    # over home uplink was the bottleneck; runners fetch them in seconds).
+    # Dispatch with run_id=<successful build run> + tag=<v*.*.*-go.N>; all build
+    # jobs are gated off when run_id is set.
+    if: ${{ github.event_name == 'workflow_dispatch' && inputs.run_id != '' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ env.SOURCE_TAG }}
+
+      - name: Download artifacts from source run
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          RUN_ID: ${{ inputs.run_id }}
+        run: |
+          set -uo pipefail
+          for n in cli-linux-x64 cli-win32-x64 apk-arm64 desktop-windows desktop-linux; do
+            gh run download "$RUN_ID" -n "$n" -D "art/$n" || echo "artifact absent: $n"
+          done
+          find art -type f | sort
+
+      - name: Windows zip manifest check (list-only; never executed)
+        shell: bash
+        run: |
+          set -euo pipefail
+          z="$(ls art/desktop-windows/Paseo-*x64.zip | head -1)"
+          unzip -l "$z" > wz-listing.txt
+          grep -E "Paseo(-Setup)?-|app.asar|app-dist|paseo.cmd" wz-listing.txt | head -12
+          for m in "Paseo.exe" "resources/app.asar" "resources/bin/paseo.cmd" "resources/app-dist" "chrome_100_percent.pak" "LICENSE.electron.txt"; do
+            grep -qi -- "$m" wz-listing.txt || { echo "::error::win zip missing $m"; exit 1; }
+          done
+          echo "WIN-ZIP-MANIFEST-OK $z"
+
+      - name: Upload assets to release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ env.SOURCE_TAG }}
+          REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          cd art
+          shopt -s nullglob
+          files=(*/*)
+          gh release upload "$TAG" "${files[@]}" --repo "$REPO" --clobber
+
+      - name: Rebuild release body (latest-pointer manifest incl. pre-uploaded APK)
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ env.SOURCE_TAG }}
+          REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          gh release download "$TAG" --repo "$REPO" -p "*.sha256" -D art/pre || true
+          gh release view "$TAG" --repo "$REPO" --json assets > assets.json
+          node paseo-go/release/assemble-body.mjs --assets-json assets.json --sha-dir art --out release-body.md --version "${TAG#v}" --tag "$TAG" --repo "$REPO"
+          gh release edit "$TAG" --repo "$REPO" --notes-file release-body.md
+          gh release view "$TAG" --repo "$REPO" --json assets --jq '.assets[].name'
