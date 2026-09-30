@@ -52,3 +52,5 @@ D1 claude fork-on-send=维持顺延尾卡；D2 identity-colors.ts 第 5 触点=�
 ## 追加排队
 
 - B4-LANG（语言传播断链查证，RevUI 现场，pre-existing）→ FixB 后派；R4-05 en 帧复验并入其尾项。
+
+- C 批口径扩：R4-06+R4-32 并案「开屏=危险时刻覆盖面收口」——import 徽标跳转走 createChatOpener 全链（构造清单见 agent://B4R4Open 转案），通知 tap 挂 decideOwnershipSendWarning 纯函数门（取消=不 navigate 不 dismiss）。
