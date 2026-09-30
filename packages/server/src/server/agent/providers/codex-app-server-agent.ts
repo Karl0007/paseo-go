@@ -3430,6 +3430,9 @@ export class CodexAppServerAgentSession implements AgentSession {
   private unpairedCompactionItemCompletions = 0;
   private connectionState: "disconnected" | "history-ready" | "connected" = "disconnected";
   private connectionPromise: Promise<void> | null = null;
+  // Latched from the transport's `exit` listener (via the unexpected-termination
+  // handler): the app-server child is owned by the client, not by this session.
+  private appServerGone = false;
   private closed = false;
   private collaborationModes: Array<{
     name: string;
@@ -3611,6 +3614,7 @@ export class CodexAppServerAgentSession implements AgentSession {
   }
 
   private handleUnexpectedTermination(error: Error): void {
+    this.appServerGone = true;
     this.connectionState = "disconnected";
     const hasActiveRootTurn = this.activeForegroundTurnId !== null || this.currentTurnId !== null;
     this.clearPendingPermissions({ preservePlanApprovals: !hasActiveRootTurn });
@@ -4817,6 +4821,16 @@ export class CodexAppServerAgentSession implements AgentSession {
         asyncQuestions: this.asyncQuestions.serialize(),
       },
     };
+  }
+
+  /**
+   * The codex app-server process. `connectionState === "connected"` is NOT the
+   * answer (it means the initialize handshake completed, and a history-only
+   * session never spawns one), so this reads the death latch the transport sets
+   * from `child.on("exit")` plus the client presence.
+   */
+  isAlive(): boolean {
+    return !this.closed && !this.appServerGone && this.client !== null;
   }
 
   async revertConversation(input: { messageId: string }): Promise<void> {

@@ -1150,6 +1150,8 @@ export class PiRpcAgentSession implements AgentSession {
   private readonly logger: Logger;
   private readonly usagePoller: PiUsagePoller;
   private closed = false;
+  // Set by the runtime's `process_exit` event (same latch shape as omp).
+  private processExited = false;
   private readonly closeController = new AbortController();
   private readonly pendingExtensionHydrations = new Set<Promise<void>>();
   // Pi publishes the terminal before acknowledging abort. Autonomous runs have no
@@ -1420,6 +1422,16 @@ export class PiRpcAgentSession implements AgentSession {
         ...(this.currentModeId ? { modeId: this.currentModeId } : {}),
       },
     };
+  }
+
+  /**
+   * The pi RPC child. Unlike omp/pi's sibling providers pi does NOT hold the
+   * transcript open (measured in paseo-go/RESEARCH-provider-dual-write.md), so
+   * this latch is the only process-level signal the session has; the runtime
+   * publishes `process_exit` synchronously from the child's `exit` listener.
+   */
+  isAlive(): boolean {
+    return !this.closed && !this.processExited;
   }
 
   async interrupt(): Promise<void> {
@@ -2038,6 +2050,7 @@ export class PiRpcAgentSession implements AgentSession {
   }
 
   private handleProcessExit(error: string): void {
+    this.processExited = true;
     this.rejectAllExtensionResults(new Error(error));
     this.interruptingTurn = null;
     if (!this.activeTurnId && !this.activeTurnStarted) {

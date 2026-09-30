@@ -1031,6 +1031,10 @@ class PluginAgentClient implements AgentClient {
   }
 }
 
+// No `isAlive()` on purpose (B4-OWNERSHIP): a plugin session is a bridge into the
+// plugin runtime — it owns no ChildProcess and no pid, and the runtime's own
+// liveness says nothing about this session. Absent method = no evidence, which is
+// exactly what the ownership state machine wants (agent-sdk-types.ts `isAlive`).
 class PluginAgentSession implements AgentSession {
   private readonly listeners = new Set<(event: AgentStreamEvent) => void>();
   private readonly history: AgentStreamEvent[] = [];

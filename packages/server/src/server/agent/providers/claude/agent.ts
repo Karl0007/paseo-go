@@ -2668,6 +2668,18 @@ class ClaudeAgentSession implements AgentSession {
     return this.persistence;
   }
 
+  /**
+   * The Claude Code process this session drives. `handleRuntimeExit` nulls the
+   * handle the moment the child exits and `close()` tree-kills it, so a handle
+   * with no exit code/signal is a direct answer, not an inference. `killed` is
+   * deliberately NOT consulted: it only says a signal was sent, and the process
+   * may still be running (or already reaped) either way.
+   */
+  isAlive(): boolean {
+    const child = this.childProcess;
+    return child !== null && child.exitCode === null && child.signalCode === null;
+  }
+
   async close(): Promise<void> {
     this.logger.trace(
       {

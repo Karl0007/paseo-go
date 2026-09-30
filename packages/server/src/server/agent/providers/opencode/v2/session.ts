@@ -37,6 +37,12 @@ import { messages } from "./history.js";
 import { SessionPermissions } from "./permissions.js";
 import { SessionUsage } from "./usage.js";
 
+// No `isAlive()` on purpose — same ruling as the v1 session
+// (providers/opencode-agent.ts): `V2Connection.exited` is a promise resolved from
+// the shared helper server's `exit`, and `this.exited` is reset on reconnect.
+// Both opencode generations are covered because providers/opencode/runtime-client.ts
+// picks one at runtime by CLI probe; answering from only one would make liveness
+// depend on the installed opencode version.
 export class OpenCodeV2Session implements AgentSession {
   readonly provider = "opencode";
   readonly capabilities = V2_CAPABILITIES;

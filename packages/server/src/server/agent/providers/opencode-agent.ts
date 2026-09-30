@@ -3360,6 +3360,13 @@ interface OpenCodeServerConnection {
   release: () => Promise<void>;
 }
 
+// No `isAlive()` on purpose (B4-OWNERSHIP): this session talks HTTP/SSE to a
+// HELPER SERVER shared by every opencode agent (`refCount` in
+// providers/opencode/server-manager.ts), and `serverExited` is a link-death proxy
+// that a successful reconnect resets. "Helper process alive" does not prove this
+// session's write-ownership, and "link down" does not prove the process died —
+// either answer would corrupt `processAlive`, so the manager keeps its
+// lifecycle inference for opencode.
 class OpenCodeAgentSession implements AgentSession {
   readonly provider = "opencode" as const;
   readonly capabilities = OPENCODE_CAPABILITIES;

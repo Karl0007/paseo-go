@@ -137,6 +137,29 @@ export function ownershipOnRelease(
 }
 
 /**
+ * B4-OWNERSHIP precision: the provider transport answered the liveness question
+ * directly (`AgentSession.isAlive`) instead of the manager inferring it from
+ * "I still hold a session object". A dead process settles through the same R5
+ * release rule, so a pending external observation becomes `external` at the
+ * moment of death rather than at close (which may never come: a crashed child
+ * only ever reaches the manager as `turn_failed`).
+ *
+ * Returns the SAME object when nothing moved, so callers can compare by identity
+ * and skip a broadcast.
+ */
+export function ownershipWithProcessLiveness(
+  state: AgentOwnershipState,
+  processAlive: boolean,
+): AgentOwnershipState {
+  if (state.processAlive === processAlive) {
+    return state;
+  }
+  return processAlive
+    ? withValue({ ...state, processAlive: true })
+    : ownershipOnRelease(state, { transcriptObservable: state.transcriptObservable });
+}
+
+/**
  * R2-lite/R3: the transcript watcher saw bytes change. While paseo still owns the
  * session this only records the pending observation (the live process is the one
  * appending, so its own writes must never escalate — the caller only feeds paseo

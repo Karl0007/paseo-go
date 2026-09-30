@@ -697,6 +697,16 @@ export interface AgentSession {
   ): Promise<AgentPermissionResult | void>;
   describePersistence(): AgentPersistenceHandle | null;
   /**
+   * Direct answer to "is the runtime process behind this session still alive?"
+   * (B4-OWNERSHIP: feeds `AgentOwnershipFacts.processAlive` without going
+   * through the manager's lifecycle inference). Absent means the provider owns
+   * no handle it can answer with — or the handle it owns does not prove
+   * write-ownership of THIS session (opencode's shared helper server) — and the
+   * manager keeps the inferred answer. `false` must mean the process is GONE,
+   * not "between processes": the manager releases session ownership on it.
+   */
+  isAlive?(): boolean;
+  /**
    * Resolve once every foreground turn that predates this call can no longer run or become active.
    * Calling while already idle is a successful no-op. Reject only when foreground ownership is
    * still uncertain.

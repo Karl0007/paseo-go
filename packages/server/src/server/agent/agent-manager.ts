@@ -72,6 +72,7 @@ import {
   ownershipOnExternalChange,
   ownershipOnRelease,
   ownershipWithExternalActivity,
+  ownershipWithProcessLiveness,
   ownershipWithTranscriptVisibility,
   restoreAgentOwnership,
   type AgentOwnershipState,
@@ -4038,6 +4039,36 @@ export class AgentManager {
   }
 
   /**
+   * B4-OWNERSHIP precision: replace the inferred `processAlive` with what the
+   * provider transport itself reports (`AgentSession.isAlive`). Providers with no
+   * handle to answer with — or whose handle does not prove write-ownership of
+   * THIS session (opencode's shared helper server) — omit the method, and the
+   * manager keeps the lifecycle inference untouched.
+   *
+   * Mid-turn the answer is skipped by default: a process serving a turn is alive,
+   * and a deliberate runtime restart inside a turn (claude rebuilds its query,
+   * codex respawns the app-server) would otherwise read as a false death.
+   */
+  private syncProcessLiveness(agent: LiveManagedAgent, options?: { allowMidTurn?: boolean }): void {
+    if (
+      !options?.allowMidTurn &&
+      (agent.lifecycle === "running" || agent.activeTurnId || agent.activeForegroundTurnId)
+    ) {
+      return;
+    }
+    const reported = agent.session.isAlive?.();
+    if (reported === undefined) {
+      return;
+    }
+    const settled = ownershipWithProcessLiveness(agent.ownership, reported);
+    if (settled === agent.ownership) {
+      return;
+    }
+    agent.ownership = settled;
+    this.emitState(agent);
+  }
+
+  /**
    * A live agent whose process is mid-turn is writing the transcript ITSELF, so
    * only a session with no paseo turn in flight (idle / error / initializing,
    * process presumed gone) can attribute fresh bytes to another writer. There the
@@ -4048,6 +4079,12 @@ export class AgentManager {
     if (live.lifecycle === "running" || live.activeTurnId) {
       return;
     }
+    // B4-OWNERSHIP precision: an idle session whose provider process died is no
+    // longer paseo's. Settle that BEFORE judging the observation, or fresh
+    // external bytes are recorded as a PENDING change that can never escalate
+    // (the value stays `paseo`, and `externalLooksActive` is zeroed with it) —
+    // the R4 warning the user needs never arms.
+    this.syncProcessLiveness(live);
     // R4-01 belt (the chain itself is broken at acquire: the watcher detaches
     // and the cursor resets before paseo writes again): a transcript
     // observation must never re-record rows the resident timeline already
@@ -5030,9 +5067,12 @@ export class AgentManager {
     if (!isForegroundEvent && !agent.activeForegroundTurnId) {
       agent.lifecycle = "error";
       // A failed turn is the only evidence the manager gets that the provider
-      // process died (it owns no child handle). Start observing the transcript:
-      // ownership stays `paseo` while the session object is still held, but the
-      // moment it is released the pending observation decides `external`.
+      // process died. Where the transport can answer directly (`isAlive`) settle
+      // ownership now instead of waiting for a close that may never come; where
+      // it cannot, the watcher below keeps the R5 path alive: ownership stays
+      // `paseo` while the session object is held, and the pending observation
+      // decides the moment it is released.
+      this.syncProcessLiveness(agent, { allowMidTurn: true });
       this.trackBackgroundTask(this.observeReleasedTranscript(agent));
     }
     agent.lastError = event.error;

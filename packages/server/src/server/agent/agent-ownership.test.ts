@@ -24,6 +24,7 @@ import {
   ownershipOnExternalChange,
   ownershipOnRelease,
   ownershipWithExternalActivity,
+  ownershipWithProcessLiveness,
   ownershipWithTranscriptVisibility,
   restoreAgentOwnership,
 } from "./agent-ownership.js";
@@ -251,6 +252,65 @@ describe("ownershipWithTranscriptVisibility", () => {
   });
 });
 
+describe("ownershipWithProcessLiveness (provider answers directly)", () => {
+  it("returns the same state when the answer matches what is recorded", () => {
+    const acquired = ownershipOnAcquire(INITIAL_AGENT_OWNERSHIP);
+    expect(ownershipWithProcessLiveness(acquired, true)).toBe(acquired);
+    const released = ownershipOnRelease(acquired, { transcriptObservable: true });
+    expect(ownershipWithProcessLiveness(released, false)).toBe(released);
+  });
+
+  it("settles a pending external observation at the moment of death, not at close", () => {
+    // The R5 release rule, applied by the process report itself: a child that
+    // crashes between turns never reaches `prepareAgentForClosure` on its own,
+    // so without this the value stayed `paseo` and `externalLooksActive` was
+    // zeroed with it (withValue only keeps that flag in `external`).
+    const acquired = ownershipOnAcquire(INITIAL_AGENT_OWNERSHIP);
+    const observed = ownershipWithTranscriptVisibility(
+      ownershipOnExternalChange(acquired),
+      true,
+      120,
+    );
+    expect(observed.value).toBe("paseo");
+
+    const dead = ownershipWithProcessLiveness(observed, false);
+    expect(dead).toMatchObject({
+      value: "external",
+      processAlive: false,
+      transcriptObservable: true,
+      baselineBytes: 120,
+    });
+  });
+
+  it("falls back to none when the process died and nothing external was seen", () => {
+    const acquired = ownershipOnAcquire(INITIAL_AGENT_OWNERSHIP);
+    expect(ownershipWithProcessLiveness(acquired, false).value).toBe("none");
+  });
+
+  it("re-claims the session when a process is behind it again", () => {
+    const acquired = ownershipOnAcquire(INITIAL_AGENT_OWNERSHIP);
+    const dead = ownershipWithProcessLiveness(
+      ownershipOnExternalChange(ownershipWithTranscriptVisibility(acquired, true, 10)),
+      false,
+    );
+    expect(dead.value).toBe("external");
+    expect(ownershipWithProcessLiveness(dead, true).value).toBe("paseo");
+  });
+
+  it("arms the R4 signal only once the settled value is external", () => {
+    const observed = ownershipOnExternalChange(
+      ownershipWithTranscriptVisibility(ownershipOnAcquire(INITIAL_AGENT_OWNERSHIP), true, 10),
+    );
+    expect(observed.value).toBe("paseo");
+    // While paseo holds the session the flag is not a statement about anybody.
+    expect(ownershipWithExternalActivity(observed, true).externalLooksActive).toBe(false);
+
+    const dead = ownershipWithProcessLiveness(observed, false);
+    expect(dead.value).toBe("external");
+    expect(ownershipWithExternalActivity(dead, true).externalLooksActive).toBe(true);
+  });
+});
+
 // ---------------------------------------------------------------------------
 // The same rules through AgentManager: the real projection chain (record → wire),
 // the real transcript funnel (claude's computed project path), and the watcher
@@ -454,37 +514,37 @@ function createCrashableClaudeClient(): { client: AgentClient; crash: () => void
   };
 }
 
-describe("AgentManager transcript byte attribution (R4-01/03/04)", () => {
-  function createHarness(work: string, client?: AgentClient) {
-    const logger = createTestLogger();
-    const storage = new AgentStorage(join(work, "agents"), logger);
-    const manager = new AgentManager({
-      clients: { claude: client ?? createTestAgentClient("claude") },
-      registry: storage,
-      transcriptStatPollIntervalMs: 60 * 60 * 1000,
-      logger,
-    });
-    const configDir = join(work, "claude-config");
-    const previousConfigDir = process.env.CLAUDE_CONFIG_DIR;
-    process.env.CLAUDE_CONFIG_DIR = configDir;
-    const projectDir = claudeProjectDirSync(work, { configDir });
-    mkdirSync(projectDir, { recursive: true });
-    return {
-      storage,
-      manager,
-      projectDir,
-      cleanup: () => {
-        manager.stopTranscriptWatch();
-        if (previousConfigDir === undefined) {
-          delete process.env.CLAUDE_CONFIG_DIR;
-        } else {
-          process.env.CLAUDE_CONFIG_DIR = previousConfigDir;
-        }
-        rmSync(work, { recursive: true, force: true });
-      },
-    };
-  }
+function createHarness(work: string, client?: AgentClient) {
+  const logger = createTestLogger();
+  const storage = new AgentStorage(join(work, "agents"), logger);
+  const manager = new AgentManager({
+    clients: { claude: client ?? createTestAgentClient("claude") },
+    registry: storage,
+    transcriptStatPollIntervalMs: 60 * 60 * 1000,
+    logger,
+  });
+  const configDir = join(work, "claude-config");
+  const previousConfigDir = process.env.CLAUDE_CONFIG_DIR;
+  process.env.CLAUDE_CONFIG_DIR = configDir;
+  const projectDir = claudeProjectDirSync(work, { configDir });
+  mkdirSync(projectDir, { recursive: true });
+  return {
+    storage,
+    manager,
+    projectDir,
+    cleanup: () => {
+      manager.stopTranscriptWatch();
+      if (previousConfigDir === undefined) {
+        delete process.env.CLAUDE_CONFIG_DIR;
+      } else {
+        process.env.CLAUDE_CONFIG_DIR = previousConfigDir;
+      }
+      rmSync(work, { recursive: true, force: true });
+    },
+  };
+}
 
+describe("AgentManager transcript byte attribution (R4-01/03/04)", () => {
   it("does not read a failed turn's own transcript bytes back as an external write (R4-01)", async () => {
     const work = mkdtempSync(join(tmpdir(), "agent-ownership-failed-turn-"));
     const { client, crash } = createCrashableClaudeClient();
@@ -662,6 +722,138 @@ describe("AgentManager transcript byte attribution (R4-01/03/04)", () => {
       );
     } finally {
       harness.cleanup();
+    }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// B4-OWNERSHIP precision: `AgentSession.isAlive` feeds the state machine the
+// process fact directly, instead of the manager inferring it from "I still hold
+// a session object" (which a crashed child never invalidates).
+// ---------------------------------------------------------------------------
+
+function createLivenessClaudeClient(): {
+  client: AgentClient;
+  crash: () => void;
+  setAlive: (alive: boolean) => void;
+} {
+  const inner = createTestAgentClient("claude");
+  let emit: ((event: AgentStreamEvent) => void) | null = null;
+  let alive = true;
+  const wrapSession = (session: AgentSession): AgentSession =>
+    new Proxy(session, {
+      get(target, prop, receiver) {
+        if (prop === "subscribe") {
+          return (callback: (event: AgentStreamEvent) => void) => {
+            emit = callback;
+            return target.subscribe(callback);
+          };
+        }
+        if (prop === "isAlive") {
+          return () => alive;
+        }
+        const value = Reflect.get(target, prop, receiver);
+        return typeof value === "function" ? value.bind(target) : value;
+      },
+    });
+  const client = new Proxy(inner, {
+    get(target, prop) {
+      if (prop === "createSession") {
+        return async (...args: Parameters<AgentClient["createSession"]>) =>
+          wrapSession(await target.createSession(...args));
+      }
+      const value = Reflect.get(target, prop);
+      return typeof value === "function" ? value.bind(target) : value;
+    },
+  });
+  return {
+    client,
+    crash: () => {
+      emit?.({ type: "turn_failed", provider: "claude", error: "provider process died" });
+    },
+    setAlive: (next: boolean) => {
+      alive = next;
+    },
+  };
+}
+
+describe("AgentManager process-liveness reporting (isAlive)", () => {
+  it("settles a dead provider process and lets the foreign write escalate immediately", async () => {
+    const work = mkdtempSync(join(tmpdir(), "agent-ownership-liveness-"));
+    const { client, crash, setAlive } = createLivenessClaudeClient();
+    const harness = createHarness(work, client);
+    let agentId: string | null = null;
+    try {
+      const agent = await harness.manager.createAgent(
+        { provider: "claude", cwd: work },
+        undefined,
+        { workspaceId: undefined },
+      );
+      agentId = agent.id;
+      expect(agent.ownership.value).toBe("paseo");
+      const transcript = join(harness.projectDir, `${agent.persistence?.sessionId ?? ""}.jsonl`);
+      writeFileSync(transcript, claudeLine("user", "from the phone", "u1"));
+
+      // The provider process dies between turns. Pre-fix this was invisible: the
+      // only death evidence the manager got was the failed turn, and it kept
+      // claiming the session until someone closed it.
+      setAlive(false);
+      crash();
+      await harness.manager.flush();
+      expect(harness.manager.getAgent(agent.id)?.ownership.value).toBe("none");
+
+      // The user continues in their own terminal. With the process fact settled,
+      // the watcher's observation escalates NOW (R4's precondition) instead of
+      // staying a pending change behind a `paseo` value.
+      appendFileSync(transcript, claudeLine("assistant", "continued at the desk", "a2"));
+      await harness.manager.sweepTranscriptWatch();
+      await harness.manager.flush();
+
+      expect(harness.manager.getAgent(agent.id)?.ownership.value).toBe("external");
+      expect((await harness.storage.get(agent.id))?.ownership).toBe("external");
+    } finally {
+      if (agentId) await harness.manager.closeAgent(agentId).catch(() => undefined);
+      harness.cleanup();
+    }
+  });
+
+  it("keeps the claim when the process answers alive, and keeps the inference when it cannot answer", async () => {
+    const liveWork = mkdtempSync(join(tmpdir(), "agent-ownership-liveness-alive-"));
+    const live = createLivenessClaudeClient();
+    const liveHarness = createHarness(liveWork, live.client);
+    const blindWork = mkdtempSync(join(tmpdir(), "agent-ownership-liveness-blind-"));
+    const blind = createCrashableClaudeClient();
+    const blindHarness = createHarness(blindWork, blind.client);
+    let liveAgentId: string | null = null;
+    let blindAgentId: string | null = null;
+    try {
+      const liveAgent = await liveHarness.manager.createAgent(
+        { provider: "claude", cwd: liveWork },
+        undefined,
+        { workspaceId: undefined },
+      );
+      liveAgentId = liveAgent.id;
+      // An ordinary turn error with the process still serving: no release.
+      live.crash();
+      await liveHarness.manager.flush();
+      expect(liveHarness.manager.getAgent(liveAgent.id)?.ownership.value).toBe("paseo");
+
+      // opencode / plugin posture: no `isAlive` = no evidence, inference stands.
+      const blindAgent = await blindHarness.manager.createAgent(
+        { provider: "claude", cwd: blindWork },
+        undefined,
+        { workspaceId: undefined },
+      );
+      blindAgentId = blindAgent.id;
+      blind.crash();
+      await blindHarness.manager.flush();
+      expect(blindHarness.manager.getAgent(blindAgent.id)?.ownership.value).toBe("paseo");
+    } finally {
+      if (liveAgentId) await liveHarness.manager.closeAgent(liveAgentId).catch(() => undefined);
+      if (blindAgentId) await blindHarness.manager.closeAgent(blindAgentId).catch(() => undefined);
+      // Reverse order: each harness restores the CLAUDE_CONFIG_DIR it found.
+      blindHarness.cleanup();
+      liveHarness.cleanup();
     }
   });
 });

@@ -464,6 +464,10 @@ export function wrapSessionProvider(provider: AgentProvider, inner: AgentSession
     getPendingPermissions: () => inner.getPendingPermissions(),
     respondToPermission: (requestId, response) => inner.respondToPermission(requestId, response),
     describePersistence: () => mapPersistenceHandle(provider, inner.describePersistence()),
+    // Capability forwarding is hand-written here: a new optional AgentSession
+    // member that is not listed is silently lost for every custom/derived
+    // provider. `undefined` when the inner session cannot answer = no evidence.
+    isAlive: inner.isAlive?.bind(inner),
     interrupt: () => inner.interrupt(),
     close: () => inner.close(),
     listCommands: inner.listCommands?.bind(inner),

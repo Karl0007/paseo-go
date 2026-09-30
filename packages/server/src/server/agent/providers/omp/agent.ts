@@ -906,6 +906,9 @@ export class OmpAgentSession implements AgentSession {
   private readonly noTurnScheduler: OmpNoTurnScheduler;
   private readonly usagePoller: OmpUsagePoller;
   private closed = false;
+  // Set by the runtime's `process_exit` event. NOT the `live` field below, which
+  // tracks whether this session has driven a turn itself (replay suppression).
+  private processExited = false;
   private live: boolean;
   private readonly emittedUserMessageIds = new Set<string>();
 
@@ -1149,6 +1152,16 @@ export class OmpAgentSession implements AgentSession {
         ...(this.currentModeId ? { modeId: this.currentModeId } : {}),
       },
     };
+  }
+
+  /**
+   * The omp RPC child. `JsonlRpcProcess` owns the handle three layers down, but
+   * its `exit` listener publishes `process_exit` synchronously into this session
+   * (`handleProcessExit`), so the latch is the same fact without opening the
+   * transport's private field.
+   */
+  isAlive(): boolean {
+    return !this.closed && !this.processExited;
   }
 
   async interrupt(): Promise<void> {
@@ -1809,6 +1822,7 @@ export class OmpAgentSession implements AgentSession {
   }
 
   private handleProcessExit(error: string): void {
+    this.processExited = true;
     this.usagePoller.stopTurn();
     this.terminalizeActiveWork();
     this.subagentIndex.clear(this.runtimeSession);

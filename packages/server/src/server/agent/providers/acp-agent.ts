@@ -2402,6 +2402,18 @@ export class ACPAgentSession implements AgentSession, ACPClient {
     };
   }
 
+  /**
+   * The ACP child (cursor / copilot / kiro / kimi / trae …, all built on this
+   * session). Its `exit` handler only synthesizes cancellations and fails the
+   * turn — it deliberately keeps the handle for diagnostics — so liveness reads
+   * the exit markers instead of handle presence. Before the first spawn there is
+   * no process, which is the honest `false`: nothing of paseo's holds the session.
+   */
+  isAlive(): boolean {
+    const child = this.child;
+    return child !== null && child.exitCode === null && child.signalCode === null;
+  }
+
   async interrupt(): Promise<void> {
     if (!this.connection || !this.sessionId) {
       return;
