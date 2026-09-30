@@ -8,6 +8,7 @@ import { createTestLogger } from "../../test-utils/test-logger.js";
 import { AgentStorage } from "./agent-storage.js";
 import { buildConfigOverrides, buildSessionConfig } from "../persistence-hooks.js";
 import type { ManagedAgent } from "./agent-manager.js";
+import { INITIAL_AGENT_OWNERSHIP } from "./agent-ownership.js";
 import type {
   AgentPermissionRequest,
   AgentProvider,
@@ -128,6 +129,7 @@ function createManagedAgent(overrides: ManagedAgentOverrides = {}): ManagedAgent
     historyPrimed: overrides.historyPrimed ?? true,
     lastUserMessageAt: overrides.lastUserMessageAt ?? core.now,
     lastMessage: overrides.lastMessage ?? { preview: null, role: null, seq: null, messageId: null },
+    ownership: INITIAL_AGENT_OWNERSHIP,
     lastUsage: overrides.lastUsage,
     lastError: overrides.lastError,
   };

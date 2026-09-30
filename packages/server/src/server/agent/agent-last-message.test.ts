@@ -23,6 +23,7 @@ import {
   normalizeLastMessagePreview,
   type AgentLastMessageTrack,
 } from "./agent-last-message.js";
+import { INITIAL_AGENT_OWNERSHIP } from "./agent-ownership.js";
 import { AgentSnapshotPayloadSchema } from "../messages.js";
 import type { AgentSession, AgentTimelineItem } from "./agent-sdk-types.js";
 import type { AgentTimelineRow } from "./agent-timeline-store-types.js";
@@ -258,6 +259,7 @@ function createProjectionManagedAgent(
       ...EMPTY_AGENT_LAST_MESSAGE,
       ...overrides.lastMessage,
     },
+    ownership: overrides.ownership ?? INITIAL_AGENT_OWNERSHIP,
     activeTurnId: null,
     activeTurnStartedAt: null,
     foregroundTurnWaiters: new Set(),

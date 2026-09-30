@@ -84,6 +84,10 @@ export function toStoredAgentRecord(
     lastUserMessageAt: agent.lastUserMessageAt ? agent.lastUserMessageAt.toISOString() : null,
     lastMessagePreview: agent.lastMessage.preview,
     lastMessageRole: agent.lastMessage.role,
+    // COMPAT(agentOwnership): Paseo Go B4-OWNERSHIP — persisted ownership axis.
+    ownership: agent.ownership.value,
+    externalLooksActive: agent.ownership.externalLooksActive,
+    ownershipBaselineBytes: agent.ownership.baselineBytes,
     title: options?.title ?? null,
     labels: agent.labels,
     lastStatus: agent.lifecycle,
@@ -128,6 +132,14 @@ export function toAgentPayload(
     lastUserMessageAt: agent.lastUserMessageAt ? agent.lastUserMessageAt.toISOString() : null,
     lastMessagePreview: agent.lastMessage.preview,
     lastMessageRole: agent.lastMessage.role,
+    // COMPAT(agentOwnership): Paseo Go B4-OWNERSHIP. `paseo` while a daemon-owned
+    // provider process holds the session, `external` once a released session's
+    // transcript was written elsewhere, `none` otherwise. Always emitted; old
+    // daemons omit it and clients read the absence as `none`.
+    ownership: agent.ownership.value,
+    // Companion of `ownership`: in the `external` state, does the external writer
+    // still look alive (R4 warning / "external, running" badge)? `false` elsewhere.
+    externalLooksActive: agent.ownership.externalLooksActive,
     status: agent.lifecycle,
     activeTurn: agent.activeTurnId
       ? {
@@ -199,6 +211,20 @@ function buildStoredPersistenceHandle(
   return toAgentPersistenceHandle(validProviders, record.persistence);
 }
 
+/**
+ * COMPAT(agentOwnership): Paseo Go B4-OWNERSHIP. Records written before the field
+ * existed have no recorded observation, and `none` is the conservative answer (no
+ * external evidence) — the same value the watcher re-derives on first attach.
+ */
+function projectStoredOwnership(
+  record: StoredAgentRecord,
+): Pick<AgentSnapshotPayload, "ownership" | "externalLooksActive"> {
+  return {
+    ownership: record.ownership ?? "none",
+    externalLooksActive: record.externalLooksActive ?? false,
+  };
+}
+
 export function buildStoredAgentPayload(
   record: StoredAgentRecord,
   validProviders: Iterable<AgentProvider>,
@@ -244,6 +270,7 @@ export function buildStoredAgentPayload(
     capabilities: defaultCapabilities,
     lastMessagePreview: record.lastMessagePreview ?? null,
     lastMessageRole: record.lastMessageRole ?? null,
+    ...projectStoredOwnership(record),
     currentModeId: record.lastModeId ?? null,
     availableModes: [],
     pendingPermissions: [],
@@ -276,6 +303,8 @@ export function toAgentListItemPayload(agent: AgentSnapshotPayload): AgentListIt
     requiresAttention: agent.requiresAttention ?? false,
     lastMessagePreview: agent.lastMessagePreview ?? null,
     lastMessageRole: agent.lastMessageRole ?? null,
+    ownership: agent.ownership ?? "none",
+    externalLooksActive: agent.externalLooksActive ?? false,
     attentionReason: agent.attentionReason ?? null,
     attentionTimestamp: agent.attentionTimestamp ?? null,
     labels: agent.labels,

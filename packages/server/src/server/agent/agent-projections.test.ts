@@ -8,6 +8,7 @@ import {
   toStoredAgentRecord,
   type ManagedAgent,
 } from "./agent-projections.js";
+import { INITIAL_AGENT_OWNERSHIP } from "./agent-ownership.js";
 import type { AgentSession } from "./agent-sdk-types.js";
 import type {
   AgentFeature,
@@ -95,6 +96,7 @@ function createManagedAgent(overrides: ManagedAgentOverrides = {}): ManagedAgent
     historyPrimed: true,
     lastUserMessageAt: now,
     lastMessage: { preview: null, role: null, seq: null, messageId: null },
+    ownership: INITIAL_AGENT_OWNERSHIP,
     attention: { requiresAttention: false },
   };
 

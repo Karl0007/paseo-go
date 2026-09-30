@@ -81,6 +81,17 @@ const STORED_AGENT_SCHEMA = z.object({
   // after a daemon restart; resume paths re-derive from the timeline tail.
   lastMessagePreview: z.string().nullable().optional(),
   lastMessageRole: z.enum(["user", "assistant", "other"]).nullable().optional(),
+  // COMPAT(agentOwnership): added 2026-09-30 (Paseo Go B4-OWNERSHIP, batch-4 F8).
+  // The ownership state machine's persisted half, same posture as the preview pair
+  // above: optional so pre-build records still parse, and because zod strips
+  // unknown keys the values would otherwise vanish on every load. Provider
+  // processes are daemon children, so a restart always means "the process is gone";
+  // `ownership` plus `ownershipBaselineBytes` is what lets the transcript watcher
+  // tell "the file grew while we were down" (→ external) from "nothing happened"
+  // (→ none) instead of losing the distinction.
+  ownership: z.enum(["paseo", "external", "none"]).nullable().optional(),
+  externalLooksActive: z.boolean().nullable().optional(),
+  ownershipBaselineBytes: z.number().int().nonnegative().nullable().optional(),
   owner: AgentOwnerSchema.optional(),
 });
 

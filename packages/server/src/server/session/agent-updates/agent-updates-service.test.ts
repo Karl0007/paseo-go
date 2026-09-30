@@ -8,6 +8,7 @@ import type {
 } from "../../messages.js";
 import type { ManagedAgent } from "../../agent/agent-manager.js";
 import type { StoredAgentRecord } from "../../agent/agent-storage.js";
+import { INITIAL_AGENT_OWNERSHIP } from "../../agent/agent-ownership.js";
 import { DirectorySyncService } from "../../directory-sync/index.js";
 
 // No mocks — every dependency is an injected in-memory fake. The agent payloads
@@ -200,6 +201,7 @@ function buildHarness() {
           seq: null,
           messageId: null,
         },
+        ownership: INITIAL_AGENT_OWNERSHIP,
         pendingPermissions: new Map(),
         attention: {
           requiresAttention: payload.requiresAttention ?? false,

@@ -8,6 +8,7 @@ import type {
   ManagedImportableProviderSession,
 } from "./agent-manager.js";
 import { AgentStorage, type StoredAgentRecord } from "./agent-storage.js";
+import { INITIAL_AGENT_OWNERSHIP } from "./agent-ownership.js";
 import type { FetchRecentProviderSessionsRequestMessage } from "@getpaseo/protocol/messages";
 import {
   IMPORTED_PROVIDER_SESSION_LABEL,
@@ -106,6 +107,7 @@ function makeManagedAgent(args: {
     historyPrimed: true,
     lastUserMessageAt: null,
     lastMessage: { preview: null, role: null, seq: null, messageId: null },
+    ownership: INITIAL_AGENT_OWNERSHIP,
     attention: { requiresAttention: false },
     foregroundTurnWaiters: new Set(),
     finalizedForegroundTurnIds: new Set(),

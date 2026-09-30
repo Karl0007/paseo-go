@@ -440,6 +440,8 @@ export interface PaseoDaemonConfig {
   downloadTokenTtlMs?: number;
   agentProviderSettings?: AgentProviderRuntimeSettingsMap;
   providerCatalogRefreshTimeoutMs?: number;
+  /** Transcript watcher stat-sweep backstop; default applied by the consumer. */
+  transcriptStatPollIntervalMs?: number;
   metadataGeneration?: {
     providers?: Array<{
       provider: string;
@@ -938,6 +940,7 @@ export async function createPaseoDaemon(
     resolvePaseoToolPolicy: (provider) =>
       resolvePaseoToolPolicy(provider, daemonConfigStore.get().providers),
     logger,
+    transcriptStatPollIntervalMs: config.transcriptStatPollIntervalMs,
   });
   const syncPluginProviders = () => {
     agentManager.updateProviderRegistry(
@@ -1769,6 +1772,9 @@ export async function createPaseoDaemon(
       // model loading doesn't block the server from accepting connections.
       speechService.start();
       scriptHealthMonitor.start();
+      // Ownership observation (batch-4 F8): the first sweep discovers agents released
+      // by a previous daemon run. prepareForShutdown() stops it before the close sweep.
+      agentManager.startTranscriptWatch();
     } catch (error) {
       localCredential = null;
       await deleteLocalCredential(config.paseoHome);

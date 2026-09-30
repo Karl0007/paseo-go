@@ -28,6 +28,7 @@ import type { AgentSnapshotPayload, SessionOutboundMessage } from "@getpaseo/pro
 import type { TerminalManager } from "../terminal/terminal-manager.js";
 import { createTerminalManager } from "../terminal/terminal-manager.js";
 import { AgentManager, type AgentManagerEvent, type ManagedAgent } from "./agent/agent-manager.js";
+import { INITIAL_AGENT_OWNERSHIP } from "./agent/agent-ownership.js";
 import type { ProviderSubagentDescriptor } from "./agent/provider-subagents/store.js";
 import { AgentStorage, type StoredAgentRecord } from "./agent/agent-storage.js";
 import type {
@@ -350,6 +351,7 @@ function makeManagedAgent(input: {
     historyPrimed: true,
     lastUserMessageAt: null,
     lastMessage: { preview: null, role: null, seq: null, messageId: null },
+    ownership: INITIAL_AGENT_OWNERSHIP,
     attention: {
       requiresAttention: false,
       attentionReason: null,

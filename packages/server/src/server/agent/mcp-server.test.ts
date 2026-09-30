@@ -13,6 +13,7 @@ import { createTestLogger } from "../../test-utils/test-logger.js";
 import { createAgentMcpServer } from "./mcp-server.js";
 import { AgentManager, type ManagedAgent } from "./agent-manager.js";
 import { AgentStorage, type StoredAgentRecord } from "./agent-storage.js";
+import { INITIAL_AGENT_OWNERSHIP } from "./agent-ownership.js";
 import { createTestAgentClients } from "../test-utils/fake-agent-client.js";
 import type {
   AgentClient,
@@ -513,6 +514,7 @@ function createManagedAgent(overrides: Partial<ManagedAgent> = {}): ManagedAgent
     updatedAt: now,
     lastUserMessageAt: null,
     lastMessage: { preview: null, role: null, seq: null, messageId: null },
+    ownership: INITIAL_AGENT_OWNERSHIP,
     lifecycle: "idle",
     capabilities: {
       supportsStreaming: false,
@@ -5690,6 +5692,8 @@ describe("agent snapshot MCP serialization", () => {
           lastUserMessageAt: null,
           lastMessagePreview: null,
           lastMessageRole: null,
+          ownership: "none",
+          externalLooksActive: false,
           archivedAt: null,
           requiresAttention: false,
           attentionReason: null,
@@ -6057,6 +6061,8 @@ describe("agent snapshot MCP serialization", () => {
       lastUserMessageAt: null,
       lastMessagePreview: null,
       lastMessageRole: null,
+      ownership: "none",
+      externalLooksActive: false,
       archivedAt: now,
       requiresAttention: false,
       attentionReason: null,

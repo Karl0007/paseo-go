@@ -865,6 +865,24 @@ export const AgentSnapshotPayloadSchema = z.object({
   // message-like timeline items that are neither user nor assistant (errors,
   // notifications).
   lastMessageRole: z.enum(["user", "assistant", "other"]).nullable().optional(),
+  // COMPAT(agentOwnership): added 2026-09-30 (Paseo Go B4-OWNERSHIP, batch-4 F8
+  // ruling 13). Pure-add session-ownership axis, orthogonal to the
+  // `paseo.imported-provider-session` birth label: `paseo` = a daemon-owned provider
+  // process holds the session; `external` = that process is gone and the transcript
+  // was written by someone else (watcher-confirmed); `none` = process gone with no
+  // observed external write, or the provider exposes no transcript the daemon can
+  // observe (never escalated to `external`). Daemons older than the Paseo Go build
+  // omit the field, so it stays optional while clients support those hosts —
+  // consumers MUST read `undefined`/`null` as `none`. Official clients ignore
+  // unknown fields.
+  ownership: z.enum(["paseo", "external", "none"]).nullable().optional(),
+  // COMPAT(agentOwnership): the companion of `ownership` — in the `external` state,
+  // does the external writer still look alive (provider-specific probe: claude live
+  // session registry, codex/omp exclusive-open, pi mtime freshness)? Drives the R4
+  // "may be running in an external terminal" send warning and the "external, running"
+  // badge variant. Meaningless outside `external`; current daemons always send
+  // `false` there. Consumers MUST read `undefined`/`null` as `false`.
+  externalLooksActive: z.boolean().nullable().optional(),
 });
 
 export type AgentSnapshotPayload = z.infer<typeof AgentSnapshotPayloadSchema>;
@@ -893,6 +911,12 @@ export const AgentListItemPayloadSchema = z.object({
   // carried through toAgentListItemPayload for MCP list_agents consumers.
   lastMessagePreview: z.string().nullable().optional(),
   lastMessageRole: z.enum(["user", "assistant", "other"]).nullable().optional(),
+  // COMPAT(agentOwnership): added 2026-09-30 (Paseo Go B4-OWNERSHIP). Same pure-add
+  // pair and semantics as AgentSnapshotPayloadSchema.ownership /
+  // .externalLooksActive; carried through toAgentListItemPayload for MCP
+  // list_agents consumers.
+  ownership: z.enum(["paseo", "external", "none"]).nullable().optional(),
+  externalLooksActive: z.boolean().nullable().optional(),
 });
 
 export type AgentListItemPayload = z.infer<typeof AgentListItemPayloadSchema>;

@@ -185,6 +185,12 @@ Single file, validated with `PersistedConfigSchema`.
 `{ mode: "all" }`. Installed state is not persisted; the daemon derives it from its three managed
 skill directories and keeps config plus filesystem convergence behind one serialized owner.
 
+`agents.transcriptStatPollIntervalMs` sets how often the daemon re-stats the transcripts of
+sessions it is no longer running, as the backstop to their live file watchers (which can miss
+events on network drives). It only changes how quickly a session continued in another terminal
+is marked `external` and its new messages appear in the agent list; the default is 60000 ms, and
+the value is capped at the Node timer limit.
+
 `paseo reload` reads and validates this file once inside the daemon. That snapshot drives resolution,
 classification, application, and reload bookkeeping. `DaemonConfigStore` owns applying runtime-safe
 fields and their removal/default semantics; session handlers and the CLI only relay the structured

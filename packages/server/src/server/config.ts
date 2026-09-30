@@ -648,6 +648,9 @@ export function resolveConfigFromPersisted(
     voiceLlmModel: voiceLlm.model,
     agentProviderSettings: extractAgentProviderSettings(providerOverrides),
     providerCatalogRefreshTimeoutMs: persisted.agents?.catalogRefreshTimeoutMs,
+    // COMPAT(agentOwnership): Paseo Go B4-OWNERSHIP. Default (60s) is applied by
+    // the consumer, matching the downloadTokenTtlMs precedent.
+    transcriptStatPollIntervalMs: persisted.agents?.transcriptStatPollIntervalMs,
     metadataGeneration: persisted.agents?.metadataGeneration,
     providerOverrides,
     log: resolveLogConfigFromEnv(env, persisted),

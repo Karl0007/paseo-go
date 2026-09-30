@@ -19,6 +19,7 @@ import { OWNER_PERMISSIONS } from "./authorization/index.js";
 import { DirectorySyncService } from "./directory-sync/index.js";
 import { createProviderSnapshotManagerStub } from "./test-utils/session-stubs.js";
 import type { AgentTimelineRow } from "./agent/agent-manager.js";
+import { INITIAL_AGENT_OWNERSHIP } from "./agent/agent-ownership.js";
 import { InMemoryAgentTimelineStore } from "./agent/agent-timeline-store.js";
 import type { AgentTimelineFetchOptions } from "./agent/agent-timeline-store-types.js";
 import { handleCreatePaseoWorktreeRequest } from "./worktree-session.js";
@@ -78,6 +79,7 @@ class InMemoryAgentManager {
       createdAt: new Date("2026-05-02T00:00:00.000Z"),
       updatedAt: new Date("2026-05-02T00:00:00.000Z"),
       lastMessage: { preview: null, role: null, seq: null, messageId: null },
+      ownership: INITIAL_AGENT_OWNERSHIP,
       lastUserMessageAt: null,
       lifecycle: "idle",
       capabilities: {

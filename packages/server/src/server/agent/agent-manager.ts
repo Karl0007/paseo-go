@@ -65,6 +65,22 @@ import {
   EMPTY_AGENT_LAST_MESSAGE,
   type AgentLastMessageTrack,
 } from "./agent-last-message.js";
+import {
+  INITIAL_AGENT_OWNERSHIP,
+  ownershipOnAcquire,
+  ownershipOnExternalChange,
+  ownershipOnRelease,
+  ownershipWithExternalActivity,
+  ownershipWithTranscriptVisibility,
+  restoreAgentOwnership,
+  type AgentOwnershipState,
+} from "./agent-ownership.js";
+import {
+  DEFAULT_TRANSCRIPT_STAT_POLL_INTERVAL_MS,
+  TranscriptWatchService,
+  type TranscriptChange,
+  type TranscriptWatchCandidate,
+} from "./transcript-watch-service.js";
 import type { AgentOwner } from "./agent-owner.js";
 import {
   InMemoryAgentTimelineStore,
@@ -347,6 +363,13 @@ export interface AgentManagerOptions {
     agentId: string;
     expectedTurnId: string;
   }) => Promise<void>;
+  /**
+   * COMPAT(agentOwnership): stat-poll fallback interval for the transcript watcher
+   * (config `agents.transcriptStatPollIntervalMs`, default 60s). The watcher's
+   * `fs.watch` fast path needs no configuration; this is the network-mount and
+   * lost-event backstop.
+   */
+  transcriptStatPollIntervalMs?: number;
   logger: Logger;
 }
 
@@ -438,6 +461,11 @@ interface ManagedAgentBase {
   // Maintained at the recordTimeline choke point, re-derived from the timeline
   // tail on register/hydrate, and persisted on the stored record.
   lastMessage: AgentLastMessageTrack;
+  // COMPAT(agentOwnership): Paseo Go B4-OWNERSHIP (batch-4 F8). The ownership axis
+  // (paseo | external | none) plus the evidence behind it. Acquired at register /
+  // on a submitted prompt, released when the provider process is let go, escalated
+  // by the transcript watcher; see agent-ownership.ts for the rules.
+  ownership: AgentOwnershipState;
   activeTurnId: string | null;
   activeTurnStartedAt: Date | null;
   lastUsage?: AgentUsage;
@@ -753,6 +781,7 @@ export class AgentManager {
   private readonly reloadedSessionCloses = new WeakMap<AgentSession, Promise<void>>();
   private readonly lifecycleMutationTails = new Map<string, Promise<void>>();
   private readonly agentStreamCoalescer: AgentStreamCoalescer;
+  private readonly transcriptWatch: TranscriptWatchService;
   private mcpBaseUrl: string | null;
   private readonly mcpAuthToken: string | null;
   private paseoToolsEnabled = true;
@@ -798,9 +827,25 @@ export class AgentManager {
         this.notifyForegroundTurnWaiters(agentId, event);
       },
     });
+    this.transcriptWatch = this.createTranscriptWatch(options);
     this.updateProviderRegistry({
       providerDefinitions: options.providerDefinitions ?? {},
       clients: options.clients ?? {},
+    });
+  }
+
+  /**
+   * COMPAT(agentOwnership): the transcript watcher is constructed here but only
+   * started by `startTranscriptWatch()` (daemon start) so a manager built in a test
+   * or a not-yet-listening daemon never touches the filesystem on its own.
+   */
+  private createTranscriptWatch(options: AgentManagerOptions): TranscriptWatchService {
+    return new TranscriptWatchService({
+      logger: this.logger,
+      statPollIntervalMs:
+        options.transcriptStatPollIntervalMs ?? DEFAULT_TRANSCRIPT_STAT_POLL_INTERVAL_MS,
+      listCandidates: () => this.listTranscriptWatchCandidates(),
+      onChange: (change) => this.applyTranscriptChange(change),
     });
   }
 
@@ -865,6 +910,9 @@ export class AgentManager {
 
   prepareForShutdown(): void {
     this.acceptingAgentRegistrations = false;
+    // Stop tailing before the close sweep: a watcher firing after the snapshot
+    // flush would write a timeline row nobody persists.
+    this.transcriptWatch.stop();
   }
 
   setPaseoToolsEnabled(enabled: boolean): void {
@@ -1733,6 +1781,10 @@ export class AgentManager {
       persistError = error;
     }
     this.emitClosedAgent(closedAgent, { persist: false });
+    // R5: paseo let go of the provider process. Start tailing the transcript so
+    // the next external writer is observed, and settle the ownership value.
+    // Tracked so a shutdown drains the observation instead of racing it.
+    this.trackBackgroundTask(this.observeReleasedTranscript(closedAgent));
     this.logger.trace(
       {
         agentId,
@@ -1925,6 +1977,15 @@ export class AgentManager {
           seq: null,
           messageId: null,
         },
+        // COMPAT(agentOwnership): a stored record carries the last observed
+        // ownership. Restoring it re-derives through the same rule as a process
+        // exit — provider processes are daemon children, so a record projected
+        // here has no live writer behind it.
+        ownership: restoreAgentOwnership({
+          ownership: record.ownership,
+          externalLooksActive: record.externalLooksActive,
+          baselineBytes: record.ownershipBaselineBytes,
+        }),
         lastUsage: undefined,
         lastError: record.lastError ?? undefined,
         attention,
@@ -3533,6 +3594,9 @@ export class AgentManager {
 
       this.assertAcceptingAgentRegistrations();
       this.agents.set(resolvedAgentId, managed);
+      // R5: resume/create/reload succeeded — paseo owns the session again and the
+      // watcher must stop reading bytes its own provider process is writing.
+      this.transcriptWatch.detach(resolvedAgentId);
       registered = true;
       // Initialize previousStatus to track transitions
       this.previousStatuses.set(resolvedAgentId, managed.lifecycle);
@@ -3741,6 +3805,9 @@ export class AgentManager {
       historyPrimed: options?.historyPrimed ?? durableTimelineHasRows,
       lastUserMessageAt: options?.lastUserMessageAt ?? null,
       lastMessage,
+      // R5 accounting: reaching here means a provider process is live behind this
+      // session (fresh create, resume, or reload), so ownership is acquired.
+      ownership: ownershipOnAcquire(INITIAL_AGENT_OWNERSHIP),
       lastUsage: options?.lastUsage,
       lastError: options?.lastError,
       attention: resolveInitialAttention(options?.attention),
@@ -3783,6 +3850,13 @@ export class AgentManager {
     return {
       ...agent,
       lifecycle: "closed",
+      // R5: the provider process is gone. Settle synchronously against what is
+      // already known (a first close has no transcript observation yet → `none`);
+      // `observeReleasedTranscript` then upgrades observability once the watcher
+      // has resolved the provider's transcript path.
+      ownership: ownershipOnRelease(agent.ownership, {
+        transcriptObservable: agent.ownership.transcriptObservable,
+      }),
       session: null,
       activeForegroundTurnId: null,
       activeTurnId: null,
@@ -3798,6 +3872,7 @@ export class AgentManager {
   }
 
   private discardRetainedAgentState(agentId: string): void {
+    this.transcriptWatch.detach(agentId);
     this.timelineStore.delete(agentId);
     this.paseoToolPolicies.delete(agentId);
     for (const event of this.providerSubagents.deleteParent(agentId)) {
@@ -3807,6 +3882,284 @@ export class AgentManager {
 
   private emitClosedAgent(agent: ManagedAgentClosed, options?: { persist?: boolean }): void {
     this.emitState(agent, options);
+  }
+
+  // -------------------------------------------------------------------------
+  // COMPAT(agentOwnership): Paseo Go B4-OWNERSHIP (batch-4 F8). Ownership
+  // accounting + transcript-watcher plumbing. The rules live in agent-ownership.ts;
+  // the transcript knowledge lives in provider-transcript.ts.
+  // -------------------------------------------------------------------------
+
+  /**
+   * Begin the periodic transcript sweep (daemon startup). The first tick also does
+   * discovery: after a restart every stored agent is released, and some of them may
+   * have been continued in a terminal while the daemon was down.
+   */
+  startTranscriptWatch(): void {
+    this.transcriptWatch.start();
+  }
+
+  stopTranscriptWatch(): void {
+    this.transcriptWatch.stop();
+  }
+
+  /**
+   * Start observing a transcript paseo is no longer writing. Called after a close
+   * (the provider process was let go) and after a failed turn — the manager owns no
+   * child handle, so a failed turn is only evidence worth watching, not evidence to
+   * release on; ownership flips when the session itself goes away.
+   */
+  private async observeReleasedTranscript(agent: ManagedAgent): Promise<void> {
+    if (agent.internal || !agent.persistence || this.transcriptWatch.isStopped) {
+      // Stopped means shutting down: a null attach there is not evidence that the
+      // provider has no transcript, and downgrading would erase a real `external`.
+      return;
+    }
+    try {
+      const attached = await this.transcriptWatch.attach({
+        agentId: agent.id,
+        provider: agent.provider,
+        persistence: agent.persistence,
+        cwd: agent.cwd,
+        baselineBytes: agent.ownership.baselineBytes,
+        updatedAtMs: agent.updatedAt.getTime(),
+      });
+      const next = ownershipWithTranscriptVisibility(
+        agent.ownership,
+        attached !== null,
+        attached?.baselineBytes ?? agent.ownership.baselineBytes,
+      );
+      if (
+        next.value === agent.ownership.value &&
+        next.transcriptObservable === agent.ownership.transcriptObservable &&
+        next.baselineBytes === agent.ownership.baselineBytes
+      ) {
+        return;
+      }
+      await this.commitOwnership(agent.id, next);
+    } catch (error) {
+      this.logger.warn(
+        { err: error, agentId: agent.id, provider: agent.provider },
+        "Failed to observe released transcript",
+      );
+    }
+  }
+
+  /**
+   * Run one transcript sweep immediately instead of waiting for the interval
+   * (refresh-on-demand and deterministic tests; the interval calls the same path).
+   */
+  sweepTranscriptWatch(): Promise<void> {
+    return this.transcriptWatch.sweep();
+  }
+
+  /**
+   * Sweep candidates: released (or process-failed), non-internal, non-archived
+   * agents with a persistence handle. Live agents are excluded because their own
+   * provider process is the writer — watching it would read paseo's bytes back as
+   * somebody else's.
+   */
+  private async listTranscriptWatchCandidates(): Promise<TranscriptWatchCandidate[]> {
+    if (!this.registry) {
+      return [];
+    }
+    const records = await this.registry.list();
+    const candidates: TranscriptWatchCandidate[] = [];
+    for (const record of records) {
+      if (record.internal || record.archivedAt || !record.persistence) {
+        continue;
+      }
+      const live = this.agents.get(record.id);
+      if (live && live.lifecycle !== "error") {
+        continue;
+      }
+      const nativeHandle =
+        typeof record.persistence.nativeHandle === "string"
+          ? record.persistence.nativeHandle
+          : undefined;
+      const parsedUpdatedAt = Date.parse(record.updatedAt);
+      candidates.push({
+        agentId: record.id,
+        provider: record.provider,
+        persistence: {
+          provider: record.persistence.provider,
+          sessionId: record.persistence.sessionId,
+          ...(nativeHandle ? { nativeHandle } : {}),
+          ...(record.persistence.metadata ? { metadata: record.persistence.metadata } : {}),
+        },
+        cwd: record.cwd,
+        baselineBytes: live
+          ? live.ownership.baselineBytes
+          : (record.ownershipBaselineBytes ?? null),
+        // An unparseable date must not silently disable observation forever.
+        updatedAtMs: Number.isNaN(parsedUpdatedAt) ? Date.now() : parsedUpdatedAt,
+      });
+    }
+    return candidates;
+  }
+
+  /**
+   * R3 + R2-lite: the watcher's only way into agent state.
+   *
+   * While paseo still holds the session the observation stays PENDING (the value
+   * remains `paseo`; R5's release rule decides), because the live provider process
+   * is a legitimate writer and the user's terminal may be interleaving. Once the
+   * session is released the same observation IS the `external` evidence: the
+   * appended rows are folded into the resident timeline (when one survives) and
+   * into the persisted chat preview, so the list refreshes without a manual reload.
+   */
+  private async applyTranscriptChange(change: TranscriptChange): Promise<void> {
+    const live = this.agents.get(change.agentId);
+    if (live) {
+      this.applyLiveTranscriptChange(live, change);
+      return;
+    }
+    const registry = this.registry;
+    if (!registry) {
+      return;
+    }
+    const record = await registry.get(change.agentId);
+    if (!record) {
+      return;
+    }
+    await this.applyStoredTranscriptChange(record, change);
+  }
+
+  /**
+   * A live agent whose process is mid-turn is writing the transcript ITSELF, so
+   * only a session with no paseo turn in flight (idle / error / initializing,
+   * process presumed gone) can attribute fresh bytes to another writer. There the
+   * observation stays PENDING: the value remains `paseo` and R5's release rule
+   * decides, because the user's terminal may legitimately be interleaving.
+   */
+  private applyLiveTranscriptChange(live: LiveManagedAgent, change: TranscriptChange): void {
+    if (live.lifecycle === "running" || live.activeTurnId) {
+      return;
+    }
+    for (const item of change.items) {
+      this.recordTimeline(live.id, item);
+    }
+    const pending = ownershipWithExternalActivity(
+      ownershipOnExternalChange(live.ownership, { baselineBytes: change.baselineBytes }),
+      change.externalLooksActive,
+    );
+    const settled = change.items.length === 0 && pending.value === live.ownership.value;
+    live.ownership = pending;
+    if (!settled) {
+      this.emitState(live);
+    }
+  }
+
+  /**
+   * A released session: the same observation IS the `external` evidence.
+   */
+  private async applyStoredTranscriptChange(
+    record: StoredAgentRecord,
+    change: TranscriptChange,
+  ): Promise<void> {
+    // The in-memory timeline usually still exists for an agent closed during this
+    // daemon's life; after a restart it does not, and reopening the conversation
+    // replays the transcript anyway — the preview update below is what the list
+    // needs meanwhile, so the rows are still folded in either way.
+    const resident = this.timelineStore.has(change.agentId);
+    let track: AgentLastMessageTrack = {
+      preview: record.lastMessagePreview ?? null,
+      role: record.lastMessageRole ?? null,
+      seq: null,
+      messageId: null,
+    };
+    for (const [index, item] of change.items.entries()) {
+      const row = resident ? this.recordTimeline(change.agentId, item) : null;
+      const advanced = advanceAgentLastMessage(track, item, row?.seq ?? index + 1);
+      if (advanced) {
+        track = advanced;
+      }
+      if (row) {
+        this.dispatchStream(
+          change.agentId,
+          { type: "timeline", item, provider: record.provider },
+          {
+            seq: row.seq,
+            epoch: this.timelineStore.getEpoch(change.agentId),
+            timestamp: row.timestamp,
+          },
+        );
+      }
+    }
+    const escalated = ownershipWithExternalActivity(
+      ownershipOnExternalChange(
+        restoreAgentOwnership({
+          ownership: record.ownership,
+          externalLooksActive: record.externalLooksActive,
+          baselineBytes: record.ownershipBaselineBytes,
+        }),
+        { baselineBytes: change.baselineBytes },
+      ),
+      change.externalLooksActive,
+    );
+    // Nothing observable changed (a torn line, a control row, a repeated sweep over
+    // the same bytes): writing anyway would bump `updatedAt` and float the row to
+    // the top of the time-ordered chat list on every poll.
+    if (
+      change.items.length === 0 &&
+      record.ownership === escalated.value &&
+      record.externalLooksActive === escalated.externalLooksActive &&
+      record.ownershipBaselineBytes === escalated.baselineBytes
+    ) {
+      return;
+    }
+    const nextRecord: StoredAgentRecord = {
+      ...record,
+      ownership: escalated.value,
+      externalLooksActive: escalated.externalLooksActive,
+      ownershipBaselineBytes: escalated.baselineBytes,
+      lastMessagePreview: track.preview,
+      lastMessageRole: track.role,
+      // A newly synced message IS activity: the chat list sorts by this, and the
+      // row must float up exactly like a live turn would.
+      updatedAt: this.nextStoredUpdatedAt(record),
+    };
+    await this.requireRegistry().upsert(nextRecord);
+    if (!nextRecord.internal) {
+      this.dispatchStoredAgentState(nextRecord);
+    }
+  }
+
+  /**
+   * Persist + broadcast an ownership transition. Ownership is deliberately NOT a
+   * reason to bump `updatedAt`: it is a derived observation, and the chat list is
+   * time-ordered (batch-4 F4 ruling 5) — a poll must never reorder rows.
+   */
+  private async commitOwnership(agentId: string, ownership: AgentOwnershipState): Promise<void> {
+    const live = this.agents.get(agentId);
+    if (live) {
+      live.ownership = ownership;
+      this.emitState(live);
+      return;
+    }
+    const registry = this.registry;
+    if (!registry) {
+      return;
+    }
+    const record = await registry.get(agentId);
+    if (
+      !record ||
+      (record.ownership === ownership.value &&
+        record.externalLooksActive === ownership.externalLooksActive &&
+        record.ownershipBaselineBytes === ownership.baselineBytes)
+    ) {
+      return;
+    }
+    const nextRecord: StoredAgentRecord = {
+      ...record,
+      ownership: ownership.value,
+      externalLooksActive: ownership.externalLooksActive,
+      ownershipBaselineBytes: ownership.baselineBytes,
+    };
+    await registry.upsert(nextRecord);
+    if (!nextRecord.internal) {
+      this.dispatchStoredAgentState(nextRecord);
+    }
   }
   private subscribeToSession(agent: ActiveManagedAgent): void {
     if (agent.unsubscribeSession) {
@@ -4574,6 +4927,11 @@ export class AgentManager {
     if (terminalDisposition === "stale") return;
     if (!isForegroundEvent && !agent.activeForegroundTurnId) {
       agent.lifecycle = "error";
+      // A failed turn is the only evidence the manager gets that the provider
+      // process died (it owns no child handle). Start observing the transcript:
+      // ownership stays `paseo` while the session object is still held, but the
+      // moment it is released the pending observation decides `external`.
+      this.trackBackgroundTask(this.observeReleasedTranscript(agent));
     }
     agent.lastError = event.error;
     await this.appendSystemErrorTimelineMessage(
@@ -4657,6 +5015,9 @@ export class AgentManager {
       this.openActiveTurn(agent, eventTurnId, new Date());
     }
     agent.lifecycle = "running";
+    // Paseo's process is appending to the transcript again: any earlier external
+    // observation predates this run and must not escalate on the next release.
+    agent.ownership = ownershipOnAcquire(agent.ownership);
     this.emitState(agent);
   }
 
@@ -4761,6 +5122,7 @@ export class AgentManager {
       clientMessageId,
       ...(options?.messageId ? { messageId: options.messageId } : {}),
     };
+    agent.ownership = ownershipOnAcquire(agent.ownership);
     this.recordAndDispatchTimelineItem(agent.id, item, agent.provider, options?.turnId, options);
   }
 

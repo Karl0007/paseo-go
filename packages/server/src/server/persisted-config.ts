@@ -313,6 +313,11 @@ export const PersistedConfigSchema = z
       .object({
         providers: z.preprocess(normalizeAgentProviders, ProviderOverridesSchema).optional(),
         catalogRefreshTimeoutMs: z.number().int().positive().max(2_147_483_647).optional(),
+        // COMPAT(agentOwnership): Paseo Go B4-OWNERSHIP (batch-4 F8, R3). Backstop
+        // interval for the transcript watcher's stat(mtime+size) sweep, used when
+        // fs.watch events are lost or never arrive (network mounts, silent Windows
+        // watcher death). Capped at the Node timer ceiling, same as the timeout above.
+        transcriptStatPollIntervalMs: z.number().int().positive().max(2_147_483_647).optional(),
         metadataGeneration: AgentMetadataGenerationSchema.optional(),
         skills: z.object({ selection: AgentSkillSelectionSchema.optional() }).strict().optional(),
       })

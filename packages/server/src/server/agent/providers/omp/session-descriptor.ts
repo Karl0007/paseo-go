@@ -8,6 +8,7 @@ import type {
   ListImportableSessionsOptions,
 } from "../../agent-sdk-types.js";
 import type { ProviderRuntimeSettings } from "../../provider-launch-config.js";
+import { LOOKS_ACTIVE_MTIME_WINDOW_MS } from "../../provider-transcript.js";
 import {
   createRealpathAwarePathMatcher,
   looksLikeDefiniteWindowsPath,
@@ -26,10 +27,11 @@ const FULL_SCAN_LINE_LIMIT = 2_000;
 // remains recursive rather than applying Pi's historical parent-only depth cap.
 const IMPORT_CANDIDATE_OVERSCAN = 40;
 const IMPORT_CANDIDATE_MIN = 400;
-// Freshness heuristic, not a liveness proof. Imported sessions are plain jsonl
-// transcripts owned by another process; the daemon has no watcher and no probe,
-// so a recently touched mtime is the strongest available "possibly active" cue.
-const LOOKS_ACTIVE_MTIME_WINDOW_MS = 5 * 60 * 1000;
+// Freshness heuristic, not a liveness proof, and the only cue available HERE: an
+// import candidate is a transcript paseo does not manage, so the ownership watcher
+// (agent/transcript-watch-service.ts) is not attached to it and a recently touched
+// mtime is the strongest available "possibly active" signal. Managed agents get the
+// exact provider probes from agent/transcript-activity-probe.ts instead.
 
 interface OmpSessionDescriptorOptions extends ListImportableSessionsOptions {
   sessionDir?: string;
