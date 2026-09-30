@@ -1,0 +1,344 @@
+# Paseo Go fork release pipeline (paseo-go M2; paseo-go/BUILD.md pipeline chapter).
+#
+# Fork-owned file — NOT an upstream touchpoint (new file; upstream workflows are
+# untouched). Runs in the PUBLIC mirror repo (Karl0007/paseo-go): tag `v*.*.*-go.*`
+# here, built from the mirrored tree. Upstream release workflows whose `v*`
+# triggers collide with our tags are disabled at the repo level (gh api), never
+# edited — see BUILD.md for the disable list.
+#
+# Products (mac intentionally absent — no Apple credentials this cycle):
+#   - CLI npm tarball per platform (fully vendored; `npm i -g <url>.tgz`)
+#   - shell APK (app.paseo.shell, arm64-v8a, RN-template debug keystore)
+#   - desktop Windows zip + NSIS (unsigned), desktop Linux deb/tar.gz/AppImage
+#   - release body = latest-pointer asset manifest with sha256 for every file
+name: Fork Release (paseo-go)
+
+on:
+  push:
+    tags:
+      - "v*.*.*-go.*"
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Existing v*.*.*-go.* tag to build (e.g. v0.10.2-go.1)"
+        required: true
+        type: string
+
+permissions:
+  contents: write
+
+concurrency:
+  group: fork-release-${{ github.event_name == 'workflow_dispatch' && github.event.inputs.tag || github.ref_name }}
+  cancel-in-progress: false
+
+env:
+  SOURCE_TAG: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.tag || github.ref_name }}
+  # upstream commit this fork line is built on (关于页 stamp; BUILD.md seam note)
+  PASEO_GO_UPSTREAM_SHA: "919c737c"
+
+jobs:
+  meta:
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.v.outputs.version }}
+    steps:
+      - id: v
+        run: |
+          set -euo pipefail
+          case "${SOURCE_TAG}" in
+            v*.*.*-go.*) ;;
+            *) echo "::error::SOURCE_TAG must match v*.*.*-go.* (got ${SOURCE_TAG})"; exit 1 ;;
+          esac
+          echo "version=${SOURCE_TAG#v}" >> "$GITHUB_OUTPUT"
+
+  cli:
+    needs: meta
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: ubuntu-latest
+            key: linux-x64
+          - runner: windows-latest
+            key: win32-x64
+    name: CLI tarball (${{ matrix.key }})
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ env.SOURCE_TAG }}
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: "npm"
+          cache-dependency-path: package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build vendored CLI tarball
+        run: node paseo-go/release/pack-cli-bundle.mjs --version "${{ needs.meta.outputs.version }}" --out dist-cli
+
+      - name: Stage asset (platform-suffixed name + sha256)
+        shell: bash
+        run: |
+          set -euo pipefail
+          src="$(ls dist-cli/*.tgz | head -1)"
+          out="dist-cli/getpaseo-cli-${{ needs.meta.outputs.version }}-${{ matrix.key }}.tgz"
+          [ "$src" = "$out" ] || mv "$src" "$out"
+          (cd dist-cli && sha256sum "$(basename "$out")" > "$(basename "$out").sha256")
+          cat "dist-cli/$(basename "$out").sha256"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: cli-${{ matrix.key }}
+          path: dist-cli/*
+          retention-days: 7
+
+  apk:
+    needs: meta
+    name: Shell APK (arm64-v8a)
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    env:
+      PASEO_GO: "1"
+      EXPO_PUBLIC_PASEO_GO_SHELL: "1"
+      EXPO_PUBLIC_PASEO_GO_UPSTREAM: ${{ env.PASEO_GO_UPSTREAM_SHA }}
+      ENTRY_FILE: packages/app/index.ts
+      NODE_OPTIONS: --max-old-space-size=8192
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ env.SOURCE_TAG }}
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: "npm"
+          cache-dependency-path: package-lock.json
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "21"
+
+      - name: Guard Android SDK licenses (runner image ships SDK; AGP auto-installs missing components)
+        run: yes | sdkmanager --licenses > /dev/null
+
+      - name: Install JS dependencies
+        run: npm ci
+
+      - name: Build app workspace deps
+        run: npm run build:app-deps
+
+      - name: Gradle input stub (ENTRY_FILE side effect; BUILD.md pitfall 1)
+        run: |
+          set -euo pipefail
+          mkdir -p packages/app/packages/app
+          cat > packages/app/packages/app/index.ts <<'STUB'
+          // Gradle input stub for release builds (paseo-go/BUILD.md §3.5, C13).
+          // With ENTRY_FILE=packages/app/index.ts set in the build environment,
+          // @react-native/gradle-plugin resolves react.entryFile to THIS path for its
+          // input validation, while `expo export:embed` receives the workspace-relative
+          // path and bundles the REAL entry (packages/app/index.ts) from the metro
+          // server root. Metro never loads this file; the re-export keeps it honest.
+          // oxlint-disable-next-line import/no-unassigned-import
+          import "../../index";
+          STUB
+
+      - name: Expo prebuild (production shell variant)
+        working-directory: packages/app
+        run: npx expo prebuild --platform android --clean --non-interactive
+
+      - name: "Assert shell variant (pitfall 6: applicationId must be app.paseo.shell)"
+        shell: bash
+        run: |
+          set -euo pipefail
+          grep -q "applicationId 'app.paseo.shell'" packages/app/android/app/build.gradle \
+            || { echo "::error::applicationId drifted (expected app.paseo.shell)"; grep -n applicationId packages/app/android/app/build.gradle; exit 1; }
+
+      - name: Restore signing keystore (RN-template debug keystore; BUILD.md custody note)
+        env:
+          KS_B64: ${{ secrets.PASEO_DEBUG_KEYSTORE }}
+        run: |
+          set -euo pipefail
+          [ -n "${KS_B64:-}" ] || { echo "::error::secret PASEO_DEBUG_KEYSTORE not set on this repo"; exit 1; }
+          printf '%s' "$KS_B64" | base64 -d > packages/app/android/app/debug.keystore
+          sha256sum packages/app/android/app/debug.keystore
+
+      - name: Assemble release APK
+        working-directory: packages/app/android
+        run: ./gradlew :app:assembleRelease --no-daemon --console=plain -PreactNativeArchitectures=arm64-v8a -Dorg.gradle.jvmargs=-Xmx6g
+
+      - name: Stage asset + sha256
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p dist-apk
+          cp packages/app/android/app/build/outputs/apk/release/app-release.apk "dist-apk/paseo-go-shell-${{ needs.meta.outputs.version }}-arm64-v8a.apk"
+          (cd dist-apk && a="$(ls *.apk)" && sha256sum "$a" > "$a.sha256")
+          cat dist-apk/*.sha256
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: apk-arm64
+          path: dist-apk/*
+          retention-days: 7
+
+  desktop:
+    needs: meta
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: windows-latest
+            key: windows
+            build_flags: --win --x64
+          - runner: ubuntu-latest
+            key: linux
+            build_flags: --linux --x64
+    name: Desktop (${{ matrix.key }})
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 90
+    env:
+      EP_GH_IGNORE_TIME: "true"
+      PASEO_DESKTOP_SMOKE: "1"
+      PASEO_DESKTOP_SMOKE_ARTIFACT_DIR: ${{ runner.temp }}/desktop-smoke
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ env.SOURCE_TAG }}
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: "npm"
+          cache-dependency-path: package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Install Linux smoke display
+        if: matrix.key == 'linux'
+        run: sudo apt-get update && sudo apt-get install -y xvfb xauth rpm
+
+      - name: Stamp desktop package version from tag
+        shell: bash
+        run: |
+          node -e '
+            const fs = require("node:fs");
+            const p = "packages/desktop/package.json";
+            const pkg = JSON.parse(fs.readFileSync(p, "utf8"));
+            pkg.version = process.argv[1];
+            fs.writeFileSync(p, JSON.stringify(pkg, null, 2) + "\n");
+          ' "${{ needs.meta.outputs.version }}"
+
+      - name: Build desktop (unsigned; update feed pointed at THIS repo)
+        shell: bash
+        run: |
+          set -euo pipefail
+          npm run build:desktop -- --publish never ${{ matrix.build_flags }} \
+            "-c.publish.owner=${{ github.repository_owner }}" \
+            "-c.publish.repo=${{ github.event.repository.name }}"
+
+      - name: Upload packaged smoke diagnostics
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: fork-desktop-smoke-${{ matrix.key }}
+          path: ${{ runner.temp }}/desktop-smoke
+          if-no-files-found: ignore
+          retention-days: 7
+
+      - name: Stage assets + sha256
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p "$GITHUB_WORKSPACE/dist-desktop"
+          cd packages/desktop/release
+          cp Paseo*.exe Paseo*.zip Paseo*.deb Paseo*.rpm Paseo*.tar.gz Paseo*.AppImage Paseo*.blockmap latest*.yml "$GITHUB_WORKSPACE/dist-desktop/" 2>/dev/null || true
+          cd "$GITHUB_WORKSPACE/dist-desktop"
+          ls -la
+          for f in *; do [ "$f" = SHA256SUMS.txt ] || sha256sum "$f"; done > SHA256SUMS.txt
+          cat SHA256SUMS.txt
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: desktop-${{ matrix.key }}
+          path: dist-desktop/*
+          retention-days: 7
+
+  release:
+    needs: [meta, cli, apk, desktop]
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: "{cli-*,apk-*,desktop-*}"
+          path: assets
+          merge-multiple: true
+
+      - name: Compose release body (latest-pointer manifest)
+        env:
+          VERSION: ${{ needs.meta.outputs.version }}
+          TAG: ${{ env.SOURCE_TAG }}
+          REPO: ${{ github.repository }}
+          OWNER: ${{ github.repository_owner }}
+        run: |
+          set -euo pipefail
+          owner_lc="$(printf '%s' "$OWNER" | tr '[:upper:]' '[:lower:]')"
+          base="https://github.com/${REPO}/releases/download/${TAG}"
+          {
+            echo "# Paseo Go ${VERSION}"
+            echo
+            echo "**产物直链清单（latest pointer — 本 release 即最新成品包）**"
+            echo
+            echo "| 产物 | 安装/使用 | sha256 |"
+            echo "|---|---|---|"
+            for f in assets/getpaseo-cli-*-linux-x64.tgz assets/getpaseo-cli-*-win32-x64.tgz assets/paseo-go-shell-*-arm64-v8a.apk; do
+              [ -e "$f" ] || continue
+              n="$(basename "$f")"
+              s="$(awk '{print $1}' "assets/${n}.sha256")"
+              case "$n" in
+                *.tgz) how="\`npm i -g ${base}/${n}\`" ;;
+                *.apk) how="adb install -r \`$n\` (arm64)" ;;
+                *) how="—" ;;
+              esac
+              echo "| $n | $how | \`$s\` |"
+            done
+            for f in assets/Paseo-*; do
+              case "$f" in *.yml|*.sha256|*.blockmap) continue;; esac
+              [ -e "$f" ] || continue
+              n="$(basename "$f")"
+              echo "| $n | 桌面安装包（未签名） | \`$(awk -v n="$n" '$2==n {print $1}' assets/SHA256SUMS.txt)\` |"
+            done
+            echo
+            echo "## 说明"
+            echo
+            echo "- macOS 产物：本轮不出（无 Apple 公证凭据）。"
+            echo "- Windows/Linux 桌面产物未签名（上游本就不签 win/linux；SmartScreen/包管理器警告预期内）。"
+            echo "- APK 签名 = React Native 模板 debug keystore（与既往 go 构建升级兼容；正式 keystore 待办见 BUILD.md）。"
+            echo "- CLI tarball 为全量 vendored 平台包：安装不访问 registry、不跑编译脚本。"
+            echo "- Docker（上游 Docker workflow 同 tag 触发）：\`ghcr.io/${owner_lc}/paseo:${VERSION}\`。"
+          } > release-body.md
+          cat release-body.md
+
+      - name: Create / update release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ env.SOURCE_TAG }}
+          REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          if ! gh release view "$TAG" --repo "$REPO" >/dev/null 2>&1; then
+            gh release create "$TAG" --repo "$REPO" --title "Paseo Go $TAG" --prerelease --notes-file release-body.md
+          else
+            gh release edit "$TAG" --repo "$REPO" --title "Paseo Go $TAG" --prerelease --notes-file release-body.md
+          fi
+          cd assets
+          shopt -s nullglob
+          files=(*)
+          gh release upload "$TAG" --repo "$REPO" "${files[@]}" --clobber
