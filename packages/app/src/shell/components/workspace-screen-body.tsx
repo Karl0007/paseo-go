@@ -55,6 +55,7 @@ import { WorkspaceFavoriteRow } from "@/shell/components/workspace-favorite-row"
 import { WorkspaceCommandRow } from "@/shell/components/workspace-command-row";
 import { createChatOpener } from "@/shell/chats/open-agent";
 import { chatLastEventAtFromAgent } from "@/shell/chats/derive";
+import { OWNERSHIP_OPEN_DIALOG_KEYS, OWNERSHIP_SEND_BODY_KEY } from "@/shell/chats/ownership";
 import { isImportedProviderSession } from "@getpaseo/protocol/agent-labels";
 import { confirmDialog } from "@/utils/confirm-dialog";
 import { usePaseoGoForkAckStore } from "@/shell/stores/forkAck";
@@ -314,6 +315,16 @@ export function WorkspaceScreenBody({ selectedAgentKey = null }: ShellScreenBody
           }),
         forkAcknowledged: (key) => usePaseoGoForkAckStore.getState().ackedKeys.includes(key),
         acknowledgeFork: (key) => usePaseoGoForkAckStore.getState().ack(key),
+        // B4-R4OPEN (裁定 18): the L3 row shares the 对话 tab's opener verbatim —
+        // external·运行中 → graded confirm before the open (平板分栏 选中即开屏
+        // rides this same chain). Same copy as the send guard.
+        confirmOwnership: (decision) =>
+          confirmDialog({
+            title: t(OWNERSHIP_OPEN_DIALOG_KEYS.title),
+            message: t(OWNERSHIP_SEND_BODY_KEY[decision]),
+            confirmLabel: t(OWNERSHIP_OPEN_DIALOG_KEYS.confirm),
+            cancelLabel: t(OWNERSHIP_OPEN_DIALOG_KEYS.cancel),
+          }),
         section: "workspace",
       }),
     [markRead, t],
@@ -575,6 +586,9 @@ export function WorkspaceScreenBody({ selectedAgentKey = null }: ShellScreenBody
         workspaceId: session.agent.workspaceId,
         lastEventAt: session.lastEventAt,
         imported: isImportedProviderSession(session.agent),
+        ownership: session.agent.ownership,
+        externalLooksActive: session.agent.externalLooksActive,
+        provider: session.agent.provider,
       });
     },
     [opener],

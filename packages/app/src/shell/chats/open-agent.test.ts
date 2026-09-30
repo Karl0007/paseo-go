@@ -6,6 +6,8 @@
 // navigateToAgent's job; the opener is judged on "called exactly once, with the
 // target's ids". C24 adds the fork guard: an imported chat's first open awaits the
 // injected confirmation BEFORE any stamp or navigation; confirming acks once.
+// B4-R4OPEN (裁定 18) adds the ownership gate in front of it: an external·运行中
+// row confirms with the SAME graded table before anything is stamped or navigated.
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { isChatUnread } from "./derive";
 import { createChatOpener, type ChatOpenTarget, type ChatOpenerDeps } from "./open-agent";
@@ -20,6 +22,7 @@ function harness(latestHostEvent = HOST_EVENT) {
   const navigateToAgent = vi.fn();
   const lastEventAtOf = vi.fn(() => latestHostEvent);
   const confirmFork = vi.fn(async () => true);
+  const confirmOwnership = vi.fn(async (_decision: "warn" | "warnWeak") => true);
   const acked = new Set<string>();
   const acknowledgeFork = vi.fn((key: string) => {
     acked.add(key);
@@ -30,6 +33,7 @@ function harness(latestHostEvent = HOST_EVENT) {
     navigateToAgent,
     lastEventAtOf,
     confirmFork,
+    confirmOwnership,
     forkAcknowledged,
     acknowledgeFork,
     section: "chats",
@@ -40,6 +44,7 @@ function harness(latestHostEvent = HOST_EVENT) {
     navigateToAgent,
     lastEventAtOf,
     confirmFork,
+    confirmOwnership,
     acked,
   };
 }
@@ -51,6 +56,11 @@ const target: ChatOpenTarget = {
   workspaceId: "ws-7",
   lastEventAt: HOST_EVENT,
   imported: false,
+  // A plain paseo-owned row: the R4 gate passes synchronously (the pre-R4OPEN
+  // fixtures all exercise the unchanged path).
+  ownership: "paseo",
+  externalLooksActive: false,
+  provider: "claude",
 };
 
 // The ledger is module-global (like the section bus); every test starts clean.
@@ -98,6 +108,7 @@ describe("createChatOpener", () => {
       confirmFork: async () => true,
       forkAcknowledged: () => false,
       acknowledgeFork: () => {},
+      confirmOwnership: async () => true,
       section: "chats",
     });
     await opener.open(target);
@@ -123,6 +134,7 @@ describe("createChatOpener", () => {
       confirmFork: async () => true,
       forkAcknowledged: () => false,
       acknowledgeFork: () => {},
+      confirmOwnership: async () => true,
       section: "chats",
     });
     await opener.open(target);
@@ -154,6 +166,7 @@ describe("createChatOpener", () => {
       confirmFork: async () => true,
       forkAcknowledged: () => false,
       acknowledgeFork: () => {},
+      confirmOwnership: async () => true,
       section: "chats",
     });
     const other: ChatOpenTarget = { ...target, key: "srv-1:agent-2", agentId: "agent-2" };
@@ -210,6 +223,7 @@ describe("createChatOpener", () => {
       confirmFork: async () => true,
       forkAcknowledged: () => false,
       acknowledgeFork: () => {},
+      confirmOwnership: async () => true,
       section: "chats",
     });
     await opener.open(target);
@@ -289,6 +303,7 @@ describe("C24 fork guard (imported chats)", () => {
         }),
       forkAcknowledged: () => false,
       acknowledgeFork: () => {},
+      confirmOwnership: async () => true,
       section: "chats",
     });
     const opening = opener.open(importedTarget);
@@ -327,6 +342,7 @@ describe("C24 fork guard (imported chats)", () => {
       },
       forkAcknowledged: () => false,
       acknowledgeFork: () => {},
+      confirmOwnership: async () => true,
       section: "chats",
     });
     await opener.open(importedTarget); // target.lastEventAt = HOST_EVENT (press snapshot)
@@ -347,6 +363,7 @@ describe("C24 fork guard (imported chats)", () => {
       },
       forkAcknowledged: () => false,
       acknowledgeFork: () => {},
+      confirmOwnership: async () => true,
       section: "chats",
     });
     await opener.open(importedTarget);
@@ -359,5 +376,78 @@ describe("C24 fork guard (imported chats)", () => {
     await opener.open(target);
     expect(markRead).toHaveBeenCalledWith(target.key, HOST_EVENT);
     expect(lastEventAtOf).not.toHaveBeenCalled();
+  });
+});
+
+// B4-R4OPEN (裁定 18): the R4 check moved to the OPEN moment — the session
+// screen's official resume is the concurrent-spawn risk. The gate reuses the
+// send guard's graded table (ownership.ts), so this suite pins the WIRING:
+// when it asks, what decision it passes, and that a cancel opens nothing.
+describe("B4-R4OPEN pre-open ownership guard", () => {
+  const liveTarget: ChatOpenTarget = {
+    ...target,
+    ownership: "external",
+    externalLooksActive: true,
+    provider: "claude",
+  };
+
+  it("asks 仍要打开 before stamp/navigation; a cancel opens nothing", async () => {
+    const { opener, markRead, navigateToAgent, confirmOwnership } = harness();
+    confirmOwnership.mockResolvedValue(false);
+    await opener.open(liveTarget);
+    expect(confirmOwnership).toHaveBeenCalledTimes(1);
+    expect(confirmOwnership).toHaveBeenCalledWith("warn");
+    expect(markRead).not.toHaveBeenCalled();
+    expect(navigateToAgent).not.toHaveBeenCalled();
+  });
+
+  it("confirming opens as usual and re-reads the watermark (R2-10 rule)", async () => {
+    let directoryEvent = HOST_EVENT;
+    const markRead = vi.fn();
+    const navigateToAgent = vi.fn();
+    const opener = createChatOpener({
+      markRead,
+      navigateToAgent,
+      lastEventAtOf: () => directoryEvent,
+      confirmFork: async () => true,
+      forkAcknowledged: () => false,
+      acknowledgeFork: () => {},
+      confirmOwnership: async () => {
+        directoryEvent = HOST_EVENT + 9_000; // activity during the dialog
+        return true;
+      },
+      section: "chats",
+    });
+    await opener.open(liveTarget);
+    expect(markRead).toHaveBeenCalledWith(liveTarget.key, HOST_EVENT + 9_000);
+    expect(navigateToAgent).toHaveBeenCalledTimes(1);
+  });
+
+  it("grades with the SAME table: codex warnWeak; opencode and dead-external pass", async () => {
+    const { opener, confirmOwnership, navigateToAgent } = harness();
+    await opener.open({ ...liveTarget, provider: "codex" });
+    expect(confirmOwnership).toHaveBeenCalledWith("warnWeak");
+    await opener.open({ ...liveTarget, provider: "opencode" });
+    await opener.open({ ...liveTarget, externalLooksActive: false });
+    expect(confirmOwnership).toHaveBeenCalledTimes(1); // neither variant asks
+    expect(navigateToAgent).toHaveBeenCalledTimes(3); // all three opened
+  });
+
+  it("a pre-go.7 row (undefined facts pair) keeps the unchanged synchronous path", async () => {
+    const { opener, confirmOwnership, navigateToAgent, lastEventAtOf } = harness();
+    await opener.open({ ...target, ownership: undefined, externalLooksActive: undefined });
+    expect(confirmOwnership).not.toHaveBeenCalled();
+    expect(navigateToAgent).toHaveBeenCalledTimes(1);
+    // No gate suspended the open → the directory is never touched (F4 path).
+    expect(lastEventAtOf).not.toHaveBeenCalled();
+  });
+
+  it("runs BEFORE the fork gate: a cancelled check never burns the fork ack", async () => {
+    const { opener, confirmFork, confirmOwnership, acked } = harness();
+    confirmOwnership.mockResolvedValue(false);
+    await opener.open({ ...liveTarget, imported: true });
+    expect(confirmOwnership).toHaveBeenCalledTimes(1);
+    expect(confirmFork).not.toHaveBeenCalled();
+    expect(acked.size).toBe(0);
   });
 });

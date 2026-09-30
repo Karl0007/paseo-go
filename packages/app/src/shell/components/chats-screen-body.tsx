@@ -75,6 +75,7 @@ import {
   type ChatSectionKind,
 } from "@/shell/chats/derive";
 import { createChatOpener } from "@/shell/chats/open-agent";
+import { OWNERSHIP_OPEN_DIALOG_KEYS, OWNERSHIP_SEND_BODY_KEY } from "@/shell/chats/ownership";
 import { chatRefreshGateProps, decidePinDrop, dispatchPinDrop } from "@/shell/chats/drag-drop";
 import {
   FILTER_SWIPE_PAGE_ARCHIVED,
@@ -310,6 +311,16 @@ export function ChatsScreenBody({ selectedAgentKey = null }: ShellScreenBodyProp
           }),
         forkAcknowledged: (key) => usePaseoGoForkAckStore.getState().ackedKeys.includes(key),
         acknowledgeFork: (key) => usePaseoGoForkAckStore.getState().ack(key),
+        // B4-R4OPEN (裁定 18): external·运行中 row → graded confirm BEFORE the open
+        // (the resume-on-open IS the concurrent-spawn moment). Same copy as the
+        // send guard; 取消 leaves the row on the list untouched.
+        confirmOwnership: (decision) =>
+          confirmDialog({
+            title: t(OWNERSHIP_OPEN_DIALOG_KEYS.title),
+            message: t(OWNERSHIP_SEND_BODY_KEY[decision]),
+            confirmLabel: t(OWNERSHIP_OPEN_DIALOG_KEYS.confirm),
+            cancelLabel: t(OWNERSHIP_OPEN_DIALOG_KEYS.cancel),
+          }),
         section: "chats",
       }),
     [markRead, t],
@@ -323,6 +334,9 @@ export function ChatsScreenBody({ selectedAgentKey = null }: ShellScreenBodyProp
         workspaceId: agent.agent.workspaceId,
         lastEventAt: chatLastEventAt(agent),
         imported: isImportedProviderSession(agent.agent),
+        ownership: agent.agent.ownership,
+        externalLooksActive: agent.agent.externalLooksActive,
+        provider: agent.agent.provider,
       }),
     [opener],
   );

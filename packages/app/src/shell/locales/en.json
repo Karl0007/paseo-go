@@ -89,6 +89,7 @@
       "sendBody": "This session may be running in an external terminal. Continuing will start a new process from this session, which can fork the conversation.",
       "sendBodyCodex": "This session may be running in an external terminal. Nothing is lost, but the other side won't see this message.",
       "sendConfirm": "Send anyway",
+      "openConfirm": "Open anyway",
       "sendCancel": "Cancel",
       "sendCancelled": "Send cancelled"
     },

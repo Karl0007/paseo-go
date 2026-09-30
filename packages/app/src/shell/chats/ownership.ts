@@ -54,9 +54,12 @@ export type OwnershipSendDecision =
   | "warnWeak";
 
 /**
- * R4 send-warning grading. Only `external` + `externalLooksActive === true` warns
- * (an external writer nobody sees moving is exactly the safe case — sending just
- * takes the session back). opencode passes; codex gets the weak body.
+ * R4 grading — the ONE table (口径: 别造第二套), shared by the composer send guard
+ * and the pre-OPEN guard (B4-R4OPEN ruling 18: resume happens when the session
+ * screen loads, so opening is the concurrent-spawn moment; send is the secondary
+ * line). Only `external` + `externalLooksActive === true` warns (an external writer
+ * nobody sees moving is exactly the safe case — entering/sending just takes the
+ * session back). opencode passes; codex gets the weak body.
  */
 export function decideOwnershipSendWarning(
   facts: OwnershipFacts & { provider: string },
@@ -67,8 +70,19 @@ export function decideOwnershipSendWarning(
   return "warn";
 }
 
-/** Locale keys for the dialog copy per decision (`pass` never renders). */
+/** Locale keys for the dialog per decision (`pass` never renders). */
 export const OWNERSHIP_SEND_BODY_KEY: Record<Exclude<OwnershipSendDecision, "pass">, string> = {
   warn: "chats.ownership.sendBody",
   warnWeak: "chats.ownership.sendBodyCodex",
 };
+
+/**
+ * Locale keys for the pre-OPEN dialog (B4-R4OPEN 口径 1: 复用 send-guard 文案).
+ * Title/cancel are the send dialog's strings verbatim (the risk sentence is the
+ * same); only the confirm verb differs — 仍要打开 vs 仍要发送.
+ */
+export const OWNERSHIP_OPEN_DIALOG_KEYS = {
+  title: "chats.ownership.sendTitle",
+  confirm: "chats.ownership.openConfirm",
+  cancel: "chats.ownership.sendCancel",
+} as const;
