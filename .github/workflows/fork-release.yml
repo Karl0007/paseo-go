@@ -405,7 +405,7 @@ jobs:
           set -euo pipefail
           z="$(ls art/desktop-windows/Paseo-*x64.zip | head -1)"
           unzip -l "$z" > wz-listing.txt
-          grep -E "Paseo(-Setup)?-|app.asar|app-dist|paseo.cmd" wz-listing.txt | head -12
+          { grep -E "Paseo(-Setup)?-|app.asar|app-dist|paseo.cmd" wz-listing.txt || true; } | head -12
           for m in "Paseo.exe" "resources/app.asar" "resources/bin/paseo.cmd" "resources/app-dist" "chrome_100_percent.pak" "LICENSE.electron.txt"; do
             grep -qi -- "$m" wz-listing.txt || { echo "::error::win zip missing $m"; exit 1; }
           done
