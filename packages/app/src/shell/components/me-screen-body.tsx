@@ -29,7 +29,8 @@ import { useHosts } from "@/runtime/host-runtime";
 import type { HostProfile } from "@/types/host-connection";
 import { buildShellAboutInfo } from "@/shell/about";
 import { SHELL_I18N_NAMESPACE } from "@/shell/i18n";
-import { SHELL_MODE_ENV_DEFAULT } from "@/shell/config";
+import { SHELL_GO_VERSION, SHELL_MODE_ENV_DEFAULT } from "@/shell/config";
+import { useShellUpdateStore, type ShellUpdatePhase } from "@/shell/update/state";
 import { buildShellOverview } from "@/shell/overview";
 import { OFFICIAL } from "@/shell/routes";
 import { useShellHostStatuses } from "@/shell/runtime/use-shell-host-statuses";
@@ -204,6 +205,26 @@ function HostSettingsRow({ host, online }: { host: HostProfile; online: boolean 
   );
 }
 
+// M4 slice 2: 「检查更新」行尾三态件 (own component: stable refs, no nested ternary)。
+function UpdateRowTrailing({
+  phase,
+  latest,
+  url,
+}: {
+  phase: ShellUpdatePhase;
+  latest: string | null;
+  url: string | null;
+}) {
+  const { t } = useTranslation(SHELL_I18N_NAMESPACE);
+  if (phase === "checking") {
+    return <Text style={styles.muted}>{t("update.checking")}</Text>;
+  }
+  if (phase === "available" && latest !== null && url !== null) {
+    return <ExternalLink href={url} label={latest} testID="me-check-update-open" />;
+  }
+  return null;
+}
+
 export function MeScreenBody() {
   const { t } = useTranslation(SHELL_I18N_NAMESPACE);
   const toast = useToast();
@@ -308,6 +329,27 @@ export function MeScreenBody() {
   const handleClearDataPress = useCallback(() => {
     void handleClearData();
   }, [handleClearData]);
+  // M4 slice 2: 手动「检查更新」= 强拉 fork Releases + 三态 toast（当前/最新/已最新/
+  // 失败）；发现新版时启动提示条也会重新可见（seen 标记未置位）。
+  const updatePhase = useShellUpdateStore((state) => state.phase);
+  const updateLatest = useShellUpdateStore((state) => state.latest);
+  const updateUrl = useShellUpdateStore((state) => state.url);
+  const runUpdateCheckNow = useShellUpdateStore((state) => state.runCheck);
+  const reportUpdateCheck = useCallback(async () => {
+    const result = await runUpdateCheckNow(true);
+    if (!result) return; // 已有一次检查在飞，行内「检查中…」即反馈
+    if (result.state === "available") {
+      toast.show(t("update.found", { latest: result.latest ?? "", current: result.current }));
+    } else if (result.state === "upToDate") {
+      toast.show(t("update.upToDate", { current: result.current }));
+    } else {
+      toast.show(t("update.checkFailed"));
+    }
+  }, [runUpdateCheckNow, toast, t]);
+  const handleCheckUpdatePress = useCallback(() => {
+    tapHaptic();
+    void reportUpdateCheck();
+  }, [reportUpdateCheck]);
 
   return (
     <View style={styles.screen}>
@@ -411,6 +453,15 @@ export function MeScreenBody() {
             testID="me-about-row"
           >
             <ExternalLink href={about.licenseUrl} label={t("me.license")} testID="me-license" />
+          </SettingRow>
+          <View style={styles.divider} />
+          <SettingRow
+            title={t("me.checkUpdate")}
+            hint={t("me.checkUpdateHint", { version: SHELL_GO_VERSION })}
+            onPress={handleCheckUpdatePress}
+            testID="me-check-update"
+          >
+            <UpdateRowTrailing phase={updatePhase} latest={updateLatest} url={updateUrl} />
           </SettingRow>
         </View>
       </ScrollView>

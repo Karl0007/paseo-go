@@ -235,6 +235,23 @@ CI=ubuntu runner（JDK21+镜像自带 Android SDK，AGP 自动补组件）：`PA
 2. 换装：CLI=本机 `npm i -g --prefix <测试前缀> <win32 tarball>` → `paseo --version` 应为 `<ver>` → 隔离 `PASEO_HOME`+config.json `daemon.listen` 指第三端口 → `daemon start/stop`；APK=`adb -s 192.168.31.14:5555 install -r <apk>`（签名同源可直接覆盖）→ 冷启三 tab；win zip=解包+清单核对（本机禁忌#1 不实跑）。
 3. 任务重启：新包验证过 → RELEASE.md 记 go.N 行（产物 sha256+run 链接）→ 后续任务按新成品包口径验收。
 
+## 7. M4 客户端更新仪式（CLI 升级 + 更新指向 fork Releases）
+
+### 7.1 CLI 升级仪式（fork Releases=唯一分发源；生产切换/回滚细则见 `~/.paseo/DEPLOY-NOTES.md`，它是生产真相，M3 维护其升级仪式 diff，本节不重复）
+
+1. 看最新指针：`gh release list -R Karl0007/paseo-go`（M2 口径：**最新 release 即最新成品包**，body=全产物直链+sha256 清单）。
+2. 装：win `npm i -g https://github.com/Karl0007/paseo-go/releases/download/<tag>/getpaseo-cli-<ver>-win32-x64.tgz`；linux 同形换 `linux-x64`。tarball 全量 vendored——不访问 registry、不跑编译脚本（§6.2）。
+3. 验：`paseo --version` = `<ver>`（tag 去 `v`）。
+4. 重启任务：`Stop-ScheduledTask PaseoDaemon` → `Start-ScheduledTask PaseoDaemon`（dev 形态=daemon stop/start）；生产按 DEPLOY-NOTES 自检四条执行。
+5. 回滚=同法装上一版 tarball 再重启任务。
+
+### 7.2 更新指向落地口径（M4）
+
+- **desktop**：`packages/desktop/electron-builder.yml` publish `owner/repo=Karl0007/paseo-go`（上游触点 `COMPAT(paseoGoUpdateFeed)`，申报制；fork-release.yml 出包时另按仓库上下文覆盖，两处同源）。⚠ 实测定口径：我们的 release 是 **prerelease**，electron-updater stable 通道 `allowPrerelease=false` 不认（`src/features/auto-updater.ts`）——desktop 自动更新要真正触发，需 release job 去掉 `--prerelease`（fork-release.yml 一行）或用户在应用内把通道切 beta。本轮未改（禁忌#1：desktop 不装不跑，改了也无本机证据链）。
+- **壳 APK**：启动探一次 + 设置页手动强拉 `GET /repos/Karl0007/paseo-go/releases?per_page=1`（实测 `/releases/latest` 对 prerelease-only 仓 404，故用 list 首条）；比对 `0.10.x-go.N` go 线（`src/shell/update/versions.ts` 段内数值序，go.10>go.9）。当前版本=构建期盖章 `EXPO_PUBLIC_PASEO_GO_VERSION`（CI apk job 注 tag；本地 `release/build-release-wsl.sh` 默认读 `paseo-go/VERSION`；`shell/config.ts` 字面兜底=最后发布线，**发版仪式随 tag bump**）。新则一次性提示条（可关、同版本 store 标记只提示一次、点击落 release 页）。
+- **测试钩**：metro 起时 `EXPO_PUBLIC_PASEO_GO_UPDATE_FEED=http://<PC_IP>:8099/fake.json` 把 feed 指到本地 mock（形状=GitHub releases 列表数组，`[{tag_name,html_url}]`，见 `src/shell/update/feed.test.ts` 契约）；产品常量零假数据。
+- **验证级别（如实记）**：无第二台测试机，desktop 端到端更新链未实跑（代码审+config-parse 单测代证，卡验收允许）；壳侧状态机/版本比对/feed 契约=单测钉住（update 域 36 例）。
+
 ## 已知问题 / 边界
 
 1. 上表 4 个环境性测试失败（zh-CN locale x3、CRLF x1、forges 测试 Windows 路径 bug x1）——Linux CI 全绿，本机不修（`packages/` 铁律禁改）。

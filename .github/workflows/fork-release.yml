@@ -135,6 +135,9 @@ jobs:
       EXPO_PUBLIC_PASEO_GO_SHELL: "1"
       ENTRY_FILE: packages/app/index.ts
       EXPO_PUBLIC_PASEO_GO_UPSTREAM: "919c737c"
+      # M4 slice 2: shell update checker compares this baked go-line version
+      # against the Releases feed (packages/app/src/shell/config.ts).
+      EXPO_PUBLIC_PASEO_GO_VERSION: ${{ needs.meta.outputs.version }}
     steps:
       - uses: actions/checkout@v4
         with:

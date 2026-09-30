@@ -11,6 +11,7 @@ import { usePaseoGoForkAckStore } from "@/shell/stores/forkAck";
 import { usePaseoGoPinsStore } from "@/shell/stores/pins";
 import { usePaseoGoReadStateStore } from "@/shell/stores/readState";
 import { usePaseoGoSettingsStore } from "@/shell/stores/settings";
+import { usePaseoGoUpdateNoticeStore } from "@/shell/stores/updateNotice";
 
 export const PASEO_GO_STORAGE_PREFIX = "paseoGo.";
 
@@ -53,4 +54,5 @@ export function resetShellStores(): void {
     defaultTab: "chats",
     notifications: true,
   });
+  usePaseoGoUpdateNoticeStore.setState({ seenVersion: null });
 }

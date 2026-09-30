@@ -5,10 +5,13 @@ import { ShellSessionHeaderOverlay } from "@/shell/components/shell-session-head
 import { Tabs, useNavigation } from "expo-router";
 import { FolderTree, MessageCircle, User } from "lucide-react-native";
 import { useEffect, useMemo } from "react";
+import { View } from "react-native";
 import { useTranslation } from "react-i18next";
 import { StyleSheet, withUnistyles } from "react-native-unistyles";
 import { useShellWindowCompact } from "@/shell/tablet/form-factor";
 import { useShellNotifications } from "@/shell/notify/use-shell-notifications";
+import { ShellUpdateBanner } from "@/shell/components/shell-update-banner";
+import { useShellUpdateCheck } from "@/shell/update/use-shell-update-check";
 import { ensureShellI18n, SHELL_I18N_NAMESPACE } from "@/shell/i18n";
 import { usePaseoGoSettingsStore, type ShellTab } from "@/shell/stores/settings";
 import { focusedShellTab, type NavStateLike } from "@/shell/focused-tab";
@@ -118,6 +121,9 @@ export default function ShellTabsLayout() {
 
   // C11: attention watcher lives on the tabs layout, so it runs on every shell tab.
   useShellNotifications();
+  // M4 slice 2: startup update probe (one per JS context; silent on failure —
+  // the 我的 row is the visible retry affordance).
+  useShellUpdateCheck();
   useEffect(() => {
     // F3: useNavigation resolves to the root stack — the active tab lives one level
     // deeper (focusedShellTab). Null while a (detail) push is on top (KI-9): the
@@ -131,21 +137,29 @@ export default function ShellTabsLayout() {
   }, [navigation]);
 
   return (
-    <>
-      {/* C14: floats over the official session screen via the root floating-panel
-          portal host; renders null unless the C14 visibility predicate holds. */}
+    <View style={styles.updateRoot}>
       <ShellSessionHeaderOverlay />
-      <ThemedShellTabs
-        initialRouteName={lastFocusedTab ?? defaultTab}
-        chats={t("tabs.chats")}
-        workspace={t("tabs.workspace")}
-        me={t("tabs.me")}
-      />
-    </>
+      {/* M4 slice 2: 一次性升级提示条 — flexes the tab area down while visible. */}
+      <ShellUpdateBanner />
+      <View style={styles.tabsHost}>
+        <ThemedShellTabs
+          initialRouteName={lastFocusedTab ?? defaultTab}
+          chats={t("tabs.chats")}
+          workspace={t("tabs.workspace")}
+          me={t("tabs.me")}
+        />
+      </View>
+    </View>
   );
 }
 
 const styles = StyleSheet.create((theme) => ({
+  updateRoot: {
+    flex: 1,
+  },
+  tabsHost: {
+    flex: 1,
+  },
   tabBar: {
     backgroundColor: theme.colors.surface0,
     borderTopColor: theme.colors.border,

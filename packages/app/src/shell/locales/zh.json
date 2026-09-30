@@ -324,7 +324,17 @@
     "aboutHeader": "关于",
     "shellVersion": "Paseo Go {{version}}",
     "upstream": "上游 paseo @ {{ref}}",
-    "license": "许可证"
+    "license": "许可证",
+    "checkUpdate": "检查更新",
+    "checkUpdateHint": "查询是否有新版 Paseo Go（当前 {{version}}）"
+  },
+  "update": {
+    "banner": "发现新版本 Paseo Go {{version}}，点击查看下载",
+    "dismiss": "关闭",
+    "checking": "检查中…",
+    "found": "发现新版本 {{latest}}（当前 {{current}}）",
+    "upToDate": "已是最新版本（{{current}}）",
+    "checkFailed": "检查更新失败，请检查网络后重试"
   },
   "header": {
     "back": "返回",

@@ -24,6 +24,10 @@ export ENTRY_FILE=packages/app/index.ts
 export PASEO_GO=1
 export EXPO_PUBLIC_PASEO_GO_SHELL=1
 export EXPO_PUBLIC_PASEO_GO_UPSTREAM="${EXPO_PUBLIC_PASEO_GO_UPSTREAM:-db4fd334}"
+# M4 slice 2: bake the go-line version the shell update checker compares against
+# (default = paseo-go/VERSION, the release ritual bumps it per line; override for
+# a rebuild of an older tag).
+export EXPO_PUBLIC_PASEO_GO_VERSION="${EXPO_PUBLIC_PASEO_GO_VERSION:-$(cat "$REPO/paseo-go/VERSION" 2>/dev/null || echo 0.10.2-go.0)}"
 run() { [[ " $PHASES " == *" $1 "* ]]; }
 
 if run 0; then

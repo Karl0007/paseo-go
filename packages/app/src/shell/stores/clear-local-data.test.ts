@@ -38,6 +38,7 @@ import { usePaseoGoPinsStore } from "@/shell/stores/pins";
 import { usePaseoGoReadStateStore } from "@/shell/stores/readState";
 import { usePaseoGoForkAckStore } from "@/shell/stores/forkAck";
 import { usePaseoGoSettingsStore } from "@/shell/stores/settings";
+import { usePaseoGoUpdateNoticeStore } from "@/shell/stores/updateNotice";
 
 const SHELL_KEYS = ["paseoGo.settings", "paseoGo.favorites", "paseoGo.commands", "paseoGo.forkAck"];
 const OFFICIAL_KEYS = ["@paseo:app-settings", "@paseo:settings-migrations", "some-foreign-key"];
@@ -87,6 +88,7 @@ describe("resetShellStores", () => {
     usePaseoGoForkAckStore.getState().ack("srv-A:agent-1");
     usePaseoGoSettingsStore.getState().setShellMode(true);
     usePaseoGoSettingsStore.getState().setDefaultTab("workspace");
+    usePaseoGoUpdateNoticeStore.getState().markSeen("0.10.2-go.9");
 
     resetShellStores();
 
@@ -98,6 +100,7 @@ describe("resetShellStores", () => {
     expect(usePaseoGoArchiveStore.getState().archivedIds).toEqual([]);
     expect(usePaseoGoReadStateStore.getState().lastReadAt).toEqual({});
     expect(usePaseoGoForkAckStore.getState().ackedKeys).toEqual([]);
+    expect(usePaseoGoUpdateNoticeStore.getState().seenVersion).toBeNull();
     expect(state.defaultTab).toBe("chats");
     // false, not null: null defers to the env default, which is ON under dev metro.
     expect(state.shellMode).toBe(false);

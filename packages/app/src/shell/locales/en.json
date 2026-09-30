@@ -324,7 +324,17 @@
     "aboutHeader": "About",
     "shellVersion": "Paseo Go {{version}}",
     "upstream": "upstream paseo @ {{ref}}",
-    "license": "License"
+    "license": "License",
+    "checkUpdate": "Check for updates",
+    "checkUpdateHint": "Looks for a newer Paseo Go release (current {{version}})"
+  },
+  "update": {
+    "banner": "Paseo Go {{version}} is available — tap to download",
+    "dismiss": "Dismiss",
+    "checking": "Checking…",
+    "found": "New version {{latest}} found (current {{current}})",
+    "upToDate": "Already up to date ({{current}})",
+    "checkFailed": "Update check failed — check the network and try again"
   },
   "header": {
     "back": "Back",

@@ -12,6 +12,17 @@ export const SHELL_UPSTREAM_REF = process.env.EXPO_PUBLIC_PASEO_GO_UPSTREAM ?? "
 export const SHELL_VERSION = "0.3.0";
 
 /**
+ * Go-line release version (`paseo-go/VERSION` scheme `0.10.x-go.N`) this bundle was
+ * built from — the update checker compares it against the fork Releases feed.
+ * Release builds stamp the exact tag: fork-release.yml apk job sets
+ * `EXPO_PUBLIC_PASEO_GO_VERSION=${{ needs.meta.outputs.version }}` (metro inlines
+ * EXPO_PUBLIC_* at bundle time, same mechanism as `_UPSTREAM` above). The literal
+ * is the fallback for unstamped bundles — bump it alongside the release ritual
+ * (paseo-go BUILD.md §7) so dev builds compare against the last known good line.
+ */
+export const SHELL_GO_VERSION = process.env.EXPO_PUBLIC_PASEO_GO_VERSION ?? "0.10.2-go.0";
+
+/**
  * Bundle-time default for shell mode. Metro inlines `EXPO_PUBLIC_*` vars at bundle
  * time, so `EXPO_PUBLIC_PASEO_GO_SHELL=1 npx expo start` turns the shell on without
  * a rebuild. The runtime store value (`paseoGo.settings.shellMode`) takes priority
