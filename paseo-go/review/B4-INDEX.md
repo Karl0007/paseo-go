@@ -48,3 +48,7 @@ R4-26 崩溃残留注册表 pid 回收假活（并入 R4-21 修复面）；R4-27
 ## 拍板（Main，无人值守授权内）
 
 D1 claude fork-on-send=维持顺延尾卡；D2 identity-colors.ts 第 5 触点=接受入账；D3 双弹窗叠加=保留。R4-08 处置=帧改名+勘误行（B 批带上）。R4-28/29 立尾 chore。
+
+## 追加排队
+
+- B4-LANG（语言传播断链查证，RevUI 现场，pre-existing）→ FixB 后派；R4-05 en 帧复验并入其尾项。
