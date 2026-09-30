@@ -26,7 +26,17 @@
 //
 // usage: node paseo-go/release/pack-cli-bundle.mjs --version 0.10.2-go.1 --out <dir>
 import { execFileSync } from "node:child_process";
-import { cpSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, renameSync, rmSync, writeFileSync } from "node:fs";
+import {
+  cpSync,
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  readdirSync,
+  renameSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -46,13 +56,46 @@ const OUT = path.resolve(flag("--out"));
 const FORK_PACKAGES = ["cli", "client", "protocol", "server", "relay", "highlight", "plugin"];
 const FORK_NAMES = FORK_PACKAGES.map((p) => `@getpaseo/${p}`);
 
-// Node >=18.20 rejects .cmd shims via execFile (EINVAL); drive npm through
-// its cli js next to the running node binary — identical on win and linux.
-const NPM_CLI = path.join(path.dirname(process.execPath), "node_modules", "npm", "bin", "npm-cli.js");
+// Node >=18.20 rejects .cmd shims via execFile (EINVAL) on Windows; drive npm
+// through its cli js. Resolve npm-cli.js across layouts: win (next to node.exe),
+// linux/mac tool-cache (../lib/node_modules/npm), system prefix (../../lib).
+const NPM_CLI_CANDIDATES = [
+  path.join(path.dirname(process.execPath), "node_modules", "npm", "bin", "npm-cli.js"),
+  path.join(
+    path.dirname(process.execPath),
+    "..",
+    "lib",
+    "node_modules",
+    "npm",
+    "bin",
+    "npm-cli.js",
+  ),
+  path.join(
+    path.dirname(process.execPath),
+    "..",
+    "..",
+    "lib",
+    "node_modules",
+    "npm",
+    "bin",
+    "npm-cli.js",
+  ),
+].filter((p) => existsSync(p));
+const NPM_CLI = NPM_CLI_CANDIDATES[0];
 function run(cmd, cmdArgs, opts = {}) {
-  const [bin, argv] = cmd === "npm" ? [process.execPath, [NPM_CLI, ...cmdArgs]] : [cmd, cmdArgs];
+  const [bin, argv] =
+    cmd === "npm"
+      ? process.platform === "win32"
+        ? [process.execPath, [NPM_CLI, ...cmdArgs]]
+        : ["npm", cmdArgs]
+      : [cmd, cmdArgs];
   console.log(`$ ${bin} ${argv.join(" ")}`);
-  return execFileSync(bin, argv, { cwd: REPO, encoding: "utf8", maxBuffer: 64 * 1024 * 1024, ...opts });
+  return execFileSync(bin, argv, {
+    cwd: REPO,
+    encoding: "utf8",
+    maxBuffer: 64 * 1024 * 1024,
+    ...opts,
+  });
 }
 
 const work = mkdtempSync(path.join(tmpdir(), "paseo-cli-bundle-"));
@@ -67,13 +110,16 @@ try {
   // a silently degraded tarball. CI never sets it.
   const packExtra = process.env.PGO_IGNORE_SCRIPTS === "1" ? ["--ignore-scripts"] : [];
   for (const name of FORK_NAMES) {
-    run("npm", ["pack", "-w", name, ...packExtra, "--pack-destination", pkgsDir], { stdio: "inherit" });
+    run("npm", ["pack", "-w", name, ...packExtra, "--pack-destination", pkgsDir], {
+      stdio: "inherit",
+    });
   }
   for (const f of readdirSync(pkgsDir)) {
     const meta = JSON.parse(run("tar", ["-xOf", path.join(pkgsDir, f), "package/package.json"]));
     tgz[meta.name] = { file: path.join(pkgsDir, f), meta };
   }
-  for (const name of FORK_NAMES) if (!tgz[name]) throw new Error(`missing packed tarball for ${name}`);
+  for (const name of FORK_NAMES)
+    if (!tgz[name]) throw new Error(`missing packed tarball for ${name}`);
 
   // 2. staging install: local tarballs + registry externals, production only,
   //    scripts ON (native modules must match the host platform).
@@ -85,14 +131,29 @@ try {
   );
   run(
     "npm",
-    ["install", "--omit=dev", "--no-audit", "--no-fund", ...FORK_NAMES.map((n) => `file:${tgz[n].file}`)],
+    [
+      "install",
+      "--omit=dev",
+      "--no-audit",
+      "--no-fund",
+      ...FORK_NAMES.map((n) => `file:${tgz[n].file}`),
+    ],
     { cwd: stage, stdio: "inherit" },
   );
   const stageNm = path.join(stage, "node_modules");
 
   // Guard: staged fork packages must be OUR tarballs, not public registry
   // copies of the same version (fork ships server code upstream lacks).
-  const forkMarker = path.join(stageNm, "@getpaseo", "server", "dist", "server", "server", "workspace", "commit-history.js");
+  const forkMarker = path.join(
+    stageNm,
+    "@getpaseo",
+    "server",
+    "dist",
+    "server",
+    "server",
+    "workspace",
+    "commit-history.js",
+  );
   try {
     readFileSync(forkMarker);
   } catch {
@@ -133,12 +194,20 @@ try {
   }
   for (const name of FORK_NAMES) if (name !== "@getpaseo/cli") deps[name] = tgz[name].meta.version;
   finalPkg.version = VERSION;
-  finalPkg.dependencies = { ...deps, ...Object.fromEntries(Object.entries(finalPkg.dependencies || {}).filter(([k]) => k.startsWith("@getpaseo/"))) };
+  finalPkg.dependencies = {
+    ...deps,
+    ...Object.fromEntries(
+      Object.entries(finalPkg.dependencies || {}).filter(([k]) => k.startsWith("@getpaseo/")),
+    ),
+  };
   finalPkg.bundleDependencies = bundled;
   writeFileSync(finalPkgPath, `${JSON.stringify(finalPkg, null, 2)}\n`);
 
   mkdirSync(OUT, { recursive: true });
-  const packed = run("npm", ["pack", "--pack-destination", OUT], { cwd: final, encoding: "utf8" }).trim();
+  const packed = run("npm", ["pack", "--pack-destination", OUT], {
+    cwd: final,
+    encoding: "utf8",
+  }).trim();
   const outPath = path.join(OUT, packed.split("\n").pop());
   console.log(`tarball: ${outPath}`);
   const list = run("tar", ["-tzf", outPath]);
@@ -153,7 +222,9 @@ try {
     if (!list.includes(probe)) throw new Error(`packed tarball missing ${probe}`);
   }
   if (!/node-pty\/(build|prebuilds)\/.*\.node/.test(list)) {
-    throw new Error("packed tarball has no built node-pty native module (stage install scripts did not run?)");
+    throw new Error(
+      "packed tarball has no built node-pty native module (stage install scripts did not run?)",
+    );
   }
   console.log(`vendoring verified (${bundled.length} bundled entries)`);
   console.log(outPath);

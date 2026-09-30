@@ -123,9 +123,6 @@ jobs:
           distribution: temurin
           java-version: "21"
 
-      - name: Guard Android SDK licenses (runner image ships SDK; AGP auto-installs missing components)
-        run: yes | sdkmanager --licenses > /dev/null
-
       - name: Install JS dependencies
         run: npm ci
 
@@ -317,12 +314,10 @@ jobs:
             done
             echo
             echo "## 说明"
-            echo
-            echo "- macOS 产物：本轮不出（无 Apple 公证凭据）。"
+            echo "- macOS 产物：本轮不出（无 Apple 公证凭据）。上游 docker.yml 因 tag 版本约定冲突（test package.json.version == tag）已仓库级禁用，GHCR 镜像本轮无。"
             echo "- Windows/Linux 桌面产物未签名（上游本就不签 win/linux；SmartScreen/包管理器警告预期内）。"
             echo "- APK 签名 = React Native 模板 debug keystore（与既往 go 构建升级兼容；正式 keystore 待办见 BUILD.md）。"
             echo "- CLI tarball 为全量 vendored 平台包：安装不访问 registry、不跑编译脚本。"
-            echo "- Docker（上游 Docker workflow 同 tag 触发）：\`ghcr.io/${owner_lc}/paseo:${VERSION}\`。"
           } > release-body.md
           cat release-body.md
 
