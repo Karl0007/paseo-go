@@ -3,6 +3,7 @@ import { tmpdir } from "node:os";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
 import { describe, expect, test } from "vitest";
+import { z } from "zod";
 
 import {
   loadPersistedConfig,
@@ -841,15 +842,68 @@ describe.skipIf(process.platform === "win32")("persisted config file permissions
   });
 });
 
+// Minimal JSON-Schema view of a published/generated schema document, enough to
+// enumerate the property paths each document admits.
+interface JsonNode {
+  $ref?: string;
+  properties?: Record<string, JsonNode>;
+  items?: JsonNode;
+  additionalProperties?: JsonNode | boolean;
+  oneOf?: JsonNode[];
+  anyOf?: JsonNode[];
+  allOf?: JsonNode[];
+}
+
+function resolveRef(doc: JsonNode, ref: string): JsonNode {
+  return ref
+    .replace(/^#\//, "")
+    .split("/")
+    .reduce<JsonNode>(
+      (node, segment) =>
+        (node as Record<string, JsonNode>)[segment.replace(/~1/g, "/").replace(/~0/g, "~")] ??
+        ({} as JsonNode),
+      doc,
+    );
+}
+
+/** Every `properties` key path a JSON Schema document admits ($refs followed). */
+function collectPropertyPaths(
+  doc: JsonNode,
+  node: JsonNode,
+  prefix = "",
+  acc = new Set<string>(),
+): Set<string> {
+  const target = node.$ref ? resolveRef(doc, node.$ref) : node;
+  for (const [key, child] of Object.entries(target.properties ?? {})) {
+    const p = prefix ? `${prefix}.${key}` : key;
+    acc.add(p);
+    collectPropertyPaths(doc, child, p, acc);
+  }
+  if (target.items) collectPropertyPaths(doc, target.items, `${prefix}[]`, acc);
+  if (typeof target.additionalProperties === "object") {
+    collectPropertyPaths(doc, target.additionalProperties, `${prefix}.<item>`, acc);
+  }
+  for (const branch of [
+    ...(target.oneOf ?? []),
+    ...(target.anyOf ?? []),
+    ...(target.allOf ?? []),
+  ]) {
+    collectPropertyPaths(doc, branch, prefix, acc);
+  }
+  return acc;
+}
+
 // COMPAT(agentOwnership): R4-25 — the published JSON schema is what $schema-
 // aware editors validate against; it ships `additionalProperties: false`, so a
 // key the zod schema (and docs/data-model.md) accepts must exist here too or
 // documented configs are flagged invalid.
+
 describe("published config schema parity", () => {
+  const schemaPath = fileURLToPath(
+    new URL("../../../website/public/schemas/paseo.config.v1.json", import.meta.url),
+  );
+
   test("agents.transcriptStatPollIntervalMs is present in paseo.config.v1.json", () => {
-    const schemaPath = fileURLToPath(
-      new URL("../../../website/public/schemas/paseo.config.v1.json", import.meta.url),
-    );
     const schema = JSON.parse(readFileSync(schemaPath, "utf8")) as {
       definitions?: {
         PaseoConfigV1?: {
@@ -869,5 +923,19 @@ describe("published config schema parity", () => {
       exclusiveMinimum: 0,
       maximum: 2147483647,
     });
+  });
+
+  test("published schema admits every key PersistedConfigSchema accepts", () => {
+    const published = JSON.parse(readFileSync(schemaPath, "utf8")) as JsonNode;
+    const generated = z.toJSONSchema(PersistedConfigSchema, {
+      target: "draft-07",
+      unrepresentable: "any",
+      io: "input",
+    }) as JsonNode;
+    const publishedPaths = collectPropertyPaths(published, published);
+    const missing = [...collectPropertyPaths(generated, generated)].filter(
+      (p) => !publishedPaths.has(p),
+    );
+    expect(missing).toEqual([]);
   });
 });
