@@ -384,9 +384,9 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
+      # checkout the dispatched ref (NOT the tag): assemble-body.mjs may be newer
+      # than the tag commit; assets/verification are ref-independent.
       - uses: actions/checkout@v4
-        with:
-          ref: ${{ env.SOURCE_TAG }}
 
       - name: Download artifacts from source run
         env:
