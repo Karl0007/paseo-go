@@ -1,6 +1,6 @@
 # Paseo Go — 接手入口（先读这页）
 
-> 手机优先的 Paseo 壳 app。当前状态：**v0.2.0 验收通过**（分支 `paseo-go/v0.1.0`，105 commits on `db4fd334`=上游 fork 基点；批次二=平板分栏/三层树/文件页签/导入全家桶/未读重构/归档三义修复，见 ACCEPTANCE 批次二增补）。
+> 手机优先的 Paseo 壳 app。当前状态：**v0.3.0 已交付 + 上游已合流 v0.10.2**（M1 merge `1789ebbca`，版本系 `0.10.2-go.0`，M2 CI 出包接管分发；分支 `paseo-go/v0.1.0`，批次二=平板分栏/三层树/文件页签/导入全家桶/未读重构/归档三义修复，见 ACCEPTANCE 批次二增补）。
 > 发布物：`app-release.apk` sha256=`cb074aff…2aaa`（105MB，debug keystore；上架前换签名，见 RELEASE.md TODO；v0.1.0 包 `1d4d20df…fd64` 已被 0.2.0 取代）。
 > 公开镜像：`github.com/Karl0007/paseo-go`（单向重放，无证据历史；同步工具 `release/make-public-mirror.sh`）。
 > 开放项：①置顶拖拽真人手指复验（ACCEPTANCE §5 首行，自动化 26 样本已全绿）；②语音端到端待用户部署 STT/TTS 端点（VOICE-DEPLOY.md）；③Q10 平板设计事后审（预授权落地，留档待审）。
