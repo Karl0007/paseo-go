@@ -51,7 +51,7 @@ for (const f of walk(shaDir)) {
       const m = line.trim().match(/^([0-9a-f]{64})\s+\*?(.+)$/);
       if (m) shaByName.set(path.basename(m[2]), m[1]);
     }
-  } else if (path.basename(f) === "SHA256SUMS.txt") {
+  } else if (/SHA256SUMS.txt$/.test(path.basename(f))) {
     for (const line of text.split(/\r?\n/)) {
       const m = line.trim().match(/^([0-9a-f]{64})\s+\*?(.+)$/);
       if (m) shaByName.set(path.basename(m[2]), m[1]);
@@ -70,7 +70,7 @@ for (const n of assets.sort()) {
   let how = "—";
   if (n.endsWith(".tgz")) how = `\`npm i -g ${base}/${n}\``;
   else if (n.endsWith(".apk")) how = `adb install -r \`${n}\` (arm64)`;
-  else if (/\.(exe|zip|deb|rpm|AppImage)$/.test(n)) how = "桌面安装包（未签名）";
+  else if (/\.(exe|zip|deb|rpm|AppImage|tar\.gz)$/.test(n)) how = "桌面安装包（未签名）";
   lines.push(`| ${n} | ${how} | \`${s}\` |`);
 }
 
