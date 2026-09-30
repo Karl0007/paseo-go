@@ -43,8 +43,16 @@
 // nothing (`decidePinDrop` + `dispatchPinDrop`, chats/drag-drop.ts). KI-11
 // ruling ③ gates the refresh control off for the whole row-gesture band, so a
 // long-pressed downward drag at the list top sorts instead of refreshing.
+// B4-SWIPE (批次四 F5 裁定 10): the list area also answers a horizontal swipe —
+// 进行中 ↔ 已归档. The swipe is not a second state machine: it calls the SAME
+// `setFilter` the header's segment presses, and the page turn is one surface
+// translating (chats/filter-swipe.ts + chats/use-chats-filter-swipe.ts). The gate
+// that keeps a live 置顶 drag from turning the page is `gestureLock` read as a
+// shared value inside the worklet — never a flipped DraggableList prop.
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Text, View } from "react-native";
+import { GestureDetector } from "react-native-gesture-handler";
+import Animated from "react-native-reanimated";
 import { router, type Href } from "expo-router";
 import { useTranslation } from "react-i18next";
 import { StyleSheet } from "react-native-unistyles";
@@ -68,6 +76,12 @@ import {
 } from "@/shell/chats/derive";
 import { createChatOpener } from "@/shell/chats/open-agent";
 import { chatRefreshGateProps, decidePinDrop, dispatchPinDrop } from "@/shell/chats/drag-drop";
+import {
+  FILTER_SWIPE_PAGE_ARCHIVED,
+  filterSwipePageForArchived,
+  type FilterSwipePage,
+} from "@/shell/chats/filter-swipe";
+import { useChatsFilterSwipe } from "@/shell/chats/use-chats-filter-swipe";
 import {
   ACTIVITY_LABEL_KEY,
   ChatListRow,
@@ -442,6 +456,20 @@ export function ChatsScreenBody({ selectedAgentKey = null }: ShellScreenBodyProp
   // native drag layer took the stream (no press_out will ever arrive).
   const [gestureLock, setGestureLock] = useState(false);
 
+  // B4-SWIPE (批次四 F5 裁定 10): 列表区横滑切 进行中↔已归档。状态源仍是上面的
+  // `filter`——手势落地只调用同一个 `setFilter`（点 segment 也是它），绝不另立一份
+  // 页状态；门是 `gestureLock`（行手势 arm→menu→drag 独占带）：拖拽期间禁切页。
+  // 位移/门都走 Reanimated 共享值，DraggableList 的 props 一个都不翻转
+  // （B4-REGRESS 重挂面纪律：翻转列表 props 的状态带=整表重挂）。
+  const handleSwipePage = useCallback((page: FilterSwipePage) => {
+    setFilter(page === FILTER_SWIPE_PAGE_ARCHIVED ? "archived" : "active");
+  }, []);
+  const swipe = useChatsFilterSwipe({
+    page: filterSwipePageForArchived(archivedOnly),
+    blocked: gestureLock,
+    onSwitchPage: handleSwipePage,
+  });
+
   // KI-11 ruling ④: the library hands back the whole list reordered; what the
   // drop MEANS is decided on the zone boundary by `decidePinDrop` and run by
   // `dispatchPinDrop` through the SAME action-layer calls the menu buttons
@@ -638,21 +666,33 @@ export function ChatsScreenBody({ selectedAgentKey = null }: ShellScreenBodyProp
           <SidebarAgentListSkeleton />
         </View>
       ) : (
-        <DraggableList
-          key={listNonce}
-          data={items}
-          keyExtractor={keyExtractor}
-          renderItem={renderItem}
-          onDragEnd={handleDragEnd}
-          scrollEnabled={!gestureLock}
-          containerStyle={styles.listContainer}
-          contentContainerStyle={styles.listContent}
-          refreshing={refreshGate.refreshing}
-          onRefresh={refreshGate.onRefresh}
-          ListEmptyComponent={listEmpty}
-          extraData={selectedAgentKey}
-          testID="shell-chats-list"
-        />
+        // B4-SWIPE: 换页面板=列表的父容器。手势挂在这层（列表的祖先，和官方 explorer
+        // 开合手势、壳 edge-back 同一拓扑），位移只动这层——列表自身、它的 props、
+        // key、RefreshControl 全都不动。overflow:hidden 让「滑到墙外」真被裁掉
+        // （iOS 默认溢出可见）；flex:1 保住列表尺寸。
+        <GestureDetector gesture={swipe.gesture}>
+          <Animated.View
+            collapsable={false}
+            style={[styles.swipeSurface, swipe.surfaceStyle]}
+            onLayout={swipe.onSurfaceLayout}
+          >
+            <DraggableList
+              key={listNonce}
+              data={items}
+              keyExtractor={keyExtractor}
+              renderItem={renderItem}
+              onDragEnd={handleDragEnd}
+              scrollEnabled={!gestureLock}
+              containerStyle={styles.listContainer}
+              contentContainerStyle={styles.listContent}
+              refreshing={refreshGate.refreshing}
+              onRefresh={refreshGate.onRefresh}
+              ListEmptyComponent={listEmpty}
+              extraData={selectedAgentKey}
+              testID="shell-chats-list"
+            />
+          </Animated.View>
+        </GestureDetector>
       )}
     </View>
   );
@@ -666,6 +706,12 @@ const styles = StyleSheet.create((theme) => ({
   skeletonWrap: {
     flex: 1,
     paddingHorizontal: theme.spacing[2],
+  },
+  // B4-SWIPE: 换页面板。flex:1 = 列表尺寸不变（容器塌陷=重挂面，见 listContainer 注）；
+  // overflow:hidden = 出场拍滑到墙外的部分真被裁掉，两页边界不露半个列表。
+  swipeSurface: {
+    flex: 1,
+    overflow: "hidden",
   },
   // B4-REGRESS F11: the official wrapper's `resolvedContainerStyle` falls back to
   // `scrollEnabled ? {flex:1} : undefined`; passing our own flex:1 keeps the list
