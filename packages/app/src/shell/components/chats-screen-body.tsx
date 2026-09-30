@@ -82,6 +82,7 @@ import {
   type FilterSwipePage,
 } from "@/shell/chats/filter-swipe";
 import { useChatsFilterSwipe } from "@/shell/chats/use-chats-filter-swipe";
+import { consumeChatsFilterIntent, subscribeChatsFilterIntent } from "@/shell/chats/filter-request";
 import {
   ACTIVITY_LABEL_KEY,
   ChatListRow,
@@ -347,6 +348,20 @@ export function ChatsScreenBody({ selectedAgentKey = null }: ShellScreenBodyProp
 
   const [filter, setFilter] = useState<ChatListFilter>("active");
   const archivedOnly = filter === "archived";
+
+  // B4-IMPORT (批次四 F7 裁定 12): 导入屏「已归档」徽标行点主体=跳本 tab 并切
+  // 已归档筛选。意图走模块总线而非路由参数——宽屏 body 挂在 split 左栏(每个
+  // navigator 之外, useFocusEffect/params 都到不了它), 与 subscribeSectionFocus
+  // 同一论证。consume-once: 挂载时也兑现一次(body 未挂载时发出的意图不丢),
+  // 兑现即清空, 之后的手动切页/回访不被旧意图覆写。
+  useEffect(() => {
+    const apply = () => {
+      const intent = consumeChatsFilterIntent();
+      if (intent) setFilter(intent);
+    };
+    apply();
+    return subscribeChatsFilterIntent(apply);
+  }, []);
 
   // C9 search mode: the header owns the input, the screen owns the query. The
   // normalised form drives filtering; empty means “no filter” (restore-on-clear).

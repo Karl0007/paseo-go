@@ -143,10 +143,26 @@ export function mapEntriesToImportRows(
  * - orphan-group：父不在列表的孤儿子集共享的组头（不可点、不可勾选）；
  *   label 复用 deriveImportParentLabel 三态（parentTitle→尾段→raw 截断），
  *   三态全空（如 parentHandleId="///"）= null，屏渲染无名组头措辞。
+ * B4-IMPORT（裁定 11）折叠坐标：`rootKey`=所属顶层单元键（父行=自身
+ * handleKey，子行=祖先根行的 handleKey，孤儿成员=`orphan:` 组键），
+ * `childCount`=该单元下 depth1 后代总数（0=无可折叠内容）。折叠判定只看
+ * rootKey∈展开集，屏不需要第二份树结构。
  */
 export type ImportTreeItem =
-  | { kind: "session"; row: ImportRow; depth: 0 | 1 }
-  | { kind: "orphan-group"; key: string; label: ImportParentLabel | null; depth: 0 };
+  | {
+      kind: "session";
+      row: ImportRow;
+      depth: 0 | 1;
+      rootKey: string;
+      childCount: number;
+    }
+  | {
+      kind: "orphan-group";
+      key: string;
+      label: ImportParentLabel | null;
+      depth: 0;
+      childCount: number;
+    };
 
 /** 与 mapEntriesToImportRows 同一时间序：新在上，null 日期沉底（0=epoch 序）。 */
 const importActivityDesc = (a: ImportRow, b: ImportRow): number =>
@@ -201,22 +217,34 @@ export function buildImportTree(rows: ReadonlyArray<ImportRow>): ImportTreeItem[
 
   const items: ImportTreeItem[] = [];
   const emitted = new Set<string>();
-  const emitSession = (row: ImportRow, depth: 0 | 1): boolean => {
+  // 返回 items 下标供 emitDescendants 之后回填 childCount；-1=emitted 闸（环防御）。
+  const emitSession = (row: ImportRow, depth: 0 | 1, rootKey: string): number => {
     const handleKey = handleKeyOf(row);
-    if (emitted.has(handleKey)) return false;
+    if (emitted.has(handleKey)) return -1;
     emitted.add(handleKey);
-    items.push({ kind: "session", row, depth });
-    return true;
+    items.push({ kind: "session", row, depth, rootKey, childCount: 0 });
+    return items.length - 1;
   };
   // 两层展平：在册后代的 depth 恒为 1，紧随其最近的在册祖先。emitSession 的
-  // emitted 闸返回 false 时不再下钻——parent 互指的环在这里终止递归。
-  const emitDescendants = (parent: ImportRow): void => {
+  // emitted 闸返回 -1 时不再下钻——parent 互指的环在这里终止递归。
+  // 返回值=实际发出的后代总数（含孙），供所属单元的 childCount 回填。
+  const emitDescendants = (parent: ImportRow, rootKey: string): number => {
     const kids = childrenByParent.get(handleKeyOf(parent));
-    if (!kids) return;
+    if (!kids) return 0;
     kids.sort(importActivityDesc);
+    let count = 0;
     for (const kid of kids) {
-      if (emitSession(kid, 1)) emitDescendants(kid);
+      if (emitSession(kid, 1, rootKey) >= 0) count += 1 + emitDescendants(kid, rootKey);
     }
+    return count;
+  };
+  // 根 session 单元：depth0 自身 + 全部后代挂其自身 handleKey；后代发完回填计数。
+  const emitRootUnit = (row: ImportRow): void => {
+    const rootKey = handleKeyOf(row);
+    const index = emitSession(row, 0, rootKey);
+    if (index < 0) return;
+    const item = items[index];
+    if (item) item.childCount = emitDescendants(row, rootKey);
   };
 
   // 顶层序：独立/父行按自身活动时间倒序；孤儿组按组内最新活动参与同一时间序。
@@ -226,10 +254,7 @@ export function buildImportTree(rows: ReadonlyArray<ImportRow>): ImportTreeItem[
   }
   const topLevel: TopLevel[] = roots.map((row) => ({
     at: row.lastActivityAt ?? 0,
-    emit: () => {
-      emitSession(row, 0);
-      emitDescendants(row);
-    },
+    emit: () => emitRootUnit(row),
   }));
   for (const [groupKey, members] of orphanGroups) {
     members.sort(importActivityDesc);
@@ -241,11 +266,17 @@ export function buildImportTree(rows: ReadonlyArray<ImportRow>): ImportTreeItem[
           freshest && freshest.parentLabel !== null
             ? { text: freshest.parentLabel, raw: freshest.parentIsRawId }
             : null;
-        items.push({ kind: "orphan-group", key: `orphan:${groupKey}`, label, depth: 0 });
+        const orphanKey = `orphan:${groupKey}`;
+        items.push({ kind: "orphan-group", key: orphanKey, label, depth: 0, childCount: 0 });
+        const groupIndex = items.length - 1;
+        let count = 0;
         for (const member of members) {
-          emitSession(member, 1);
-          emitDescendants(member);
+          if (emitSession(member, 1, orphanKey) >= 0) {
+            count += 1 + emitDescendants(member, orphanKey);
+          }
         }
+        const groupItem = items[groupIndex];
+        if (groupItem) groupItem.childCount = count;
       },
     });
   }
@@ -257,8 +288,7 @@ export function buildImportTree(rows: ReadonlyArray<ImportRow>): ImportTreeItem[
   // 保证「每行恰好出现一次」。
   for (const row of rows) {
     if (emitted.has(handleKeyOf(row))) continue;
-    emitSession(row, 0);
-    emitDescendants(row);
+    emitRootUnit(row);
   }
   return items;
 }
@@ -409,4 +439,153 @@ export function buildImportToastParts(
   if (summary.alreadyImported > 0) parts.push({ key: "already", count: summary.alreadyImported });
   if (summary.failed > 0) parts.push({ key: "failed", count: summary.failed });
   return parts;
+}
+
+// ---------------------------------------------------------------------------
+// B4-IMPORT（批次四 F6/F7，裁定 11/12）：默认折叠 + 已导入/已归档徽标。
+// 折叠是「视图函数」：树（全量）+ 展开集 → 可见行；折叠态不持久化由屏保证
+// （组件态=每次进屏的初值，切主机同拍作废）。徽标是「匹配函数」：行 handle
+// ↔ agent 目录 persistence（字段实证见卡报告——服务端同款比较在
+// server/agent/agent-storage.ts listByProviderSession：
+// `persistence.sessionId===handle || persistence.nativeHandle===handle`，
+// omp 恢复后 sessionId 会变运行期 id、nativeHandle 才保住 transcript 路径，
+// 故两字段都要进索引）。匹配口径与服务端逐字节一致：provider 前缀 + 原串，
+// 不做路径归一——比服务端更宽会把「服务端其实允许导入」的行禁勾选。
+// ---------------------------------------------------------------------------
+
+/**
+ * 树（全量）→ 可见行：depth1 项仅在其所属单元展开时保留；depth0 行与
+ * orphan-group 组头恒可见（组头=折叠态下子会话的唯一入口）。
+ */
+export function applyImportTreeCollapse(
+  items: ReadonlyArray<ImportTreeItem>,
+  expandedRoots: ReadonlySet<string>,
+): ImportTreeItem[] {
+  return items.filter(
+    (item) => item.kind !== "session" || item.depth === 0 || expandedRoots.has(item.rootKey),
+  );
+}
+
+/**
+ * 搜索/过滤态的强制展开集（裁定 11「命中子→所在父自动展开」）：C23 起过滤
+ * 发生在条目层，能进树的 depth1 行都是命中者（或其父被过滤后成的孤儿组成员），
+ * 所以「所有带子的单元」整体展开——收起它们等于把搜索结果藏起来。
+ */
+export function importTreeAutoExpandKeys(
+  items: ReadonlyArray<ImportTreeItem>,
+): ReadonlySet<string> {
+  const keys = new Set<string>();
+  for (const item of items) {
+    if (item.kind === "orphan-group") {
+      if (item.childCount > 0) keys.add(item.key);
+    } else if (item.depth === 0 && item.childCount > 0) {
+      keys.add(item.rootKey);
+    }
+  }
+  return keys;
+}
+
+/** 索引键与服务端 toProviderSessionHandleKey 同形：`provider\0handle`。 */
+export function importAgentHandleKey(provider: string, handle: string): string {
+  return `${provider}\0${handle}`;
+}
+
+/** 徽标匹配要读的 agent 目录最小面（屏从 session-store 的 Agent 投影而来）。 */
+export interface ImportAgentHandleSource {
+  id: string;
+  provider: string;
+  /** 服务端 archivedAt 或壳归档 store 命中，任一为真即「已归档」。 */
+  archived: boolean;
+  persistence: { sessionId: string; nativeHandle?: string | null } | null;
+}
+
+export interface ImportAgentHandleFacts {
+  agentId: string;
+  archived: boolean;
+}
+
+/**
+ * agent 目录 → handle 索引：sessionId 与 nativeHandle 都进（服务端
+ * listByProviderSession 同款双字段），键=agent.provider + handle。同一 handle
+ * 被多个 agent 引用（归档存量 + 重新导入的活跃体）时活跃优先——活跃=「已导入」
+ * 语义，与 daemon 拒绝重复导入的判定（先查 activeRecord）同向。
+ */
+export function buildImportAgentHandleIndex(
+  agents: Iterable<ImportAgentHandleSource>,
+): Map<string, ImportAgentHandleFacts> {
+  const index = new Map<string, ImportAgentHandleFacts>();
+  const add = (handle: string | null | undefined, agent: ImportAgentHandleSource): void => {
+    if (!handle) return;
+    const key = importAgentHandleKey(agent.provider, handle);
+    const prev = index.get(key);
+    if (!prev || (prev.archived && !agent.archived)) {
+      index.set(key, { agentId: agent.id, archived: agent.archived });
+    }
+  };
+  for (const agent of agents) {
+    if (!agent.persistence) continue;
+    add(agent.persistence.sessionId, agent);
+    add(agent.persistence.nativeHandle, agent);
+  }
+  return index;
+}
+
+/** 行自身的徽标事实（无匹配=null=维持现状可勾选导入）。 */
+export function classifyImportRowBadge(
+  row: Pick<ImportRow, "providerId" | "providerHandleId">,
+  index: ReadonlyMap<string, ImportAgentHandleFacts>,
+): ImportAgentHandleFacts | null {
+  return index.get(importAgentHandleKey(row.providerId, row.providerHandleId)) ?? null;
+}
+
+export interface ImportRowBadge {
+  state: "imported" | "archived";
+  /**
+   * 跳转目标 agent；null=父行聚合徽标（自身无匹配，全部子已导入）——
+   * 没有一个「该会话」可跳，屏退化为点行展开/收起。
+   */
+  agentId: string | null;
+}
+
+/**
+ * 全树 → 行徽标表（键=row.key）。裁定 12：
+ * - 行自身命中：活跃 agent=「已导入」，归档 agent=「已归档」；
+ * - 父行聚合：自身无匹配且 childCount>0 且**全部后代都命中「已导入」**才标
+ *   imported；部分命中或含归档子=不标（子各自标）；
+ * - 自身命中优先于聚合（父自己是归档体就标「已归档」，不被子的 imported 盖掉）。
+ */
+export function buildImportRowBadgeMap(
+  treeItems: ReadonlyArray<ImportTreeItem>,
+  index: ReadonlyMap<string, ImportAgentHandleFacts>,
+): Map<string, ImportRowBadge> {
+  const badges = new Map<string, ImportRowBadge>();
+  if (index.size === 0) return badges;
+  const own = new Map<string, ImportAgentHandleFacts>();
+  const importedChildren = new Map<string, number>();
+  for (const item of treeItems) {
+    if (item.kind !== "session") continue;
+    const facts = classifyImportRowBadge(item.row, index);
+    if (!facts) continue;
+    own.set(item.row.key, facts);
+    if (item.depth === 1 && !facts.archived) {
+      importedChildren.set(item.rootKey, (importedChildren.get(item.rootKey) ?? 0) + 1);
+    }
+  }
+  for (const item of treeItems) {
+    if (item.kind !== "session") continue;
+    const facts = own.get(item.row.key);
+    if (facts) {
+      badges.set(item.row.key, {
+        state: facts.archived ? "archived" : "imported",
+        agentId: facts.agentId,
+      });
+      continue;
+    }
+    if (item.depth === 0 && item.childCount > 0) {
+      if (importedChildren.get(item.rootKey) === item.childCount) {
+        badges.set(item.row.key, { state: "imported", agentId: null });
+      }
+    }
+  }
+  return badges;
 }

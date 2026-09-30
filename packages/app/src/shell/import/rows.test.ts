@@ -2,21 +2,30 @@
 // 回退、勾选幂等与取消、导入结果分类（daemon 的「already imported」幂等语义）。
 // KI-4 验收 2：标题回退矩阵（last→first→官方）、nameLabel、buildImportTree
 // （父子嵌套/孤儿子组/自父防御/两层展平/顺序保持）。
+// B4-IMPORT（裁定 11/12）：rootKey/childCount、默认折叠/搜索自动展开、
+// handle↔persistence 徽标匹配（sessionId/nativeHandle 双字段、provider 域、
+// 活跃优先）与父行聚合。
 import { describe, expect, it } from "vitest";
 import type { FetchRecentProviderSessionEntry } from "@getpaseo/client/internal/daemon-client";
 import {
+  applyImportTreeCollapse,
+  buildImportAgentHandleIndex,
+  buildImportRowBadgeMap,
   buildImportToastParts,
   buildImportTree,
   classifyImportError,
+  classifyImportRowBadge,
   deriveImportParentLabel,
   deriveImportStatus,
   filterImportEntriesByQuery,
   importEntryMatchesQuery,
   importRowKey,
   importRowTimeLabel,
+  importTreeAutoExpandKeys,
   mapEntriesToImportRows,
   summarizeImportAttempts,
   toggleRowSelection,
+  type ImportAgentHandleSource,
   type ImportStatusInput,
   type ImportTreeItem,
 } from "./rows";
@@ -590,5 +599,215 @@ describe("buildImportTree", () => {
     );
     expect(handles).toEqual(["x", "y"]); // 各恰好一次，无 depth2。
     expect(items.every((item) => item.depth <= 1)).toBe(true);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// B4-IMPORT（批次四 F6/F7，裁定 11/12）。
+// ---------------------------------------------------------------------------
+
+/** 折叠坐标断言：`handle@depth/n=childCount` / `group:N`。 */
+function treeUnits(items: ImportTreeItem[]): string[] {
+  return items.map((item) =>
+    item.kind === "session"
+      ? `${item.row.providerHandleId}@${item.depth}:${item.childCount}`
+      : `group:${item.childCount}`,
+  );
+}
+
+describe("buildImportTree collapse coordinates (B4-IMPORT)", () => {
+  it("parent carries childCount over all descendants; every member shares rootKey", () => {
+    // 孙两层展平后仍算父单元的子（折叠父=连孙一起收起）；册内后代紧随其在册父。
+    const rows = mapEntriesToImportRows(
+      [
+        omp("p", "2026-09-20T00:00:00.000Z"),
+        omp("c1", "2026-09-22T00:00:00.000Z", { parentHandleId: "p" }),
+        omp("g", "2026-09-23T00:00:00.000Z", { parentHandleId: "c1" }),
+      ],
+      () => null,
+    );
+    const items = buildImportTree(rows);
+    expect(treeUnits(items)).toEqual(["p@0:2", "c1@1:0", "g@1:0"]);
+    const rootKeys = new Set(items.map((item) => (item.kind === "session" ? item.rootKey : "")));
+    expect([...rootKeys]).toEqual(["omp:p"]);
+  });
+
+  it("orphan group counts its members at the group key; lone rows count zero", () => {
+    const rows = mapEntriesToImportRows(
+      [
+        omp("solo", "2026-09-25T00:00:00.000Z"),
+        omp("k1", "2026-09-24T00:00:00.000Z", { parentHandleId: "ghost" }),
+        omp("k2", "2026-09-23T00:00:00.000Z", { parentHandleId: "ghost" }),
+      ],
+      () => null,
+    );
+    const items = buildImportTree(rows);
+    expect(treeUnits(items)).toEqual(["solo@0:0", "group:2", "k1@1:0", "k2@1:0"]);
+    const members = items.filter(
+      (item): item is Extract<ImportTreeItem, { kind: "session" }> =>
+        item.kind === "session" && item.depth === 1,
+    );
+    expect(members.every((item) => item.rootKey === "orphan:omp:ghost")).toBe(true);
+  });
+});
+
+describe("applyImportTreeCollapse + search auto-expand (裁定 11)", () => {
+  const rows = mapEntriesToImportRows(
+    [
+      omp("p", "2026-09-20T00:00:00.000Z"),
+      omp("c", "2026-09-21T00:00:00.000Z", { parentHandleId: "p" }),
+      omp("solo", "2026-09-22T00:00:00.000Z"),
+      omp("k", "2026-09-23T00:00:00.000Z", { parentHandleId: "ghost" }),
+    ],
+    () => null,
+  );
+  const items = buildImportTree(rows);
+
+  it("empty expansion set = default collapsed: depth0 rows and group headers survive", () => {
+    expect(treeShape(applyImportTreeCollapse(items, new Set()))).toEqual([
+      "group(ghost)@0",
+      "solo@0",
+      "p@0",
+    ]);
+  });
+
+  it("expanding a root reveals exactly its own descendants; orphan key reveals its group", () => {
+    expect(treeShape(applyImportTreeCollapse(items, new Set(["omp:p"])))).toEqual([
+      "group(ghost)@0",
+      "solo@0",
+      "p@0",
+      "c@1",
+    ]);
+    expect(treeShape(applyImportTreeCollapse(items, new Set(["orphan:omp:ghost"])))).toEqual([
+      "group(ghost)@0",
+      "k@1",
+      "solo@0",
+      "p@0",
+    ]);
+  });
+
+  it("auto-expand keys cover every unit with children (search hits must not hide)", () => {
+    expect([...importTreeAutoExpandKeys(items)]).toEqual(["orphan:omp:ghost", "omp:p"]);
+  });
+});
+
+describe("import agent handle index (裁定 12, 字段实证)", () => {
+  function agent(overrides: Partial<ImportAgentHandleSource> = {}): ImportAgentHandleSource {
+    return {
+      id: "agent-1",
+      provider: "codex",
+      archived: false,
+      persistence: { sessionId: "thread-1", nativeHandle: "thread-1" },
+      ...overrides,
+    };
+  }
+  const row = { providerId: "codex", providerHandleId: "thread-1" };
+
+  it("matches sessionId and nativeHandle alike — the omp resume shape only keeps the path in nativeHandle", () => {
+    // devd 实锤（4b0f1f3f）：恢复后 persistence.sessionId=运行期 UUID，
+    // transcript 路径只剩在 nativeHandle——只比 sessionId 会漏标。
+    const resumed = agent({
+      provider: "omp",
+      persistence: { sessionId: "01a0e029-uuid", nativeHandle: "C:\\sessions\\s.jsonl" },
+    });
+    const index = buildImportAgentHandleIndex([resumed]);
+    expect(
+      classifyImportRowBadge({ providerId: "omp", providerHandleId: "01a0e029-uuid" }, index),
+    ).toMatchObject({ agentId: "agent-1" });
+    expect(
+      classifyImportRowBadge(
+        { providerId: "omp", providerHandleId: "C:\\sessions\\s.jsonl" },
+        index,
+      ),
+    ).toMatchObject({ agentId: "agent-1" });
+  });
+
+  it("scopes by provider and compares byte-exact (server listByProviderSession 同口径)", () => {
+    const index = buildImportAgentHandleIndex([agent()]);
+    expect(
+      classifyImportRowBadge({ providerId: "claude", providerHandleId: "thread-1" }, index),
+    ).toBeNull();
+    expect(
+      classifyImportRowBadge({ providerId: "codex", providerHandleId: "Thread-1" }, index),
+    ).toBeNull();
+  });
+
+  it("skips persistence-less agents; active wins over archived for one handle", () => {
+    const index = buildImportAgentHandleIndex([
+      agent({ id: "mock", persistence: null }),
+      agent({ id: "old", archived: true }),
+      agent({ id: "new" }),
+    ]);
+    expect(classifyImportRowBadge(row, index)).toEqual({ agentId: "new", archived: false });
+  });
+
+  it("archived-only hit reports archived facts (已归档 徽标位)", () => {
+    const index = buildImportAgentHandleIndex([agent({ archived: true })]);
+    expect(classifyImportRowBadge(row, index)).toEqual({ agentId: "agent-1", archived: true });
+  });
+});
+
+describe("buildImportRowBadgeMap aggregation (裁定 12 父行)", () => {
+  function indexed(handles: Array<[id: string, handle: string, archived?: boolean]>) {
+    return buildImportAgentHandleIndex(
+      handles.map(([id, handle, archived]) => ({
+        id,
+        provider: "omp",
+        archived: archived ?? false,
+        persistence: { sessionId: handle },
+      })),
+    );
+  }
+  const rows = mapEntriesToImportRows(
+    [
+      omp("p", "2026-09-20T00:00:00.000Z"),
+      omp("c1", "2026-09-22T00:00:00.000Z", { parentHandleId: "p" }),
+      omp("c2", "2026-09-21T00:00:00.000Z", { parentHandleId: "p" }),
+    ],
+    () => null,
+  );
+  const tree = buildImportTree(rows);
+
+  it("all children imported → parent aggregated imported with no jump target", () => {
+    const badges = buildImportRowBadgeMap(
+      tree,
+      indexed([
+        ["a1", "c1"],
+        ["a2", "c2"],
+      ]),
+    );
+    expect(badges.get("omp:p")).toEqual({ state: "imported", agentId: null });
+    expect(badges.get("omp:c1")).toEqual({ state: "imported", agentId: "a1" });
+  });
+
+  it("partial coverage marks nobody at the parent (children keep own badges)", () => {
+    const badges = buildImportRowBadgeMap(tree, indexed([["a1", "c1"]]));
+    expect(badges.has("omp:p")).toBe(false);
+    expect(badges.get("omp:c1")?.state).toBe("imported");
+  });
+
+  it("an archived child breaks aggregation; the parent's own match outranks it", () => {
+    const mixed = buildImportRowBadgeMap(
+      tree,
+      indexed([
+        ["a1", "c1"],
+        ["a2", "c2", true],
+      ]),
+    );
+    expect(mixed.has("omp:p")).toBe(false);
+    expect(mixed.get("omp:c2")).toEqual({ state: "archived", agentId: "a2" });
+    const ownWins = buildImportRowBadgeMap(
+      tree,
+      indexed([
+        ["ap", "p", true],
+        ["a1", "c1"],
+        ["a2", "c2"],
+      ]),
+    );
+    expect(ownWins.get("omp:p")).toEqual({ state: "archived", agentId: "ap" });
+  });
+
+  it("empty index = no badges anywhere (目录未到货维持现状可勾选)", () => {
+    expect(buildImportRowBadgeMap(tree, new Map()).size).toBe(0);
   });
 });

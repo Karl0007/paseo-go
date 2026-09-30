@@ -1,19 +1,33 @@
 // 会话导入屏 (card C10, DESIGN §8): ＋菜单 →「导入会话」进入本屏。流程：
 // 选 host（KI-5：挂载单 host 自动选中免弹；顶栏主机 chip 点击恒弹
 // ShellHostPickerSheet，含「添加主机」行）→ 列可导入会话（标题/时间/项目，
-// 数据源 daemon `fetch_recent_provider_sessions`，已导入的由 daemon 过滤）→ 勾选
-// → 导入按钮（逐条进度 n/m）→ 成功 toast → 返回对话列表，新条目出现后点开即完整
-// timeline（C4 opener）。重复导入按 daemon 的「already imported」错误归类为幂等
-// 提示而非失败。状态判定/行映射/勾选/结果分类都在 @/shell/import/rows（纯逻辑，
-// 单测覆盖），屏只剩数据接线与渲染。KI-9 起本屏是 (detail) 根栈 push：返回按钮
-// =router.back 真弹栈（与硬件/手势返回同款），canGoBack 兑底 replace 回对话。
+// 数据源 daemon `fetch_recent_provider_sessions`）→ 勾选 → 导入按钮（逐条进度
+// n/m）→ 成功 toast → 返回对话列表，新条目出现后点开即完整 timeline（C4
+// opener）。B4-IMPORT（批次四 F6/F7 裁定 11/12）：树默认折叠子会话（父行
+// chevron+子计数，点 chevron 展开；搜索/过滤态强制展开；折叠态不持久化），
+// 行 handle 命中 agent 目录 persistence 时标「已导入/已归档」灰徽标+勾选禁用+
+// 点主体跳转（新 daemon 已在服务端把命中行滤掉，徽标是对旧 daemon/竞态窗口的
+// 双保险——实证链见卡报告）。重复导入按 daemon 的「already imported」错误归类
+// 为幂等提示而非失败。状态判定/行映射/树/折叠/徽标/勾选/结果分类都在
+// @/shell/import/rows（纯逻辑，单测覆盖），屏只剩数据接线与渲染。KI-9 起本屏
+// 是 (detail) 根栈 push：返回按钮=router.back 真弹栈（与硬件/手势返回同款），
+// canGoBack 兑底 replace 回对话。
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { FlatList, Pressable, RefreshControl, Text, View } from "react-native";
 import { router, type Href } from "expo-router";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useTranslation } from "react-i18next";
 import { StyleSheet } from "react-native-unistyles";
-import { Check, ChevronDown, ChevronLeft, Inbox, RotateCw, Search } from "lucide-react-native";
+import {
+  Archive,
+  Check,
+  ChevronDown,
+  ChevronLeft,
+  ChevronRight,
+  Inbox,
+  RotateCw,
+  Search,
+} from "lucide-react-native";
 import * as Haptics from "expo-haptics";
 import { Button } from "@/components/ui/button";
 import { LoadingSpinner } from "@/components/ui/loading-spinner";
@@ -38,21 +52,28 @@ import { SHELL_I18N_NAMESPACE } from "@/shell/i18n";
 import { OFFICIAL, SHELL } from "@/shell/routes";
 import { detailBack } from "@/shell/detail-back";
 import {
+  applyImportTreeCollapse,
+  buildImportRowBadgeMap,
   buildImportToastParts,
   buildImportTree,
   classifyImportError,
   deriveImportStatus,
   filterImportEntriesByQuery,
   importRowTimeLabel,
+  importTreeAutoExpandKeys,
   mapEntriesToImportRows,
   summarizeImportAttempts,
   type ImportAttempt,
   type ImportParentLabel,
   type ImportRow,
+  type ImportRowBadge,
   type ImportTreeItem,
 } from "@/shell/import/rows";
 import { useImportList } from "@/shell/import/use-import-list";
 import { useImportSelection } from "@/shell/import/use-import-selection";
+import { useImportAgentHandleIndex } from "@/shell/import/use-import-agent-index";
+import { shellNavigateToAgent } from "@/shell/chats/shell-navigate-to-agent";
+import { requestChatsFilter } from "@/shell/chats/filter-request";
 
 const IMPORT_LIST_LIMIT = 60;
 // C23: 搜索防抖（对齐官方 import-session-sheet 姿势，卡口径 ~300ms）。
@@ -62,6 +83,10 @@ const IMPORT_SEARCH_DEBOUNCE_MS = 300;
 // pressable style callback are created once at module scope.
 const ACCESSIBILITY_CHECKED = { checked: true };
 const ACCESSIBILITY_UNCHECKED = { checked: false };
+// B4-IMPORT: 折叠态初值（裁定 11「不持久化」=组件态，模块级空集=每次进屏全折叠
+// 的共享初值）；chevron 命中区外扩（C12 44dp 姿势的列表行内版）。
+const EMPTY_ROOTS: ReadonlySet<string> = new Set<string>();
+const CHEVRON_HIT_SLOP = { top: 12, bottom: 12, left: 8, right: 8 } as const;
 
 function rowPressStyle({ pressed }: { pressed: boolean }) {
   return [styles.row, pressed && styles.rowPressed];
@@ -72,6 +97,15 @@ function childRowPressStyle({ pressed }: { pressed: boolean }) {
   return [styles.row, styles.rowChild, pressed && styles.rowPressed];
 }
 
+/**
+ * B4-IMPORT（裁定 11/12）行渲染事实：
+ * - childCount>0 → 左侧 chevron+计数徽标「N」独立命中区（点 chevron=展开/收起，
+ *   行主体=勾选，现语义不动）；无子行占同宽空槽保持标题对齐。
+ * - badge=已导入/已归档 → 标题行灰徽标（归档带箱形 icon=壳内归档语义形，Q2③
+ *   同系）、勾选框禁用置灰；行主体改跳转：agentId 命中体→C4 open-intent /
+ *   归档体→对话 tab 已归档筛选；聚合徽标（agentId=null，父全子已导入）无单一
+ *   跳转目标，点主体退化为展开/收起。
+ */
 function ImportRowCell({
   row,
   depth,
@@ -79,7 +113,13 @@ function ImportRowCell({
   serverId,
   selected,
   disabled,
+  badge,
+  childCount,
+  rootKey,
+  expanded,
   onToggle,
+  onToggleExpand,
+  onOpenBadge,
 }: {
   row: ImportRow;
   depth: 0 | 1;
@@ -87,7 +127,13 @@ function ImportRowCell({
   serverId: string | null;
   selected: boolean;
   disabled: boolean;
+  badge: ImportRowBadge | null;
+  childCount: number;
+  rootKey: string;
+  expanded: boolean;
   onToggle: (key: string) => void;
+  onToggleExpand: (rootKey: string) => void;
+  onOpenBadge: (badge: ImportRowBadge) => void;
 }) {
   const { t } = useTranslation(SHELL_I18N_NAMESPACE);
   const ProviderIcon = getProviderIcon(row.providerId, serverId);
@@ -98,16 +144,51 @@ function ImportRowCell({
   // KI-4: meta = folder · nameLabel? · time（子代理名降级到此，不丢）；
   // preview 行不再渲染（title=末次输入，同文重复）。
   const meta = [row.folder, row.nameLabel, timeLabel].filter(Boolean).join(" · ");
-  const handlePress = useCallback(() => onToggle(row.key), [onToggle, row.key]);
+  const handleExpand = useCallback(() => onToggleExpand(rootKey), [onToggleExpand, rootKey]);
+  const handlePress = useCallback(() => {
+    if (badge?.agentId) {
+      onOpenBadge(badge);
+    } else if (badge) {
+      // 聚合徽标父行：没有一个「该会话」可跳，主体点击退化为展开/收起。
+      onToggleExpand(rootKey);
+    } else {
+      onToggle(row.key);
+    }
+  }, [badge, onOpenBadge, onToggle, onToggleExpand, rootKey, row.key]);
+  const badgeLabel = badge
+    ? t(badge.state === "archived" ? "import.badgeArchived" : "import.badgeImported")
+    : null;
   return (
     <Pressable
       onPress={handlePress}
-      accessibilityRole="checkbox"
+      accessibilityRole={badge ? "button" : "checkbox"}
+      accessibilityLabel={badgeLabel ? `${row.title} · ${badgeLabel}` : undefined}
       accessibilityState={selected ? ACCESSIBILITY_CHECKED : ACCESSIBILITY_UNCHECKED}
       disabled={disabled}
       testID={`shell-import-row-${index}`}
       style={depth === 1 ? childRowPressStyle : rowPressStyle}
     >
+      {childCount > 0 ? (
+        <Pressable
+          onPress={handleExpand}
+          accessibilityRole="button"
+          accessibilityLabel={t(expanded ? "import.collapseChildren" : "import.expandChildren", {
+            count: childCount,
+          })}
+          hitSlop={CHEVRON_HIT_SLOP}
+          testID={`shell-import-row-${index}-chevron`}
+          style={styles.rowChevron}
+        >
+          {expanded ? (
+            <ChevronDown size={15} color={styles.chevron.color} />
+          ) : (
+            <ChevronRight size={15} color={styles.chevron.color} />
+          )}
+          <Text style={styles.rowChildCount}>{childCount}</Text>
+        </Pressable>
+      ) : (
+        <View style={styles.rowChevronSpacer} />
+      )}
       <ProviderIcon size={16} color={styles.rowIcon.color} />
       <View style={styles.rowBody}>
         <View style={styles.rowTitleRow}>
@@ -123,37 +204,75 @@ function ImportRowCell({
               {t("import.activeBadge")}
             </Text>
           ) : null}
+          {/* B4-IMPORT 裁定 12: 已导入（灰）/已归档（灰+箱形归档语义 icon）。 */}
+          {badge ? (
+            <View
+              style={styles.rowStateBadge}
+              testID={`shell-import-row-${index}-badge-${badge.state}`}
+            >
+              {badge.state === "archived" ? (
+                <Archive size={11} color={styles.rowStateBadgeText.color} />
+              ) : null}
+              <Text style={styles.rowStateBadgeText}>{badgeLabel}</Text>
+            </View>
+          ) : null}
         </View>
         <Text style={styles.rowMeta} numberOfLines={1}>
           {meta}
         </Text>
       </View>
-      <View style={[styles.checkbox, selected && styles.checkboxOn]}>
+      <View
+        style={[styles.checkbox, selected && styles.checkboxOn, badge && styles.checkboxDisabled]}
+      >
         {selected ? <Check size={14} color={styles.check.color} /> : null}
       </View>
     </Pressable>
   );
 }
 
-// KI-4: 孤儿子组组头（父不在列表）——不可点、不可勾选的 muted 行；
-// label 三态措辞：有名/裸 id（「源:」）/无名。
+// KI-4: 孤儿子组组头（父不在列表）——不可勾选的 muted 行；label 三态措辞：
+// 有名/裸 id（「源:」）/无名。B4-IMPORT: 组头=该组折叠单元的行主体，点组头
+// 展开/收起（chevron+计数与 session 父行同款）。
 function ImportOrphanGroupHeader({
   label,
   index,
+  childCount,
+  rootKey,
+  expanded,
+  onToggleExpand,
 }: {
   label: ImportParentLabel | null;
   index: number;
+  childCount: number;
+  rootKey: string;
+  expanded: boolean;
+  onToggleExpand: (rootKey: string) => void;
 }) {
   const { t } = useTranslation(SHELL_I18N_NAMESPACE);
   const text = label
     ? t(label.raw ? "import.orphanGroupRaw" : "import.orphanGroup", { parent: label.text })
     : t("import.orphanGroupUnknown");
+  const handleExpand = useCallback(() => onToggleExpand(rootKey), [onToggleExpand, rootKey]);
   return (
-    <View style={styles.orphanGroup} testID={`shell-import-orphan-group-${index}`}>
+    <Pressable
+      onPress={handleExpand}
+      accessibilityRole="button"
+      accessibilityLabel={t(expanded ? "import.collapseChildren" : "import.expandChildren", {
+        count: childCount,
+      })}
+      testID={`shell-import-orphan-group-${index}`}
+      style={styles.orphanGroup}
+    >
+      {expanded ? (
+        <ChevronDown size={15} color={styles.chevron.color} />
+      ) : (
+        <ChevronRight size={15} color={styles.chevron.color} />
+      )}
       <Text style={styles.orphanGroupText} numberOfLines={1}>
         {text}
       </Text>
-    </View>
+      <Text style={styles.rowChildCount}>{childCount}</Text>
+    </Pressable>
   );
 }
 
@@ -287,12 +406,72 @@ export default function ShellImportScreen() {
   // 被过滤掉的父自然让子成为孤儿组。
   const treeItems = useMemo(() => buildImportTree(rows), [rows]);
 
+  // B4-IMPORT 裁定 12: 行 handle ↔ agent 目录 persistence（sessionId/nativeHandle
+  // 双字段，服务端 listByProviderSession 同款口径）→ 已导入/已归档徽标表；
+  // 父行全子「已导入」才聚合标。目录未订阅到时 index 为空=全行维持现状。
+  const agentIndex = useImportAgentHandleIndex(serverId);
+  const badgeMap = useMemo(
+    () => buildImportRowBadgeMap(treeItems, agentIndex),
+    [agentIndex, treeItems],
+  );
+
+  // B4-IMPORT 裁定 11: 折叠态=纯组件态（不持久化，每次进屏默认全折叠）；
+  // serverId 存在值里=切主机同拍作废，旧主机的展开键不读。搜索/过滤态强制展开
+  // 所有带子单元（能进树的 depth1 都是命中者，收起=把搜索结果藏起来）。
+  const [expandedState, setExpandedState] = useState<{
+    serverId: string | null;
+    keys: ReadonlySet<string>;
+  }>({ serverId: null, keys: EMPTY_ROOTS });
+  const expandedRoots = useMemo(() => {
+    const manual = expandedState.serverId === serverId ? expandedState.keys : EMPTY_ROOTS;
+    if (normalizedQuery.length === 0) return manual;
+    const auto = importTreeAutoExpandKeys(treeItems);
+    if (auto.size === 0) return manual;
+    if (manual.size === 0) return auto;
+    return new Set([...auto, ...manual]);
+  }, [expandedState, normalizedQuery, serverId, treeItems]);
+  const visibleItems = useMemo(
+    () => applyImportTreeCollapse(treeItems, expandedRoots),
+    [expandedRoots, treeItems],
+  );
+  const handleToggleExpand = useCallback(
+    (rootKey: string) => {
+      setExpandedState((prev) => {
+        const base = prev.serverId === serverId ? prev.keys : EMPTY_ROOTS;
+        const next = new Set(base);
+        if (next.has(rootKey)) next.delete(rootKey);
+        else next.add(rootKey);
+        return { serverId, keys: next };
+      });
+    },
+    [serverId],
+  );
+
   // KI-13: 勾选集生命周期（含切主机复位）在 useImportSelection；rows 由
   // useImportList 切换同拍清空——列表与勾选两侧都进新态，旧主机零残留。
   const { selectedSet, toggle: handleToggle, clear: clearSelection } = useImportSelection(serverId);
+  // 裁定 12: 徽标行注定幂等/失败——勾选禁用之外，提交集同口径剔除（勾选后
+  // 目录才到货的竞态行也进不了 runImport；classifyImportError 链保留兜底）。
   const selectedRows = useMemo(
-    () => rows.filter((row) => selectedSet.has(row.key)),
-    [rows, selectedSet],
+    () => rows.filter((row) => selectedSet.has(row.key) && !badgeMap.has(row.key)),
+    [badgeMap, rows, selectedSet],
+  );
+
+  // B4-IMPORT 裁定 12: 徽标行点主体跳转。已导入→该会话（C4 open-intent，与
+  // 对话行同一 shellNavigateToAgent 通道）；已归档→对话 tab 已归档筛选——
+  // filter 经模块总线投递（宽屏 body 在 navigator 外，路由参数到不了它，
+  // section-focus 同构），导航动词 navigate=回到并激活 chats tab（不新增栈帧）。
+  const handleOpenBadge = useCallback(
+    (badge: ImportRowBadge) => {
+      if (!serverId || !badge.agentId) return;
+      if (badge.state === "archived") {
+        requestChatsFilter("archived");
+        router.navigate(SHELL.chats as Href);
+      } else {
+        shellNavigateToAgent({ serverId, agentId: badge.agentId });
+      }
+    },
+    [serverId],
   );
 
   // KI-9 返回：真弹栈回来源（＋菜单在对话 tab，back 即回对话列表）；深链直达时
@@ -391,12 +570,34 @@ export default function ShellImportScreen() {
           serverId={serverId}
           selected={selectedSet.has(item.row.key)}
           disabled={progress !== null}
+          badge={badgeMap.get(item.row.key) ?? null}
+          childCount={item.childCount}
+          rootKey={item.rootKey}
+          expanded={item.depth === 0 && expandedRoots.has(item.rootKey)}
           onToggle={handleToggle}
+          onToggleExpand={handleToggleExpand}
+          onOpenBadge={handleOpenBadge}
         />
       ) : (
-        <ImportOrphanGroupHeader label={item.label} index={index} />
+        <ImportOrphanGroupHeader
+          label={item.label}
+          index={index}
+          childCount={item.childCount}
+          rootKey={item.key}
+          expanded={expandedRoots.has(item.key)}
+          onToggleExpand={handleToggleExpand}
+        />
       ),
-    [handleToggle, progress, selectedSet, serverId],
+    [
+      badgeMap,
+      expandedRoots,
+      handleOpenBadge,
+      handleToggle,
+      handleToggleExpand,
+      progress,
+      selectedSet,
+      serverId,
+    ],
   );
   const keyExtractor = useCallback(
     (item: ImportTreeItem) => (item.kind === "session" ? item.row.key : item.key),
@@ -484,7 +685,7 @@ export default function ShellImportScreen() {
       </View>
 
       <FlatList
-        data={treeItems}
+        data={visibleItems}
         keyExtractor={keyExtractor}
         renderItem={renderItem}
         contentContainerStyle={styles.listContent}
@@ -615,8 +816,12 @@ const styles = StyleSheet.create((theme) => ({
     paddingLeft: theme.spacing[8],
   },
   // KI-4: 孤儿子组组头——无底边线，与成员贴成一个视觉块，块间分隔沿用上一行
-  // session 行的底边线。
+  // session 行的底边线。B4-IMPORT: 组头整体=折叠单元主体（点=展开/收起），
+  // chevron+计数与 session 父行同款。
   orphanGroup: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: theme.spacing[2],
     paddingHorizontal: theme.spacing[4],
     paddingTop: theme.spacing[3],
     paddingBottom: theme.spacing[1],
@@ -630,6 +835,42 @@ const styles = StyleSheet.create((theme) => ({
     color: theme.colors.statusWarning,
     fontSize: theme.fontSize.sm,
     fontWeight: theme.fontWeight.medium,
+  },
+  // B4-IMPORT 裁定 12: 状态徽标=灰 chip（已导入纯文字；已归档加箱形 icon，
+  // Q2③ 归档图标语系）。刻意小一号弱于「可能活跃」——它是事实不是启发式，
+  // 但行主角仍是标题。
+  rowStateBadge: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 3,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: theme.colors.border,
+    borderRadius: 4,
+    paddingHorizontal: 5,
+    paddingVertical: 1,
+  },
+  rowStateBadgeText: {
+    color: theme.colors.foregroundMuted,
+    fontSize: theme.fontSize.sm,
+  },
+  // B4-IMPORT 裁定 11: chevron+子计数徽标「N」=独立命中区；无子行占同宽空槽，
+  // depth0 各行标题对齐不随折叠态抖动。
+  rowChevron: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 2,
+    minWidth: 30,
+    paddingVertical: 2,
+  },
+  rowChevronSpacer: {
+    width: 30,
+  },
+  chevron: {
+    color: theme.colors.foregroundMuted,
+  },
+  rowChildCount: {
+    color: theme.colors.foregroundMuted,
+    fontSize: theme.fontSize.sm,
   },
   rowMeta: {
     color: theme.colors.foregroundMuted,
@@ -647,6 +888,10 @@ const styles = StyleSheet.create((theme) => ({
   checkboxOn: {
     backgroundColor: theme.colors.accent,
     borderColor: theme.colors.accent,
+  },
+  // 裁定 12: 徽标行勾选禁用——置灰即可，跳转反馈由徽标 chip 承担。
+  checkboxDisabled: {
+    opacity: 0.35,
   },
   check: {
     color: theme.colors.accentForeground,
