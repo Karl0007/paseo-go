@@ -5,6 +5,7 @@
 // tie-break) and the band width the card ruled.
 import { describe, expect, it } from "vitest";
 import {
+  isInsideShellEdgeBand,
   resolveShellEdgeSwipeIntent,
   SHELL_EDGE_BACK_ACTIVATE_DP,
   SHELL_EDGE_BAND_WIDTH_DP,
@@ -56,5 +57,25 @@ describe("resolveShellEdgeSwipeIntent", () => {
     expect(resolveShellEdgeSwipeIntent({ deltaX: SHELL_EDGE_BACK_ACTIVATE_DP, deltaY: 6 })).toBe(
       "back",
     );
+  });
+});
+
+describe("isInsideShellEdgeBand", () => {
+  it("keeps the band at the ruled 32dp and nothing wider", () => {
+    expect(isInsideShellEdgeBand(0)).toBe(true);
+    expect(isInsideShellEdgeBand(SHELL_EDGE_BAND_WIDTH_DP)).toBe(true);
+    expect(isInsideShellEdgeBand(SHELL_EDGE_BAND_WIDTH_DP + 0.5)).toBe(false);
+  });
+
+  it("compares dp against dp — a density-scaled band is the bug this replaces", () => {
+    // The gate runs against RNGH's `absoluteX`, which Android already converts
+    // to dp (`PixelUtil.toDIPFromPixel`) and iOS reports in points. Multiplying
+    // the band by `PixelRatio.get()` compared 80 against a dp coordinate, so on
+    // a 2.5-density device any right-drag starting within 80dp of the left edge
+    // was stolen from the session underneath.
+    const density = 2.5;
+    expect(isInsideShellEdgeBand(SHELL_EDGE_BAND_WIDTH_DP * density)).toBe(false);
+    // The real edge touch: 80 raw px on a 2.5-density screen arrives as 32dp.
+    expect(isInsideShellEdgeBand(80 / density)).toBe(true);
   });
 });

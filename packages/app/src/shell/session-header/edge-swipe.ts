@@ -16,6 +16,19 @@ export type ShellEdgeSwipeIntent = "back" | "fail" | "wait";
 /** Width of the transparent left-edge band, dp (card C21: ≈32px). */
 export const SHELL_EDGE_BAND_WIDTH_DP = 32;
 
+/**
+ * Left-edge band gate — dp against dp. RNGH hands `absoluteX` already converted
+ * to density-independent units (Android: `PixelUtil.toDIPFromPixel` in
+ * `GestureHandler.kt`; iOS: points), so the start-x limit must NOT be scaled by
+ * `PixelRatio.get()`: that compared 32 × density against a dp coordinate and
+ * opened the band to 80dp on a 2.5-density device, stealing session drags that
+ * start well inside the screen.
+ */
+export function isInsideShellEdgeBand(startXDp: number): boolean {
+  "worklet";
+  return startXDp <= SHELL_EDGE_BAND_WIDTH_DP;
+}
+
 /** Rightward travel that commits the swipe to 返回, dp. */
 export const SHELL_EDGE_BACK_ACTIVATE_DP = 24;
 

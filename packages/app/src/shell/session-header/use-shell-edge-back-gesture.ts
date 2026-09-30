@@ -19,14 +19,13 @@
 // mirrors the official open gesture: a code block scrolled off its leading
 // edge keeps its own rightward swipe.
 import { useCallback, useMemo } from "react";
-import { PixelRatio } from "react-native";
 import { Gesture } from "react-native-gesture-handler";
 import { useSharedValue } from "react-native-reanimated";
 import { detailBack } from "@/shell/detail-back";
 import { SHELL } from "@/shell/routes";
 import { scheduleOnRN } from "react-native-worklets";
 import { useHorizontalScrollOptional } from "@/contexts/horizontal-scroll-context";
-import { resolveShellEdgeSwipeIntent, SHELL_EDGE_BAND_WIDTH_DP } from "./edge-swipe";
+import { isInsideShellEdgeBand, resolveShellEdgeSwipeIntent } from "./edge-swipe";
 
 export function useShellEdgeBackGesture(enabled: boolean) {
   const horizontalScroll = useHorizontalScrollOptional();
@@ -39,9 +38,6 @@ export function useShellEdgeBackGesture(enabled: boolean) {
     // onto (shell)/chats instead of swallowing the swipe.
     detailBack(SHELL.chats);
   }, []);
-
-  // The layer spans the window, so the card's ≈32dp band is a start-x limit.
-  const edgeLimitPx = SHELL_EDGE_BAND_WIDTH_DP * PixelRatio.get();
 
   return useMemo(
     () =>
@@ -60,7 +56,8 @@ export function useShellEdgeBackGesture(enabled: boolean) {
           if (
             !touch ||
             event.numberOfTouches !== 1 ||
-            touchStartX.value > edgeLimitPx ||
+            // Band gate: dp against dp — RNGH's absoluteX is already density-free.
+            !isInsideShellEdgeBand(touchStartX.value) ||
             horizontalScroll?.isAnyScrolledRight.value ||
             horizontalScroll?.activeGestureStartedScrolled.value
           ) {
@@ -77,6 +74,6 @@ export function useShellEdgeBackGesture(enabled: boolean) {
         .onEnd((_event, success) => {
           if (success) scheduleOnRN(requestBack);
         }),
-    [edgeLimitPx, enabled, horizontalScroll, requestBack, touchStartX, touchStartY],
+    [enabled, horizontalScroll, requestBack, touchStartX, touchStartY],
   );
 }
