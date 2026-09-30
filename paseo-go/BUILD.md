@@ -209,11 +209,15 @@ $ADB = "$env:LOCALAPPDATA\Android\platform-tools\adb.exe"
 
 CI=ubuntu runner（JDK21+镜像自带 Android SDK，AGP 自动补组件）：`PASEO_GO=1 EXPO_PUBLIC_PASEO_GO_SHELL=1 EXPO_PUBLIC_PASEO_GO_UPSTREAM=<上游短sha> ENTRY_FILE=packages/app/index.ts` + 壳侧桩（§3.5 坑①同物，workflow 内联生成）+ `expo prebuild --clean` + `gradlew :app:assembleRelease`（arm64-v8a 单 ABI）。**linux hermesc=Optimized，§3.5 坑②(win64 debug OOM)整套不存在，无需 afterEvaluate 补丁/外部 hermesc/WSL**——本机一键链的 phase0-4 在 CI 全部不需要。prebuild 后断言 `applicationId 'app.paseo.shell'`（坑⑥漂移防线）。
 
+**go.4-6 实锤：16GB 托管 runner 打不出本 APK**——`Assemble release APK` 三连被宿主驱逐（`The runner has received a shutdown signal`，均发生在 metro bundle 写完瞬间，java 6g + metro node 8g cap + linux hermesc 48MB bundle 编译三者叠加超 16GB 宿主压力；`gh run rerun --failed` 一次同点死）。go.6 的 APK=本机 `build-release-wsl.sh` 全链重打（见 RELEASE.md go.6 行）。CI 化下轮候选：**A**=NODE_OPTIONS 降 6144 + `-Dorg.gradle.workers.max=2` 压峰值；**B**=self-hosted runner（用户另一台 Linux 机，DEPLOY-NOTES 同规范）。
+
+**go.6 新增 CI 事实**：镜像根来自 Windows tarball 快照 → 全仓文件 git mode=100644（无 100755），linux desktop 构建 EACCES on `resources/bin/paseo`——workflow 已在 linux job 内 `chmod +x packages/desktop/bin/paseo`、APK job `chmod +x gradlew`（CI 侧修，不动仓内文件）。CLI 打包顺序=上游 Dockerfile 证明过的依赖序（bare `npm ci` 无 workspace dist，cli 先 pack 必死 TS2307）。
+
 **keystore 保管纪律**：签名=RN 模板 debug keystore（cert SHA-256 `fac61745dc…91033b9c`，与 M1 装机包同源=可 `-r` 升级）。⚠ 注意 `~/.android/debug.keystore` 是**另一把**（cert `5E8F…`），别混。保管三处：① public 仓 secret `PASEO_DEBUG_KEYSTORE`（base64，CI 写回 `android/app/debug.keystore`——gradle 模板 release 块本就指 `file('debug.keystore')`，**零 gradle 改动**）；② 本机副本 `C:/work/paseo-go-keystore/debug.keystore`（仓外，不入库）；③ 源头=prebuild 模板自带（`packages/app/android/app/debug.keystore`，android/ gitignored）。正式签名 keystore 仍是发布前待办（换 keystore 会断装机升级链，需配合卸载重装）。
 
 ### 6.4 上游 workflow 冲突处置（零触点原则）
 
-上游 12 个 workflow 逐个核 triggers：与 `v*.*.*-go.*` 撞 tag 且缺凭据必红的 4 个——`android-apk-release.yml`(EXPO*TOKEN)、`deploy-app.yml`(CLOUDFLARE_API_TOKEN)、`desktop-release.yml`(APPLE*\*)、`release-notes-sync.yml`(GITHUB_TOKEN 够用但会用 CHANGELOG 覆写我们的 release 说明)——在 **public 仓仓库级禁用**（`gh api -X PUT …/workflows/<id>/disable`，不改文件=不扩触点；禁用态是服务端属性，镜像 force-push 不复原）。第 5 个禁用=`docker.yml`：纯 GITHUB_TOKEN 本可用，但其 setup 断言 `package.json.version == tag去v`，与我们的 `0.10.2-go.N` 系列天然冲突（go.1-3 三轮 publish 全红实锤），不改上游文件只能禁。其余 7 个 trigger=main/PR/manual，镜像分支 `paseo-go/v0.1.0` 上天然休眠。安全面：public 仓非 owner 不能推 tag，secrets 只在 owner 推 tag 时可达；`allowed_actions=local` **未设**（会连 actions/checkout 一起禁掉，本仓 workflow 全瘫）。
+上游 12 个 workflow 逐个核 triggers：与 `v*.*.*-go.*` 撞 tag 且缺凭据必红的 4 个——`android-apk-release.yml`(`EXPO_TOKEN`)、`deploy-app.yml`(`CLOUDFLARE_API_TOKEN`)、`desktop-release.yml`(`APPLE_*`)、`release-notes-sync.yml`(GITHUB_TOKEN 够用但会用 CHANGELOG 覆写我们的 release 说明)——在 **public 仓仓库级禁用**（`gh api -X PUT …/workflows/<id>/disable`，不改文件=不扩触点；禁用态是服务端属性，镜像 force-push 不复原）。第 5 个禁用=`docker.yml`：纯 GITHUB_TOKEN 本可用，但其 setup 断言 `package.json.version == tag去v`，与我们的 `0.10.2-go.N` 系列天然冲突（go.1-3 三轮 publish 全红实锤），不改上游文件只能禁。其余 7 个 trigger=main/PR/manual，镜像分支 `paseo-go/v0.1.0` 上天然休眠。安全面：public 仓非 owner 不能推 tag，secrets 只在 owner 推 tag 时可达；`allowed_actions=local` **未设**（会连 actions/checkout 一起禁掉，本仓 workflow 全瘫）。
 
 ### 6.5 镜像全量重建 runbook（本轮实测版）
 
