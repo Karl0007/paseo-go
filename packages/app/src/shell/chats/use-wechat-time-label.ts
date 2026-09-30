@@ -21,6 +21,10 @@ import { SHELL_I18N_NAMESPACE } from "@/shell/i18n";
 export interface WechatTimeLabels {
   /** 「昨天」/ "Yesterday" — the only tier that needs a word. */
   yesterday: string;
+  /** B4 review R4-15: the weekday tier formats in the APP language (the same source
+   *  as `yesterday`), never the device locale — a zh app on an en device must not
+   *  mix "Yesterday" and 「周三」 in one column. */
+  locale: string;
 }
 
 export interface WechatTimeDescription {
@@ -79,8 +83,13 @@ export function describeWechatTime(
 
   if (days === 1) return { label: labels.yesterday, resolution: "hour" };
   if (days < 7) {
-    // Locale-driven: 「周一」 on a zh device, "Mon" on an en one.
-    return { label: date.toLocaleDateString(undefined, { weekday: "short" }), resolution: "hour" };
+    // App-language driven (R4-15): 「周三」 in the zh bundle, "Wed" in the en one —
+    // `labels.locale` is i18n's resolved language, so this tier and 「昨天」 always
+    // speak the same language whatever the device is set to.
+    return {
+      label: date.toLocaleDateString(labels.locale, { weekday: "short" }),
+      resolution: "hour",
+    };
   }
   // Pinned numeric formats, not Intl date parts — the card fixes `MM-DD` /
   // `YYYY-MM-DD` and a locale-dependent separator would make the column jitter.
@@ -98,8 +107,12 @@ export function describeWechatTime(
  * null/undefined date → empty string (the caller renders nothing).
  */
 export function useWechatTimeLabel(date: Date | null | undefined): string {
-  const { t } = useTranslation(SHELL_I18N_NAMESPACE);
+  const { t, i18n } = useTranslation(SHELL_I18N_NAMESPACE);
   const yesterday = t("chats.time.yesterday");
+  // R4-15: the weekday tier reads the APP language, so the label set never mixes two
+  // languages in one column. `resolvedLanguage` is the bundle i18n actually picked
+  // (「zh-CN」 falls back to 「zh」); `language` is the fallback for a bare instance.
+  const locale = i18n.resolvedLanguage ?? i18n.language;
   // Keyed on the instant, not the Date object — the store parses a fresh Date per
   // payload, and identity churn would rebuild the subscription for an unchanged time.
   // R2-14: protocol dates are bare strings, so an Invalid Date reads as absent here
@@ -107,7 +120,9 @@ export function useWechatTimeLabel(date: Date | null | undefined): string {
   const ms = date ? date.getTime() : null;
   const time = ms !== null && Number.isFinite(ms) ? ms : null;
   const [label, setLabel] = useState(() =>
-    time === null ? "" : describeWechatTime(new Date(time), new Date(), { yesterday }).label,
+    time === null
+      ? ""
+      : describeWechatTime(new Date(time), new Date(), { yesterday, locale }).label,
   );
 
   useEffect(() => {
@@ -116,7 +131,7 @@ export function useWechatTimeLabel(date: Date | null | undefined): string {
       return undefined;
     }
     const source = new Date(time);
-    const labels = { yesterday };
+    const labels = { yesterday, locale };
     let current = describeWechatTime(source, new Date(), labels);
     setLabel(current.label);
 
@@ -140,7 +155,7 @@ export function useWechatTimeLabel(date: Date | null | undefined): string {
     };
     attach();
     return () => unsubscribe?.();
-  }, [time, yesterday]);
+  }, [time, yesterday, locale]);
 
   return label;
 }

@@ -89,19 +89,29 @@ export async function confirmOwnershipSend(
   return { proceed: ok, warned: true };
 }
 
-/** Look the agent up across every connected host's directory. */
-function findAgentFacts(agentId: string): GuardAgentFacts | null {
-  for (const session of Object.values(useSessionStore.getState().sessions)) {
-    const agent = session?.agents.get(agentId);
-    if (agent) {
-      return {
-        ownership: agent.ownership,
-        externalLooksActive: agent.externalLooksActive,
-        provider: agent.provider,
-      };
-    }
-  }
-  return null;
+/**
+ * The host a wrapped client belongs to. The install pass re-labels the SAME
+ * instance when a placeholder host (`local:…`) reconciles to its real serverId, so
+ * the call site never reads a stale key (R4-28).
+ */
+const serverIdByClient = new WeakMap<object, string>();
+
+/**
+ * Look the agent up by HOST + agent id (R4-28). The old form scanned every
+ * connected host's directory and took the first one that knew the id — two daemons
+ * can carry the same agent id, and host A's send would then be graded with host B's
+ * ownership facts (a false dialog, or worse, a missing one).
+ */
+function findAgentFacts(serverId: string | undefined, agentId: string): GuardAgentFacts | null {
+  const agent = serverId
+    ? useSessionStore.getState().sessions[serverId]?.agents.get(agentId)
+    : undefined;
+  if (!agent) return null;
+  return {
+    ownership: agent.ownership,
+    externalLooksActive: agent.externalLooksActive,
+    provider: agent.provider,
+  };
 }
 
 function wrapSendAgentMessage(client: DaemonClient): void {
@@ -113,7 +123,7 @@ function wrapSendAgentMessage(client: DaemonClient): void {
     if (deps && isShellActiveNow()) {
       const { proceed } = await confirmOwnershipSend(
         deps,
-        findAgentFacts(agentId),
+        findAgentFacts(serverIdByClient.get(client), agentId),
         options?.activeTurnBehavior !== undefined,
       );
       // The official submit path catches this, restores the composer text and
@@ -135,7 +145,12 @@ export function installOwnershipSendGuard(deps: OwnershipSendGuardDeps): () => v
   const wrapAll = (): void => {
     for (const host of store.getHosts()) {
       const client = store.getClient(host.serverId);
-      if (client) wrapSendAgentMessage(client);
+      if (!client) continue;
+      // R4-28: labelled on EVERY pass, not only the first — a placeholder host
+      // (`local:…`) reconciles to its real serverId while the same client instance
+      // stays connected, and the WeakSet keeps the wrapper from being re-installed.
+      serverIdByClient.set(client, host.serverId);
+      wrapSendAgentMessage(client);
     }
   };
   wrapAll();

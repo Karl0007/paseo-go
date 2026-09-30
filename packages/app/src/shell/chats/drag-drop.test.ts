@@ -19,7 +19,12 @@ vi.mock("@react-native-async-storage/async-storage", () => {
   };
 });
 import { usePaseoGoPinsStore } from "@/shell/stores/pins";
-import { chatRefreshGateProps, decidePinDrop, dispatchPinDrop } from "@/shell/chats/drag-drop";
+import {
+  CHATS_LIST_CONTAINER_STYLE,
+  chatGestureBandProps,
+  decidePinDrop,
+  dispatchPinDrop,
+} from "@/shell/chats/drag-drop";
 import { createShellAgentActions, type ShellChatTarget } from "@/shell/shellAgentActions";
 
 // Only `key` reaches the store writes; the rest of the target is carried.
@@ -220,36 +225,37 @@ describe("dispatchPinDrop: cross-zone drops run the SAME actions the buttons run
   });
 });
 
-describe("chatRefreshGateProps (ruling ③)", () => {
+describe("chatGestureBandProps (ruling ③ + B4-REGRESS F10)", () => {
   const handleRefresh = () => {};
+  const band = (gestureLive: boolean, refreshing = false) =>
+    chatGestureBandProps({ gestureLive, refreshing, onRefresh: handleRefresh });
 
-  it("a live row gesture keeps the control MOUNTED but idle: refreshing=false, onRefresh retained", () => {
-    // B4-REGRESS F10: dropping onRefresh made the official wrapper UNMOUNT the
-    // RefreshControl, and the FlatList then remounted every cell — each row's
-    // unmount `closeFor` destroyed the just-opened long-press menu (menu opened
-    // then vanished ~400ms later). The control must stay mounted; the downward
-    // pull is suppressed by the co-riding `scrollEnabled={!gestureLock}` lock,
-    // not by removing the control.
-    expect(
-      chatRefreshGateProps({ gestureLive: true, refreshing: true, onRefresh: handleRefresh }),
-    ).toEqual({
+  it("keeps the refresh control MOUNTED and idle through a live gesture", () => {
+    // F10 trigger ①: dropping `onRefresh` unmounts the wrapper's RefreshControl,
+    // React moves the list's children out of it, every cell remounts, and each
+    // row's unmount `closeFor` destroys the just-opened long-press menu ~400ms
+    // later. The band may force `refreshing` false — it may never remove the hook.
+    expect(band(true, true)).toEqual({
+      scrollEnabled: false,
       refreshing: false,
       onRefresh: handleRefresh,
-    });
-    expect(
-      chatRefreshGateProps({ gestureLive: true, refreshing: false, onRefresh: handleRefresh }),
-    ).toEqual({
-      refreshing: false,
-      onRefresh: handleRefresh,
+      containerStyle: CHATS_LIST_CONTAINER_STYLE,
     });
   });
 
-  it("no live gesture passes the real refresh state through (普通下拉照常刷新)", () => {
-    expect(
-      chatRefreshGateProps({ gestureLive: false, refreshing: true, onRefresh: handleRefresh }),
-    ).toEqual({ refreshing: true, onRefresh: handleRefresh });
-    expect(
-      chatRefreshGateProps({ gestureLive: false, refreshing: false, onRefresh: handleRefresh }),
-    ).toEqual({ refreshing: false, onRefresh: handleRefresh });
+  it("hands the SAME flex:1 container object to both states (F10 trigger ②, R4-19)", () => {
+    // The official wrapper's fallback is `scrollEnabled ? {flex:1} : undefined`, so
+    // a band that rebuilds (or omits) the style collapses the list container to 0
+    // the moment a row arms — VirtualizedList then unmounts every cell and the menu
+    // dies the same way. Identity is the contract, not the value: same object.
+    expect(band(true).containerStyle).toBe(band(false).containerStyle);
+    expect(band(true).containerStyle).toEqual({ flex: 1 });
+  });
+
+  it("freezes scrolling only for the band; a plain pull keeps the real state", () => {
+    expect(band(true).scrollEnabled).toBe(false);
+    expect(band(false).scrollEnabled).toBe(true);
+    expect(band(false, true).refreshing).toBe(true);
+    expect(band(false, false).refreshing).toBe(false);
   });
 });

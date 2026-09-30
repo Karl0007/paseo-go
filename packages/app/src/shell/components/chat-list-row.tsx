@@ -3,10 +3,12 @@
 // right | unread badge (C18: dot only on idle rows, count pill only while approvals
 // pend) | subtitle by priority `[草稿] `+draft > `[需要回复] `+preview > preview
 // (`我: ` when the last message is the user's) | four-state light | ⋯ overflow.
-// The clock lives in its own `<Text>` and the draft read in the subtitle, so neither
-// a minute tick nor a keystroke in the composer re-renders the row. Tapping calls the
-// screen's opener (C4: official navigateToAgent — workspace route + open intent —
-// plus the read stamp; never the parse-stub push).
+// The clock lives in its own `<Text>`, so a minute tick never reaches the row; the
+// draft read lives in the ROW (R4-13: the a11y label has to speak the subtitle, and
+// `accessibilityLabel` replaces all child text), which is why a composer keystroke
+// re-renders exactly the one row it belongs to. Tapping calls the screen's opener
+// (C4: official navigateToAgent — workspace route + open intent — plus the read
+// stamp; never the parse-stub push).
 //
 // C3 interaction layer (card C3): every row wraps the official ContextMenu engine —
 // long press opens the menu, the ⋯ button opens the same menu for accessibility.
@@ -50,7 +52,11 @@ import {
   type IdentityColorName,
 } from "@/styles/identity-colors";
 import { projectAvatarFor } from "@/shell/chats/project-avatar";
-import { buildChatRowTitle, buildChatSubtitle } from "@/shell/chats/row-title";
+import {
+  buildChatSubtitle,
+  buildChatRowTitle,
+  type ChatSubtitleSegment,
+} from "@/shell/chats/row-title";
 import { useWechatTimeLabel } from "@/shell/chats/use-wechat-time-label";
 import { buildDraftStoreKey } from "@/stores/draft-keys";
 import { useDraftStore } from "@/stores/draft-store";
@@ -176,38 +182,13 @@ function ChatTimestamp({ at }: { at: Date }) {
   );
 }
 
-const ChatSubtitle = memo(function ChatSubtitle({
-  agent,
-  bucket,
-}: {
-  agent: AggregatedAgent;
-  bucket: SidebarStateBucket;
-}) {
-  const { t } = useTranslation(SHELL_I18N_NAMESPACE);
-  // Ruling 2: the row shows the composer's unsent text. The key is the official
-  // session composer's own (`agent:${serverId}:${agentId}` — buildDraftStoreKey, the
-  // exact call agent-panel.tsx passes to useAgentInputDraft), read through a selector
-  // that returns a primitive: the list only ever READS the draft store.
-  const draftKey = useMemo(
-    () => buildDraftStoreKey({ serverId: agent.serverId, agentId: agent.id }),
-    [agent.serverId, agent.id],
-  );
-  const draftText = useDraftStore((state) => {
-    const record = state.drafts[draftKey];
-    return record?.lifecycle === "active" ? record.input.text : "";
-  });
-  const flagKey = ACTIVITY_LABEL_KEY[bucket];
-  const segments = useMemo(
-    () =>
-      buildChatSubtitle({
-        draftText,
-        flagLabel: flagKey ? t(flagKey) : null,
-        preview: agent.lastMessagePreview,
-        previewRole: agent.lastMessageRole,
-        labels: { draft: t("chats.row.draft"), userPrefix: `${t("chats.row.me")}: ` },
-      }),
-    [draftText, flagKey, t, agent.lastMessagePreview, agent.lastMessageRole],
-  );
+// R4-13 (review): the subtitle is BUILT IN THE ROW and rendered here, because the
+// row's `accessibilityLabel` has to speak it — TalkBack got the whole subtitle
+// replaced by the label, so a draft or a preview nobody put in the label was simply
+// unsaid. One draft-store read serves both the pixels and the label; this component
+// renders and subscribes to nothing. (The clock keeps its own `<Text>` — a minute
+// tick still never reaches the row.)
+function ChatSubtitle({ segments }: { segments: ChatSubtitleSegment[] }) {
   if (segments.length === 0) return null;
   return (
     <Text style={styles.subtitle} numberOfLines={1}>
@@ -218,7 +199,7 @@ const ChatSubtitle = memo(function ChatSubtitle({
       ))}
     </Text>
   );
-});
+}
 
 interface ChatListRowProps {
   row: ChatRow<ShellChatAgent>;
@@ -340,6 +321,35 @@ function ChatRowInner({
     [projectName, agent.agent.cwd, agent.agent.title],
   );
   const displayTitle = alias ?? (composedTitle.length > 0 ? composedTitle : t("chats.untitled"));
+  // R4-13: the subtitle is built HERE so the row's a11y label can speak it (see
+  // `ChatSubtitle`). Ruling 2: it shows the composer's unsent text — the official
+  // session composer's own key (`agent:${serverId}:${agentId}` = buildDraftStoreKey,
+  // the exact call agent-panel.tsx passes to useAgentInputDraft), read through a
+  // selector returning a primitive: the list only ever READS the draft store. One
+  // subscription now serves the pixels and the label, so typing in a session
+  // re-renders THAT row (memo keeps it to one) — the price of 「[草稿]」 being
+  // audible at all. The clock still lives in its own `<Text>`: a minute tick never
+  // reaches the row.
+  const draftKey = useMemo(
+    () => buildDraftStoreKey({ serverId: agent.serverId, agentId: agent.agent.id }),
+    [agent.serverId, agent.agent.id],
+  );
+  const draftText = useDraftStore((state) => {
+    const record = state.drafts[draftKey];
+    return record?.lifecycle === "active" ? record.input.text : "";
+  });
+  const flagKey = ACTIVITY_LABEL_KEY[agent.bucket];
+  const subtitleSegments = useMemo(
+    () =>
+      buildChatSubtitle({
+        draftText,
+        flagLabel: flagKey ? t(flagKey) : null,
+        preview: agent.agent.lastMessagePreview,
+        previewRole: agent.agent.lastMessageRole,
+        labels: { draft: t("chats.row.draft"), userPrefix: `${t("chats.row.me")}: ` },
+      }),
+    [draftText, flagKey, t, agent.agent.lastMessagePreview, agent.agent.lastMessageRole],
+  );
   // 停止 only acts on an abortable turn: running, or blocked on an approval.
   const stoppable = agent.bucket === "running" || agent.bucket === "needs_input";
   const imported = isImportedProviderSession(agent.agent);
@@ -443,6 +453,10 @@ function ChatRowInner({
   // ruling 8 took it off the screen.
   const rowLabel = [
     displayTitle,
+    // R4-13: the subtitle line — 「[草稿] …」/「[需要回复] …」/「我: …」. `accessibilityLabel`
+    // REPLACES every child text, so before this the draft and the last message were
+    // unsaid to TalkBack: the eye's second line has to be the label's second phrase.
+    subtitleSegments.map((segment) => segment.text).join(""),
     unread ? t("chats.a11yUnread") : null,
     activityLabelKey ? t(activityLabelKey) : null,
     agent.bucket === "running" ? t("chats.activity.running") : null,
@@ -518,7 +532,7 @@ function ChatRowInner({
               rowKey={agent.key}
             />
           </View>
-          <ChatSubtitle agent={agent.agent} bucket={agent.bucket} />
+          <ChatSubtitle segments={subtitleSegments} />
         </View>
         <ChatStatusLight agent={agent.agent} bucket={agent.bucket} />
       </ContextMenuTrigger>

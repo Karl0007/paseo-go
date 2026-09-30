@@ -55,7 +55,6 @@
     "noHosts": "尚未配置任何主机。",
     "noHostsShort": "无主机",
     "hostsOnlineCount": "{{online}}/{{total}}",
-    "hostsMenu": "主机状态",
     "hostStatus": {
       "idle": "未连接",
       "connecting": "连接中",

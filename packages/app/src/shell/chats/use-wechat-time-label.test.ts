@@ -5,7 +5,7 @@
 import { describe, expect, it } from "vitest";
 import { describeWechatTime } from "./use-wechat-time-label";
 
-const LABELS = { yesterday: "昨天" };
+const LABELS = { yesterday: "昨天", locale: "zh-CN" };
 const local = (y: number, m: number, d: number, hh = 12, mm = 0) => new Date(y, m - 1, d, hh, mm);
 const label = (date: Date, now: Date) => describeWechatTime(date, now, LABELS).label;
 
@@ -29,11 +29,21 @@ describe("describeWechatTime", () => {
   it("uses the weekday for days 2-6 and drops to MM-DD on day 7", () => {
     const now = local(2026, 10, 1, 12, 0);
     for (const day of [29, 28, 27, 26, 25]) {
-      expect(label(local(2026, 9, day), now)).toBe(
-        local(2026, 9, day).toLocaleDateString(undefined, { weekday: "short" }),
-      );
+      const day0 = local(2026, 9, day);
+      expect(label(day0, now)).toBe(day0.toLocaleDateString(LABELS.locale, { weekday: "short" }));
     }
     expect(label(local(2026, 9, 24), now)).toBe("09-24");
+  });
+
+  it("formats the weekday tier in the injected app language, never the device's (R4-15)", () => {
+    // 2026-09-30 is a Wednesday. A zh app on an en device (or the reverse) must not
+    // mix 「Yesterday」 and 「周三」 in one column: the tier reads `labels.locale`.
+    const wed = local(2026, 9, 30, 12, 0);
+    const now = local(2026, 10, 5, 12, 0);
+    expect(describeWechatTime(wed, now, { yesterday: "昨天", locale: "zh-CN" }).label).toBe("周三");
+    expect(describeWechatTime(wed, now, { yesterday: "Yesterday", locale: "en" }).label).toBe(
+      "Wed",
+    );
   });
 
   it("zero-pads MM-DD inside the current year", () => {

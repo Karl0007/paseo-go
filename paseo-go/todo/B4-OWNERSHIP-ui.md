@@ -20,3 +20,8 @@
 - **codex**：警告文案弱化为「对方将看不到你这条消息」。
 - **opencode**：免弹窗直接放行（共享 DB 互相可见）。
 - 分级表读 RESEARCH-provider-dual-write.md 结论节，文案 zh/en。
+
+## 勘误（批次四 review R4-08，2026-10-01）
+
+- 验收帧 `evidence/B4-OWNERSHIP-UI/08-r4-dialog.png` **名实不符**：该帧实拍的是发送前状态（顶栏「外部·运行中」徽标 + composer 已输入 R4），画面里没有警告弹窗。已改名 `08-preflight-no-dialog.png`，它只证明「预发送态」这一半。
+- 裁定 14 要求的**弹窗真机证据 = `evidence/B4-R4OPEN/01-dialog.png`**（6202f3c06 R4 开屏守卫轮实拍，同一 `decideOwnershipSendWarning` 分级表 + 同一文案键）。复核庭据此把本卡从 P2 降 P3：行为面已闭合，残余只是帧命名卫生。

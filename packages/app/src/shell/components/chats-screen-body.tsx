@@ -76,7 +76,7 @@ import {
 } from "@/shell/chats/derive";
 import { createChatOpener } from "@/shell/chats/open-agent";
 import { OWNERSHIP_OPEN_DIALOG_KEYS, OWNERSHIP_SEND_BODY_KEY } from "@/shell/chats/ownership";
-import { chatRefreshGateProps, decidePinDrop, dispatchPinDrop } from "@/shell/chats/drag-drop";
+import { chatGestureBandProps, decidePinDrop, dispatchPinDrop } from "@/shell/chats/drag-drop";
 import {
   FILTER_SWIPE_PAGE_ARCHIVED,
   filterSwipePageForArchived,
@@ -446,11 +446,26 @@ export function ChatsScreenBody({ selectedAgentKey = null }: ShellScreenBodyProp
 
   const [refreshing, setRefreshing] = useState(false);
   const refreshTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // R4-09: the band, as a REF. Android's SwipeRefreshLayout intercepts a downward
+  // pull at the scroll top even with `scrollEnabled=false` (it only asks
+  // `canChildScrollUp()`), so locking the scroll does NOT suppress the refresh —
+  // and removing `onRefresh` to suppress it is exactly the F10 remount. The one
+  // lever that touches no prop shape is the callback itself: while a row gesture
+  // owns the touch, the pull is swallowed here.
+  const gestureLiveRef = useRef(false);
   const handleRefresh = useCallback(() => {
-    refreshAll();
+    const swallowed = gestureLiveRef.current;
+    if (!swallowed) refreshAll();
+    // A swallowed pull still needs its spinner put back down: the control raises
+    // its own before JS hears the event, and RN only calls native `setRefreshing`
+    // when the prop CHANGES — so the true→false cycle IS the reconciliation
+    // (settling immediately instead of after REFRESH_SETTLE_MS).
     setRefreshing(true);
     if (refreshTimer.current) clearTimeout(refreshTimer.current);
-    refreshTimer.current = setTimeout(() => setRefreshing(false), REFRESH_SETTLE_MS);
+    refreshTimer.current = setTimeout(
+      () => setRefreshing(false),
+      swallowed ? 0 : REFRESH_SETTLE_MS,
+    );
   }, [refreshAll]);
   useEffect(
     () => () => {
@@ -484,6 +499,14 @@ export function ChatsScreenBody({ selectedAgentKey = null }: ShellScreenBodyProp
   // stream — and R2-01: handleDragEnd below releases it out-of-band when the
   // native drag layer took the stream (no press_out will ever arrive).
   const [gestureLock, setGestureLock] = useState(false);
+  // R4-09: the band also lives in a ref because `handleRefresh` must read it
+  // WITHOUT re-subscribing — its identity is the RefreshControl's `onRefresh` prop,
+  // and churning that prop on every arm/release is exactly the shape change the
+  // official wrapper keys its child tree on (B4-REGRESS F10).
+  const handleGestureLockChange = useCallback((locked: boolean) => {
+    gestureLiveRef.current = locked;
+    setGestureLock(locked);
+  }, []);
 
   // B4-SWIPE (批次四 F5 裁定 10): 列表区横滑切 进行中↔已归档。状态源仍是上面的
   // `filter`——手势落地只调用同一个 `setFilter`（点 segment 也是它），绝不另立一份
@@ -537,14 +560,12 @@ export function ChatsScreenBody({ selectedAgentKey = null }: ShellScreenBodyProp
     [actions, dragLockHandoff, pinnedIds, normalizedQuery],
   );
 
-  // KI-11 ruling ③: while a row gesture is live (armed → menu → drag — the
-  // exact band `gestureLock` mirrors) the pull-to-refresh control is REMOVED
-  // and `refreshing` forced false. Android's SwipeRefreshLayout intercepts a
-  // downward pull at the scroll top even with scrollEnabled=false, and the
-  // official wrapper only hides it once the native drag has begun — too late
-  // for the 顶部向下拖 case ruling ③ names. A plain (never long-pressed)
-  // pull-down never arms, so refresh stays exactly where users expect it.
-  const refreshGate = chatRefreshGateProps({
+  // KI-11 ruling ③ + B4-REGRESS F10: the gesture band's list props, all four from
+  // one pure function (drag-drop.ts) — the control stays MOUNTED, `refreshing`
+  // forced false, `scrollEnabled` frozen, and `containerStyle` the same flex:1
+  // object in both states. The 顶部向下拖 pull itself is swallowed in
+  // `handleRefresh` (R4-09): Android intercepts it regardless of `scrollEnabled`.
+  const gestureBand = chatGestureBandProps({
     gestureLive: gestureLock,
     refreshing,
     onRefresh: handleRefresh,
@@ -613,7 +634,7 @@ export function ChatsScreenBody({ selectedAgentKey = null }: ShellScreenBodyProp
           draggable={draggable}
           drag={draggable ? drag : undefined}
           onDragStart={handleRowDragStart}
-          onGestureLockChange={setGestureLock}
+          onGestureLockChange={handleGestureLockChange}
           isActive={isActive}
           selected={item.row.agent.key === selectedAgentKey}
         />
@@ -625,7 +646,7 @@ export function ChatsScreenBody({ selectedAgentKey = null }: ShellScreenBodyProp
       searchActive,
       handleOpenChat,
       handleRowDragStart,
-      setGestureLock,
+      handleGestureLockChange,
       hostsById,
       handleRetryHost,
       selectedAgentKey,
@@ -711,11 +732,11 @@ export function ChatsScreenBody({ selectedAgentKey = null }: ShellScreenBodyProp
               keyExtractor={keyExtractor}
               renderItem={renderItem}
               onDragEnd={handleDragEnd}
-              scrollEnabled={!gestureLock}
-              containerStyle={styles.listContainer}
+              scrollEnabled={gestureBand.scrollEnabled}
+              containerStyle={gestureBand.containerStyle}
               contentContainerStyle={styles.listContent}
-              refreshing={refreshGate.refreshing}
-              onRefresh={refreshGate.onRefresh}
+              refreshing={gestureBand.refreshing}
+              onRefresh={gestureBand.onRefresh}
               ListEmptyComponent={listEmpty}
               extraData={selectedAgentKey}
               testID="shell-chats-list"
@@ -736,19 +757,12 @@ const styles = StyleSheet.create((theme) => ({
     flex: 1,
     paddingHorizontal: theme.spacing[2],
   },
-  // B4-SWIPE: 换页面板。flex:1 = 列表尺寸不变（容器塌陷=重挂面，见 listContainer 注）；
-  // overflow:hidden = 出场拍滑到墙外的部分真被裁掉，两页边界不露半个列表。
+  // B4-SWIPE: 换页面板。flex:1 = 列表尺寸不变（容器塌陷=重挂面，见
+  // `CHATS_LIST_CONTAINER_STYLE`）；overflow:hidden = 出场拍滑到墙外的部分真被裁掉，
+  // 两页边界不露半个列表。
   swipeSurface: {
     flex: 1,
     overflow: "hidden",
-  },
-  // B4-REGRESS F11: the official wrapper's `resolvedContainerStyle` falls back to
-  // `scrollEnabled ? {flex:1} : undefined`; passing our own flex:1 keeps the list
-  // container sized when the row gesture flips `scrollEnabled` false (arm → menu →
-  // drag). Without it the container collapses to 0, VirtualizedList unmounts every
-  // cell, and each row's unmount `closeFor` destroys the just-opened menu.
-  listContainer: {
-    flex: 1,
   },
   listContent: {
     paddingBottom: theme.spacing[8],

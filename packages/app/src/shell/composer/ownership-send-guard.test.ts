@@ -27,11 +27,18 @@ const h = vi.hoisted(() => ({
   // hosts → clients, as the runtime store hands them out.
   clients: new Map<string, { sendAgentMessage: Mock }>(),
   storeListeners: new Set<() => void>(),
-  // The directory the guard reads agent facts from (server s1). Values carry the
-  // same shape the real Agent rows do; the guard reads them through its own mock.
-  agents: new Map<string, unknown>(),
+  // Per-host directories keyed EXACTLY like the real session store
+  // (serverId → agentId → row): the guard's lookup is a host+agent composite (R4-28).
+  sessions: new Map<string, Map<string, unknown>>(),
   shellActive: true,
 }));
+
+/** Put one agent row into one host's directory. */
+function setAgent(serverId: string, agentId: string, row: unknown): void {
+  const directory = h.sessions.get(serverId) ?? new Map<string, unknown>();
+  directory.set(agentId, row);
+  h.sessions.set(serverId, directory);
+}
 
 vi.mock("@/runtime/host-runtime", () => ({
   getHostRuntimeStore: () => ({
@@ -47,7 +54,13 @@ vi.mock("@/runtime/host-runtime", () => ({
 }));
 
 vi.mock("@/stores/session-store", () => ({
-  useSessionStore: { getState: () => ({ sessions: { s1: { agents: h.agents } } }) },
+  useSessionStore: {
+    getState: () => ({
+      sessions: Object.fromEntries(
+        [...h.sessions.entries()].map(([serverId, agents]) => [serverId, { agents }]),
+      ),
+    }),
+  },
 }));
 
 vi.mock("@/shell/stores/settings", () => ({
@@ -78,7 +91,7 @@ function makeClient() {
 
 beforeEach(() => {
   h.clients.clear();
-  h.agents.clear();
+  h.sessions.clear();
   h.storeListeners.clear();
   h.shellActive = true;
   vi.mocked(confirmDialog).mockClear();
@@ -141,12 +154,13 @@ describe("installOwnershipSendGuard (the client wrapper)", () => {
     const first = makeClient();
     const firstOriginal = first.sendAgentMessage;
     h.clients.set("s1", first);
-    h.agents.set("a1", agentFacts());
+    setAgent("s1", "a1", agentFacts());
     const dispose = installOwnershipSendGuard(deps);
 
     const later = makeClient();
     const laterOriginal = later.sendAgentMessage;
     h.clients.set("s2", later);
+    setAgent("s2", "a1", agentFacts());
     for (const listener of h.storeListeners) listener();
 
     const options = { messageId: "m1", activeTurnBehavior: "interrupt" };
@@ -162,11 +176,34 @@ describe("installOwnershipSendGuard (the client wrapper)", () => {
     dispose();
   });
 
+  it("grades a send with ITS OWN host's facts when two hosts share an agent id (R4-28)", async () => {
+    // Agent ids are per-daemon, so the same id can exist on two connected hosts.
+    // The old first-hit scan graded host A's send with host B's ownership row.
+    const quiet = makeClient();
+    const quietOriginal = quiet.sendAgentMessage;
+    h.clients.set("host-quiet", quiet);
+    setAgent("host-quiet", "dup", agentFacts({ ownership: "paseo", externalLooksActive: false }));
+    const hot = makeClient();
+    h.clients.set("host-hot", hot);
+    setAgent("host-hot", "dup", agentFacts());
+    const dispose = installOwnershipSendGuard(deps);
+
+    await quiet.sendAgentMessage("dup", "mine", { activeTurnBehavior: "interrupt" });
+    expect(confirmDialog).not.toHaveBeenCalled();
+    expect(quietOriginal).toHaveBeenCalledWith("dup", "mine", {
+      activeTurnBehavior: "interrupt",
+    });
+
+    await hot.sendAgentMessage("dup", "theirs", { activeTurnBehavior: "interrupt" });
+    expect(confirmDialog).toHaveBeenCalledTimes(1);
+    dispose();
+  });
+
   it("取消 throws the localized note and never reaches the daemon", async () => {
     const client = makeClient();
     const original = client.sendAgentMessage;
     h.clients.set("s1", client);
-    h.agents.set("a1", agentFacts());
+    setAgent("s1", "a1", agentFacts());
     const dispose = installOwnershipSendGuard(deps);
     vi.mocked(confirmDialog).mockResolvedValueOnce(false);
 
@@ -181,7 +218,7 @@ describe("installOwnershipSendGuard (the client wrapper)", () => {
     const client = makeClient();
     const original = client.sendAgentMessage;
     h.clients.set("s1", client);
-    h.agents.set("a1", agentFacts());
+    setAgent("s1", "a1", agentFacts());
     const dispose = installOwnershipSendGuard(deps);
 
     await client.sendAgentMessage("a1", "drained", { messageId: "m9" });
@@ -198,7 +235,7 @@ describe("installOwnershipSendGuard (the client wrapper)", () => {
   it("re-install (language change) never asks twice for one send", async () => {
     const client = makeClient();
     h.clients.set("s1", client);
-    h.agents.set("a1", agentFacts());
+    setAgent("s1", "a1", agentFacts());
     const disposeA = installOwnershipSendGuard(deps);
     const disposeB = installOwnershipSendGuard({ ...deps });
     disposeA();

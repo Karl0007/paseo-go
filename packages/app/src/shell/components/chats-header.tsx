@@ -7,13 +7,14 @@
 // row (标题+胶囊+segment+搜索+＋ 单行). Q2 三档降级: the header measures its own row
 // width (onLayout; window-form-factor seed for the first frame) and the segment
 // steps 全称 → 短称 → 纯图标 (archived count survives all three tiers — C3's
-// 「隐藏堆可见」). 搜索 (C9: the icon morphs the bar into input + 取消, filtering the
-// list instantly). ＋菜单 (新建对话 = C17 direct push of the official /new screen
-// (DESIGN §14.7), 导入会话 = C10 push of the shell import screen). Menus ride the
-// official menu engine in its anchored-popover presentation (C19, DESIGN §14.3):
-// the engine default compact mode, anchoring under the trigger and clamping at the
-// right edge.
-import { useCallback, useMemo, useState } from "react";
+// 「隐藏堆可见」). R4-05: the tier is decided by MEASURED widths (pill + segment
+// group vs the column), not by a dp table written for one language's glyphs.
+// 搜索 (C9: the icon morphs the bar into input + 取消, filtering the list instantly).
+// ＋菜单 (新建对话 = C17 direct push of the official /new screen (DESIGN §14.7),
+// 导入会话 = C10 push of the shell import screen). Menus ride the official menu
+// engine in its anchored-popover presentation (C19, DESIGN §14.3): the engine
+// default compact mode, anchoring under the trigger and clamping at the right edge.
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { LayoutChangeEvent, Pressable, Text, View, useWindowDimensions } from "react-native";
 import { StyleSheet } from "react-native-unistyles";
 import { useTranslation } from "react-i18next";
@@ -42,13 +43,22 @@ const HOST_STATUS_LABEL_KEY: Record<HostRuntimeConnectionStatus, string> = {
 };
 
 // ---------------------------------------------------------------------------
-// B4-F1/Q2: segment 三级降级（按顶栏实测列宽的断点）。
-// 设备实据（B4-HEADER 帧轮，MatePad BRT-W09）：宽屏分栏列表列=260 (md)/300 (lg) dp
-// （tablet/metrics.ts 常量表 + 真机 uiautomator bounds 对账）；紧凑（手机/竖屏）
-// 顶栏=窗口宽 ≥384 量级。断点把三档钉在这三档现实宽度上：
-//   width < 280            → icon   （260 md 列：全称/短称都放不下 标题+胶囊+＋）
-//   280 ≤ width < 380      → short  （300 lg 列：「活跃/归档 N」+收缩胶囊装得下）
-//   width ≥ 380            → full   （紧凑全屏：全称「进行中/已归档 N」）
+// B4-F1/Q2: segment 三级降级。R4-05 复核（MatePad BRT-W09 @400dpi，uiautomator
+// bounds 实测，px/2.5=dp）证明「只按列宽断点分档」是单语种算术：同一字号 en 比 zh
+// 宽得多——300dp lg 列 en 短称档实测溢出 16dp（＋ 被推出列边界），380-405dp 电话
+// en 全称档溢出 31.6dp（标题只剩 36dp 截成「Cha…」，＋ 出界）；归档计数 1→128 还要
+// 再吃 ~12dp。静态预算盖不住这两个自由度。
+//
+// 实测台账（固定件 = 列内衬 16×2 + 槽位 gap 8×3 + 搜索/＋ 32×2 = 120）：
+//   胶囊「1/2」62.8dp（窄档收内边距后 54.8）/ 图标档裸点 34（窄档 26）
+//   segment 组：zh 全称 145 / zh 短称 119.6→103.6(窄档) / en 全称 185.6 /
+//             en 短称 134.4→118.4(窄档) / 图标档 95.6→79.6(窄档)
+//   标题：en「Chats」55.2 / zh「对话」40
+// 所以断点只当**首帧种子 + 上限**（三档仍钉在现实宽度 260 md / 300 lg / ≥380 紧凑），
+// 真档位由 `chatFilterSegmentFitsTier` 用 onLayout 实测宽决定：装不下就降一档，
+// 降完还装不下就退图标档；标题另过 `chatFilterTitleFits` 的宽门（宁可无标题，
+// 不出现「Cha…」）。窄两档（short/icon）的内边距收 12→8，给 en 短称挤出 24dp。
+//   seed: width < 280 → icon | 280 ≤ width < 380 → short | width ≥ 380 → full
 // ---------------------------------------------------------------------------
 
 export type ChatFilterSegmentTier = "full" | "short" | "icon";
@@ -56,12 +66,74 @@ export type ChatFilterSegmentTier = "full" | "short" | "icon";
 export const CHAT_FILTER_SEGMENT_SHORT_MIN_WIDTH_DP = 280;
 /** 全称档下限（列宽）：低于它退短称。 */
 export const CHAT_FILTER_SEGMENT_FULL_MIN_WIDTH_DP = 380;
+/**
+ * 标题的最小留宽：低于它宁可无标题。实测 zh「对话」40dp / en「Chats」55.2dp，
+ * 52 = 两语种都能完整显示的下限（R4-05 的「标题饿死」= 全称档在 380-405dp 电话上
+ * 只剩 36dp，截成「Cha…」；标题可 flexShrink，所以它从不造成溢出，只造成难看）。
+ */
+export const CHAT_FILTER_TITLE_MIN_WIDTH_DP = 52;
+/**
+ * 与 segment 无关的固定件宽（实测）：列内衬 16×2 + 槽位三个 gap 8×3 + 搜索/＋ 32×2。
+ * 胶囊和 segment 组各自由 onLayout 实测，所以这条算术对任何 locale/计数都成立。
+ */
+export const CHAT_FILTER_SEGMENT_CHROME_DP = 32 + 24 + 64;
 
-/** 实测列宽 → segment 档位（纯函数；三档断言在 chats-header.test.ts）。 */
+/** 实测列宽 → 档位上限（纯函数；三档断言在 chats-header.test.ts）。 */
 export function chatFilterSegmentTierForWidthDp(widthDp: number): ChatFilterSegmentTier {
   if (widthDp >= CHAT_FILTER_SEGMENT_FULL_MIN_WIDTH_DP) return "full";
   if (widthDp >= CHAT_FILTER_SEGMENT_SHORT_MIN_WIDTH_DP) return "short";
   return "icon";
+}
+
+const TIER_ORDER: readonly ChatFilterSegmentTier[] = ["icon", "short", "full"];
+
+/** 降一档；图标档是底线（再降没有可降的形态）。 */
+export function downgradeChatFilterSegmentTier(tier: ChatFilterSegmentTier): ChatFilterSegmentTier {
+  const i = TIER_ORDER.indexOf(tier);
+  return TIER_ORDER[i > 0 ? i - 1 : 0];
+}
+
+/** 两档取低（列宽上限与拟合上限的交）。 */
+export function lowerChatFilterSegmentTier(
+  a: ChatFilterSegmentTier,
+  b: ChatFilterSegmentTier,
+): ChatFilterSegmentTier {
+  return TIER_ORDER.indexOf(a) <= TIER_ORDER.indexOf(b) ? a : b;
+}
+
+/**
+ * R4-05: 这一档在实测列宽里装得下吗？槽位内容（胶囊 + segment 组 + 两个图标钮 +
+ * gap + 列内衬）超过列宽时，Yoga 压不动它们（segment/图标全 flexShrink:0，胶囊
+ * 在非图标档被 B4-F2 钉住固有宽），溢出直接把 ＋ 推出列边界——所以「装得下」必须
+ * 由实测宽判定，不能按某一种字形的预算写死。
+ */
+export function chatFilterSegmentFitsTier(input: {
+  columnWidthDp: number;
+  pillWidthDp: number;
+  segmentGroupWidthDp: number;
+}): boolean {
+  return (
+    input.columnWidthDp -
+      CHAT_FILTER_SEGMENT_CHROME_DP -
+      input.pillWidthDp -
+      input.segmentGroupWidthDp >=
+    0
+  );
+}
+
+/** 全称档之外恒无标题；全称档里装得下 `CHAT_FILTER_TITLE_MIN_WIDTH_DP` 才显示。 */
+export function chatFilterTitleFits(input: {
+  columnWidthDp: number;
+  pillWidthDp: number;
+  segmentGroupWidthDp: number;
+}): boolean {
+  return (
+    input.columnWidthDp -
+      CHAT_FILTER_SEGMENT_CHROME_DP -
+      input.pillWidthDp -
+      input.segmentGroupWidthDp >=
+    CHAT_FILTER_TITLE_MIN_WIDTH_DP
+  );
 }
 
 function pillDotStyleFor(total: number, online: number) {
@@ -126,10 +198,15 @@ function FilterSegment({
   const segmentStyle = useCallback(
     ({ pressed }: { pressed: boolean }) => [
       styles.segment,
+      // R4-05: 窄两档收横向内边距（12→8）——en 短称在 300dp lg 列就差这 16dp。
+      tier !== "full" && styles.segmentNarrow,
+      // R4-11: 图标档 active 侧只有一个 14dp 字形，实测触达 38×45.6 < 44 宽；
+      // minWidth 把它抬到 44（图标档整组实测 79.6→85.6，260dp md 列仍余 26dp）。
+      tier === "icon" && styles.segmentIconTier,
       selected && styles.segmentSelected,
       pressed && !selected && styles.segmentPressed,
     ],
-    [selected],
+    [selected, tier],
   );
   const iconColor = selected ? styles.segmentIconSelected.color : styles.segmentIcon.color;
   return (
@@ -169,6 +246,71 @@ function FilterSegment({
 const SEGMENT_HIT_SLOP = { top: 10, bottom: 10 } as const;
 const PILL_HIT_SLOP = { top: 8, bottom: 8 } as const;
 export type ChatListFilter = "active" | "archived";
+
+/**
+ * onLayout → 实测 dp 宽。0.5dp 死区：同宽回写不重渲染——segment 换档会再触发一次
+ * layout，死区就是那儿的防回环环。
+ */
+function useMeasuredWidthDp(): [number | null, (event: LayoutChangeEvent) => void] {
+  const [widthDp, setWidthDp] = useState<number | null>(null);
+  const onLayout = useCallback((event: LayoutChangeEvent) => {
+    const { width } = event.nativeEvent.layout;
+    setWidthDp((prev) => (prev != null && Math.abs(prev - width) < 0.5 ? prev : width));
+  }, []);
+  return [widthDp, onLayout];
+}
+
+/**
+ * R4-05: 档位与标题的最终裁决。列宽由调用方实测（那是防回环的那一环），胶囊与
+ * segment 组的固有宽通过本钩子返回的两个 handler 进来——两处都 flexShrink:0，量到
+ * 即固有宽，于是「装不装得下」是实测算术，不再按某一种字形的 dp 预算写死。
+ *
+ * 降档只在「同列宽 + 同文案」内单调（只降不升），避免降完又升回去打乒乓；列宽或
+ * 文案/计数一变，就重新从断点档试一次，实测会再把它压回去。
+ */
+function useFittedSegmentTier(input: {
+  columnWidthDp: number;
+  pillLabel: string;
+  archivedLabel: string;
+  archivedShortLabel: string;
+  activeShortLabel: string;
+}): {
+  tier: ChatFilterSegmentTier;
+  showTitle: boolean;
+  handlePillLayout: (event: LayoutChangeEvent) => void;
+  handleSegmentGroupLayout: (event: LayoutChangeEvent) => void;
+} {
+  const { columnWidthDp, pillLabel, archivedLabel, archivedShortLabel, activeShortLabel } = input;
+  const [pillWidthDp, handlePillLayout] = useMeasuredWidthDp();
+  const [segmentGroupWidthDp, handleSegmentGroupLayout] = useMeasuredWidthDp();
+  const [fitCap, setFitCap] = useState<{
+    key: string;
+    widthDp: number;
+    cap: ChatFilterSegmentTier;
+  } | null>(null);
+  const fitKey = `${pillLabel}|${archivedLabel}|${archivedShortLabel}|${activeShortLabel}`;
+  const seedTier = chatFilterSegmentTierForWidthDp(columnWidthDp);
+  const tier =
+    fitCap && fitCap.key === fitKey && Math.abs(fitCap.widthDp - columnWidthDp) < 0.5
+      ? lowerChatFilterSegmentTier(seedTier, fitCap.cap)
+      : seedTier;
+  // 标题让位纪律：short/icon 档从不显示标题（tab 身份在导航轨上，不双写）；full 档
+  // 也只有实测还剩 `CHAT_FILTER_TITLE_MIN_WIDTH_DP` 才显示——380-405dp 电话的 en
+  // 全称档只剩 36dp，截成「Cha…」比无标题更坏。
+  const showTitle =
+    tier === "full" &&
+    (pillWidthDp == null ||
+      segmentGroupWidthDp == null ||
+      chatFilterTitleFits({ columnWidthDp, pillWidthDp, segmentGroupWidthDp }));
+
+  useEffect(() => {
+    if (pillWidthDp == null || segmentGroupWidthDp == null || tier === "icon") return;
+    if (chatFilterSegmentFitsTier({ columnWidthDp, pillWidthDp, segmentGroupWidthDp })) return;
+    setFitCap({ key: fitKey, widthDp: columnWidthDp, cap: downgradeChatFilterSegmentTier(tier) });
+  }, [fitKey, columnWidthDp, pillWidthDp, segmentGroupWidthDp, tier]);
+
+  return { tier, showTitle, handlePillLayout, handleSegmentGroupLayout };
+}
 
 export function ChatsHeader({
   hosts,
@@ -219,17 +361,11 @@ export function ChatsHeader({
   const pickArchived = useCallback(() => onFilterChange("archived"), [onFilterChange]);
   // B4-F1/Q2 降级宽度：onLayout 实测头栏宽（=分栏列宽/紧凑窗口宽）；首帧种子用
   // 窗口形态学现算（紧凑=窗口宽；分栏=§4 列表列常量），避免平板首帧全称溢出。
-  const [measuredWidthDp, setMeasuredWidthDp] = useState<number | null>(null);
+  const [columnWidthDp, handleHeaderLayout] = useMeasuredWidthDp();
   const { width: windowWidthDp } = useWindowDimensions();
   const seedWidthDp = isCompactWindowWidth(windowWidthDp)
     ? windowWidthDp
     : tabletColumnsForWidth(windowWidthDp).list;
-  const segmentTier = chatFilterSegmentTierForWidthDp(measuredWidthDp ?? seedWidthDp);
-  const handleHeaderLayout = useCallback((event: LayoutChangeEvent) => {
-    const { width } = event.nativeEvent.layout;
-    // 0.5dp 死区：布局回写同宽不重渲染（segment 换档会再触发 layout，防回环）。
-    setMeasuredWidthDp((prev) => (prev != null && Math.abs(prev - width) < 0.5 ? prev : width));
-  }, []);
   const archivedLabel =
     archivedCount > 0
       ? t("chats.filter.archivedCount", { count: archivedCount })
@@ -239,6 +375,16 @@ export function ChatsHeader({
       ? t("chats.filter.archivedShortCount", { count: archivedCount })
       : t("chats.filter.archivedShort");
   const activeShortLabel = t("chats.filter.activeShort");
+  const pillLabel =
+    total === 0 ? t("chats.noHostsShort") : t("chats.hostsOnlineCount", { online, total });
+  const segment = useFittedSegmentTier({
+    columnWidthDp: columnWidthDp ?? seedWidthDp,
+    pillLabel,
+    archivedLabel,
+    archivedShortLabel,
+    activeShortLabel,
+  });
+  const segmentTier = segment.tier;
 
   return (
     // 宽度测量壳：列宽变化（旋转/分栏拖动）在这里进状态；header 与列表仍是兄弟，
@@ -257,31 +403,28 @@ export function ChatsHeader({
           />
         </ShellTabHeader>
       ) : (
-        // 标题让位纪律（B4-HEADER 实测定案）：short/icon 档整行预算已给
-        // 胶囊+segment+图标（300dp 列：32衬+24gap+64胶囊+109短segment+64图标=293），
-        // 标题只剩个位数 dp——截断到极限=不可见，直接空串让位（tab 身份在导航轨上，
-        // 不双写）。full 档（紧凑全屏）标题恒显。
-        <ShellTabHeader title={segmentTier === "full" ? t("chats.title") : ""}>
+        <ShellTabHeader title={segment.showTitle ? t("chats.title") : ""}>
           <DropdownMenu>
             <DropdownMenuTrigger
               testID="shell-host-pill"
               accessibilityRole="button"
-              accessibilityLabel={
-                total === 0
-                  ? t("chats.noHostsShort")
-                  : t("chats.hostsOnlineCount", { online, total })
-              }
+              accessibilityLabel={pillLabel}
               hitSlop={PILL_HIT_SLOP}
               style={[styles.pillTrigger, segmentTier !== "icon" && styles.pillPinned]}
             >
-              <View style={[styles.pill, styles.pillRow]}>
+              <View
+                style={[
+                  styles.pill,
+                  styles.pillRow,
+                  segmentTier !== "full" && styles.pillRowNarrow,
+                ]}
+                onLayout={segment.handlePillLayout}
+              >
                 <View style={[styles.dot, pillDotStyle]} />
                 {/* icon 档=裸点终形态（计数进 a11y+菜单；半字形裁切比无字更坏）。 */}
                 {segmentTier === "icon" ? null : (
                   <Text style={styles.pillText} numberOfLines={1}>
-                    {total === 0
-                      ? t("chats.noHostsShort")
-                      : t("chats.hostsOnlineCount", { online, total })}
+                    {pillLabel}
                   </Text>
                 )}
               </View>
@@ -311,7 +454,11 @@ export function ChatsHeader({
             </DropdownMenuContent>
           </DropdownMenu>
           {/* B4-F1/F3: 筛选 segment 上移进 bar 行（原 accessory 带已废除）。 */}
-          <View style={[styles.pill, styles.segmentGroup]} testID="shell-chat-filter">
+          <View
+            style={[styles.pill, styles.segmentGroup]}
+            testID="shell-chat-filter"
+            onLayout={segment.handleSegmentGroupLayout}
+          >
             <FilterSegment
               kind="active"
               tier={segmentTier}
@@ -400,6 +547,11 @@ const styles = StyleSheet.create((theme) => ({
     paddingVertical: theme.spacing[1.5],
     paddingHorizontal: theme.spacing[3],
   },
+  // R4-05: 窄两档（short/icon）横向内边距 12→8——en 短称在 300dp lg 列的预算差
+  // 就落在这里（胶囊 62.8→54.8，segment 组 134.4→118.4，合计腾出 24dp）。
+  pillRowNarrow: {
+    paddingHorizontal: theme.spacing[2],
+  },
   pillText: {
     fontSize: theme.fontSize.sm,
     color: theme.colors.foregroundMuted,
@@ -441,8 +593,10 @@ const styles = StyleSheet.create((theme) => ({
   segmentGroup: {
     padding: theme.spacing[0.5],
     gap: theme.spacing[0.5],
-    // 不缩：B4-F1 溢出链=标题截断→胶囊收缩→segment 换档（三档降级在
-    // chatFilterSegmentTierForWidthDp），带内控件不被压出可点底线。
+    // 不缩：B4-F1 溢出链=标题让位→胶囊收缩→segment 换档，带内控件不被压出可点
+    // 底线。R4-05 复核补：链子前两环在窄列里根本吃不到（胶囊 full/short 档被 B4-F2
+    // 钉住、标题 flexShrink 只分到几 dp），所以换档判定改成实测宽
+    // （`chatFilterSegmentFitsTier`），不再只信按 zh 字形写的 dp 断点。
     flexShrink: 0,
   },
   segment: {
@@ -453,6 +607,15 @@ const styles = StyleSheet.create((theme) => ({
     paddingVertical: theme.spacing[1],
     paddingHorizontal: theme.spacing[3],
     flexShrink: 0,
+  },
+  // R4-05: 窄两档收横向内边距（同 pillRowNarrow，两半合计 16dp）。
+  segmentNarrow: {
+    paddingHorizontal: theme.spacing[2],
+  },
+  // R4-11: 图标档 active 侧只有 14dp 字形 → 实测触达 38dp 宽 < 44；minWidth 兜住
+  // 拇指位（图标档整组 79.6→85.6，260dp md 列实测仍余 26dp）。
+  segmentIconTier: {
+    minWidth: 44,
   },
   segmentSelected: {
     backgroundColor: theme.colors.surface2,

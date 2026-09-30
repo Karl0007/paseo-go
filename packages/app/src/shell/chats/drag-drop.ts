@@ -19,12 +19,14 @@
 //   time-derived; there is no order to persist). Single truth, zero forks.
 //
 // Ruling ③ (双向拖动不误触刷新): Android's SwipeRefreshLayout (RN RefreshControl)
-// intercepts a downward pull at the scroll top EVEN with scrollEnabled=false,
-// and the official DraggableList wrapper only removes the control once the
-// native drag has begun — too late. `chatRefreshGateProps` is the screen-side
-// gate: while a row gesture is live (armed → menu → drag, exactly the
-// `onGestureLockChange` band) the control is removed and `refreshing` forced
-// false; a plain pull-down (never long-pressed, never armed) keeps it.
+// intercepts a downward pull at the scroll top EVEN with scrollEnabled=false —
+// `ReactSwipeRefreshLayout.onInterceptTouchEvent` only asks `canChildScrollUp()`
+// (C20 device finding, re-read against RN source in the R4-09 复核), and the
+// official DraggableList wrapper only removes the control once the native drag has
+// begun — too late. `chatGestureBandProps` is the screen-side gate: the control
+// STAYS MOUNTED for the whole armed → menu → drag band (removing it is the F10
+// remount), `refreshing` is forced false, and the screen swallows the callback for
+// the band. A plain pull-down (never long-pressed, never armed) refreshes as usual.
 import type { ShellAgentActions, ShellChatTarget } from "@/shell/shellAgentActions";
 
 /**
@@ -123,23 +125,54 @@ export function dispatchPinDrop(
 }
 
 /**
- * Ruling ③: the refresh gate. While a row gesture is live the pull-to-refresh
- * must not fire, but the RefreshControl MUST STAY MOUNTED: the official wrapper
- * keys its child tree on the control's presence, so dropping `onRefresh` (the
- * old form) unmounts the RefreshControl, and the FlatList then remounts EVERY
- * cell — which fires each row's unmount cleanup (`closeFor`) and instantly
- * destroys the just-opened long-press menu (B4-REGRESS F11: menu opened then
- * vanished ~400ms later, drag too). The gate now only forces `refreshing=false`
- * and keeps `onRefresh` defined; the pull is suppressed for the whole armed →
- * menu → drag band by the `scrollEnabled={!gestureLock}` lock riding the same
- * band (a long-pressed downward drag can't scroll or refresh — the row drag
- * takes it), while a plain un-long-pressed pull-down still refreshes.
+ * KI-11 ruling ③ + B4-REGRESS F10: the props the row-gesture band is allowed to
+ * hand the list, in one pure function so the whole keep-mounted contract is
+ * testable (drag-drop.test.ts).
+ *
+ * F10 had TWO remount triggers and both are SHAPE changes:
+ *  1. `onRefresh` UNDEFINED → the official wrapper drops the `<RefreshControl>`
+ *     element, React moves the list's children out of it, every cell remounts, and
+ *     each row's unmount `closeFor` destroys the just-opened long-press menu
+ *     ~400ms later (B4-REGRESS F10, fixed by 6ec69b112).
+ *  2. `containerStyle` ABSENT → the wrapper falls back to
+ *     `scrollEnabled ? {flex:1} : undefined`, so the band's own
+ *     `scrollEnabled={false}` collapses the container to 0, VirtualizedList
+ *     unmounts every cell, same cleanup, same vanished menu.
+ * The lesson twice: the band may change VALUES, never the SHAPE. Hence
+ * `containerStyle` is the module constant below — the same object in both states,
+ * asserted by test (R4-19).
+ *
+ * Ruling ③ (双向拖动不误触刷新) then needs a suppression that does not touch the
+ * shape. C20's device finding stands, and RN's source says why:
+ * `ReactSwipeRefreshLayout.onInterceptTouchEvent` asks `canChildScrollUp()` and
+ * never consults the ScrollView's `scrollEnabled` — at the scroll top a downward
+ * pull IS intercepted even with scrolling locked. So `scrollEnabled={!gestureLive}`
+ * freezes the list but does NOT suppress the refresh; the screen swallows the
+ * callback for the whole armed → menu → drag band (`chats-screen-body.tsx`:
+ * `gestureLiveRef` + `handleRefresh`), which changes no prop at all.
  */
-export function chatRefreshGateProps<T extends () => void>(input: {
+export const CHATS_LIST_CONTAINER_STYLE: { flex: 1 } = { flex: 1 };
+
+export function chatGestureBandProps<T extends () => void>(input: {
   gestureLive: boolean;
   refreshing: boolean;
   onRefresh: T;
-}): { refreshing: boolean; onRefresh: T } {
-  if (input.gestureLive) return { refreshing: false, onRefresh: input.onRefresh };
-  return { refreshing: input.refreshing, onRefresh: input.onRefresh };
+}): {
+  scrollEnabled: boolean;
+  refreshing: boolean;
+  onRefresh: T;
+  containerStyle: { flex: 1 };
+} {
+  return {
+    // C20 device finding #2: the native ScrollView steals a vertical drag at
+    // ~12-20px, before the movement-based drag() can lift the row — the band
+    // freezes scrolling so the row, not the list, owns the stream.
+    scrollEnabled: !input.gestureLive,
+    // The spinner is the screen's, not the gesture's: a stale `refreshing=true`
+    // bleeding into the band would pin the control on-screen mid-drag.
+    refreshing: input.gestureLive ? false : input.refreshing,
+    // DEFINED in both states — presence is the remount surface (trigger ① above).
+    onRefresh: input.onRefresh,
+    containerStyle: CHATS_LIST_CONTAINER_STYLE,
+  };
 }

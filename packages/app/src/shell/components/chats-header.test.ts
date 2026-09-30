@@ -7,7 +7,11 @@ import { describe, expect, it } from "vitest";
 import {
   CHAT_FILTER_SEGMENT_FULL_MIN_WIDTH_DP,
   CHAT_FILTER_SEGMENT_SHORT_MIN_WIDTH_DP,
+  chatFilterSegmentFitsTier,
   chatFilterSegmentTierForWidthDp,
+  chatFilterTitleFits,
+  downgradeChatFilterSegmentTier,
+  lowerChatFilterSegmentTier,
 } from "@/shell/components/chats-header";
 
 describe("chatFilterSegmentTierForWidthDp (B4-F1/Q2)", () => {
@@ -45,5 +49,51 @@ describe("chatFilterSegmentTierForWidthDp (B4-F1/Q2)", () => {
       prev = r;
     }
     expect(prev).toBe(2);
+  });
+});
+
+// R4-05: 实测宽（MatePad BRT-W09 @400dpi，uiautomator bounds ÷ 2.5 = dp）。断点只
+// 是上限，真档位由这两个纯函数用实测宽决定——文案与计数都不受断点控制。
+describe("chatFilterSegmentFitsTier / chatFilterTitleFits (R4-05)", () => {
+  const zhShort = { pillWidthDp: 54.8, segmentGroupWidthDp: 103.6 };
+  const enShort = { pillWidthDp: 54.8, segmentGroupWidthDp: 118.4 };
+  // 修复前 en 短称档的实测行宽（旧文案「Archived 1」+ 旧内边距 12）。
+  const enShortBeforeFix = { pillWidthDp: 62.8, segmentGroupWidthDp: 150 };
+  const enFull = { pillWidthDp: 62.8, segmentGroupWidthDp: 185.6 };
+
+  it("keeps the short tier at the 300dp lg column in BOTH locales", () => {
+    expect(chatFilterSegmentFitsTier({ columnWidthDp: 300, ...zhShort })).toBe(true);
+    expect(chatFilterSegmentFitsTier({ columnWidthDp: 300, ...enShort })).toBe(true);
+  });
+
+  it("rejects the pre-fix en row that pushed ＋ out of the column", () => {
+    expect(chatFilterSegmentFitsTier({ columnWidthDp: 300, ...enShortBeforeFix })).toBe(false);
+  });
+
+  it("degrades on a wider archived count instead of overflowing", () => {
+    // 「Arch. 1」→「Arch. 128」实测再吃 ~12dp：300dp 列装不下 → 降图标档。
+    expect(
+      chatFilterSegmentFitsTier({
+        columnWidthDp: 300,
+        pillWidthDp: 54.8,
+        segmentGroupWidthDp: 130.4,
+      }),
+    ).toBe(false);
+  });
+
+  it("hides the full-tier title rather than starving it to 「Cha…」", () => {
+    // 400dp 电话：全称 segment 本身装得下，但标题只剩 31.6dp → 宁可无标题。
+    expect(chatFilterSegmentFitsTier({ columnWidthDp: 400, ...enFull })).toBe(true);
+    expect(chatFilterTitleFits({ columnWidthDp: 400, ...enFull })).toBe(false);
+    // 640dp 紧凑竖屏：剩 271.6dp，标题完整（与今天真机形态一致）。
+    expect(chatFilterTitleFits({ columnWidthDp: 640, ...enFull })).toBe(true);
+  });
+
+  it("walks the ladder down and stops at the icon tier", () => {
+    expect(downgradeChatFilterSegmentTier("full")).toBe("short");
+    expect(downgradeChatFilterSegmentTier("short")).toBe("icon");
+    expect(downgradeChatFilterSegmentTier("icon")).toBe("icon");
+    expect(lowerChatFilterSegmentTier("full", "short")).toBe("short");
+    expect(lowerChatFilterSegmentTier("short", "full")).toBe("short");
   });
 });

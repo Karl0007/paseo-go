@@ -55,7 +55,6 @@
     "noHosts": "No hosts configured yet.",
     "noHostsShort": "No hosts",
     "hostsOnlineCount": "{{online}}/{{total}}",
-    "hostsMenu": "Host status",
     "hostStatus": {
       "idle": "Not connected",
       "connecting": "Connecting",
@@ -112,12 +111,12 @@
       "active": "In progress",
       "activeShort": "Active",
       "archived": "Archived",
-      "archivedShort": "Archived",
+      "archivedShort": "Arch.",
       "archivedCount": "Archived {{count}}",
-      "archivedShortCount": "Archived {{count}}"
+      "archivedShortCount": "Arch. {{count}}"
     },
     "emptyArchived": "No archived chats.",
-    "emptyArchivedAction": "Back to active",
+    "emptyArchivedAction": "Back to In progress",
     "menu": {
       "pin": "Pin",
       "unpin": "Unpin",
