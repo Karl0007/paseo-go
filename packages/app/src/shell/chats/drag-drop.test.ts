@@ -223,21 +223,24 @@ describe("dispatchPinDrop: cross-zone drops run the SAME actions the buttons run
 describe("chatRefreshGateProps (ruling ③)", () => {
   const handleRefresh = () => {};
 
-  it("a live row gesture removes the control entirely: refreshing=false AND no onRefresh", () => {
-    // Dropping onRefresh is what makes the official wrapper unmount the
-    // RefreshControl — gating `refreshing` alone would still let
-    // SwipeRefreshLayout intercept the downward pull.
+  it("a live row gesture keeps the control MOUNTED but idle: refreshing=false, onRefresh retained", () => {
+    // B4-REGRESS F10: dropping onRefresh made the official wrapper UNMOUNT the
+    // RefreshControl, and the FlatList then remounted every cell — each row's
+    // unmount `closeFor` destroyed the just-opened long-press menu (menu opened
+    // then vanished ~400ms later). The control must stay mounted; the downward
+    // pull is suppressed by the co-riding `scrollEnabled={!gestureLock}` lock,
+    // not by removing the control.
     expect(
       chatRefreshGateProps({ gestureLive: true, refreshing: true, onRefresh: handleRefresh }),
     ).toEqual({
       refreshing: false,
-      onRefresh: undefined,
+      onRefresh: handleRefresh,
     });
     expect(
       chatRefreshGateProps({ gestureLive: true, refreshing: false, onRefresh: handleRefresh }),
     ).toEqual({
       refreshing: false,
-      onRefresh: undefined,
+      onRefresh: handleRefresh,
     });
   });
 

@@ -124,19 +124,22 @@ export function dispatchPinDrop(
 
 /**
  * Ruling ③: the refresh gate. While a row gesture is live the pull-to-refresh
- * control must be GONE (not just idle): `refreshing=false` and `onRefresh`
- * dropped, which is what makes the official wrapper unmount the
- * RefreshControl (`showRefreshControl = Boolean(onRefresh) && …`). The gate
- * rides the same band as the scroll lock — armed at 180ms stationary, held
- * through menu/drag, released when the stream ends (press_out or the R2-01
- * drop handoff) — so 顶部向下拖 after a long press is a drag, and a plain
- * un-long-pressed pull-down still refreshes.
+ * must not fire, but the RefreshControl MUST STAY MOUNTED: the official wrapper
+ * keys its child tree on the control's presence, so dropping `onRefresh` (the
+ * old form) unmounts the RefreshControl, and the FlatList then remounts EVERY
+ * cell — which fires each row's unmount cleanup (`closeFor`) and instantly
+ * destroys the just-opened long-press menu (B4-REGRESS F11: menu opened then
+ * vanished ~400ms later, drag too). The gate now only forces `refreshing=false`
+ * and keeps `onRefresh` defined; the pull is suppressed for the whole armed →
+ * menu → drag band by the `scrollEnabled={!gestureLock}` lock riding the same
+ * band (a long-pressed downward drag can't scroll or refresh — the row drag
+ * takes it), while a plain un-long-pressed pull-down still refreshes.
  */
 export function chatRefreshGateProps<T extends () => void>(input: {
   gestureLive: boolean;
   refreshing: boolean;
   onRefresh: T;
-}): { refreshing: boolean; onRefresh: T | undefined } {
-  if (input.gestureLive) return { refreshing: false, onRefresh: undefined };
+}): { refreshing: boolean; onRefresh: T } {
+  if (input.gestureLive) return { refreshing: false, onRefresh: input.onRefresh };
   return { refreshing: input.refreshing, onRefresh: input.onRefresh };
 }

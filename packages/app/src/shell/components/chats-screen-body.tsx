@@ -643,6 +643,7 @@ export function ChatsScreenBody({ selectedAgentKey = null }: ShellScreenBodyProp
           renderItem={renderItem}
           onDragEnd={handleDragEnd}
           scrollEnabled={!gestureLock}
+          containerStyle={styles.listContainer}
           contentContainerStyle={styles.listContent}
           refreshing={refreshGate.refreshing}
           onRefresh={refreshGate.onRefresh}
@@ -663,6 +664,14 @@ const styles = StyleSheet.create((theme) => ({
   skeletonWrap: {
     flex: 1,
     paddingHorizontal: theme.spacing[2],
+  },
+  // B4-REGRESS F11: the official wrapper's `resolvedContainerStyle` falls back to
+  // `scrollEnabled ? {flex:1} : undefined`; passing our own flex:1 keeps the list
+  // container sized when the row gesture flips `scrollEnabled` false (arm → menu →
+  // drag). Without it the container collapses to 0, VirtualizedList unmounts every
+  // cell, and each row's unmount `closeFor` destroys the just-opened menu.
+  listContainer: {
+    flex: 1,
   },
   listContent: {
     paddingBottom: theme.spacing[8],
