@@ -58,18 +58,19 @@ index 2abb4a2..8ca967f 100644
      onAnimValInit?: (animVals: ReturnType<typeof useAnimatedValues>) => void;
      itemEnteringAnimation?: AnimateProps<Animated.View>["entering"];
 diff --git a/node_modules/react-native-draggable-flatlist/src/components/CellRendererComponent.tsx b/node_modules/react-native-draggable-flatlist/src/components/CellRendererComponent.tsx
-index e4e861a..ce17bea 100644
+index e4e861a..0db7b4e 100644
 --- a/node_modules/react-native-draggable-flatlist/src/components/CellRendererComponent.tsx
 +++ b/node_modules/react-native-draggable-flatlist/src/components/CellRendererComponent.tsx
-@@ -10,6 +10,7 @@ import Animated, {
+@@ -10,6 +10,8 @@ import Animated, {
    runOnUI,
    useAnimatedStyle,
    useSharedValue,
++  withDelay,
 +  withTiming,
  } from "react-native-reanimated";
  import { useDraggableFlatListContext } from "../context/draggableFlatListContext";
  import { isWeb } from "../constants";
-@@ -46,6 +47,7 @@ function CellRendererComponent<T>(props: Props<T>) {
+@@ -46,6 +48,7 @@ function CellRendererComponent<T>(props: Props<T>) {
    const offset = useSharedValue(-1);
    const size = useSharedValue(-1);
    const heldTanslate = useSharedValue(0);
@@ -77,7 +78,7 @@ index e4e861a..ce17bea 100644
  
    const translate = useCellTranslate({
      cellOffset: offset,
-@@ -60,8 +62,25 @@ function CellRendererComponent<T>(props: Props<T>) {
+@@ -60,8 +63,32 @@ function CellRendererComponent<T>(props: Props<T>) {
      // the animated style may apply before the next paint, causing a flicker.
      // Solution is to hold over the last animated value until the next onLayout.
      // (Not required in web)
@@ -100,13 +101,20 @@ index e4e861a..ce17bea 100644
 +      // "row vanished after a pin round-trip" family). With no live drag,
 +      // decay the hold back to zero ONCE; cells that DID move re-layout and
 +      // pin it to 0 outright, so reordered drops are unaffected.
++      // PASEO-B5-REVIEW(A3): the decay starts in the SAME commit as the
++      // accepted reorder (the library runs props.onDragEnd then reset()), so
++      // a moved cell's settling layout pass races the slide-back and the
++      // accepted drop position could visibly drift for a frame or two before
++      // onCellLayout pinned it. A short delay lets the reorder's layout land
++      // first — cells that moved get pinned to 0 and never animate; only
++      // truly stale holds decay.
 +      holdReleased.value = true;
-+      heldTanslate.value = withTiming(0, { duration: 160 });
++      heldTanslate.value = withDelay(32, withTiming(0, { duration: 160 }));
      }
      const t = activeKey ? translate.value : heldTanslate.value;
      return {
 diff --git a/node_modules/react-native-draggable-flatlist/src/components/DraggableFlatList.tsx b/node_modules/react-native-draggable-flatlist/src/components/DraggableFlatList.tsx
-index 7c88afc..6d5719c 100644
+index 7c88afc..df4e477 100644
 --- a/node_modules/react-native-draggable-flatlist/src/components/DraggableFlatList.tsx
 +++ b/node_modules/react-native-draggable-flatlist/src/components/DraggableFlatList.tsx
 @@ -19,6 +19,7 @@ import {
@@ -135,7 +143,7 @@ index 7c88afc..6d5719c 100644
  
    const {
      dragHitSlop = DEFAULT_PROPS.dragHitSlop,
-@@ -144,19 +156,88 @@ function DraggableFlatListInner<T>(props: DraggableFlatListProps<T>) {
+@@ -144,19 +156,101 @@ function DraggableFlatListInner<T>(props: DraggableFlatListProps<T>) {
      });
    }, [props.data, keyExtractor, keyToIndexRef]);
  
@@ -203,35 +211,47 @@ index 7c88afc..6d5719c 100644
 +  };
 +
    const drag = useStableCallback((activeKey: string) => {
--    if (disabled.value) return;
-+    const gestureSession = currentGestureSessionRef.current;
-+    if (disabled.value || !gestureSession?.active) return;
+     if (disabled.value) return;
      const index = keyToIndexRef.current.get(activeKey);
      const cellData = cellDataRef.current.get(activeKey);
 -    if (cellData) {
 -      activeCellOffset.value = cellData.measurements.offset;
 -      activeCellSize.value = cellData.measurements.size;
 -    }
++    // PASEO-B5-REVIEW(A2): NO JS-side gesture-session gate here. The session
++    // ref is populated asynchronously (pan onBegin on the UI thread ->
++    // runOnJS(onGestureBegin) -> JS queue), so a JS-side `.active` check
++    // turns JS jank at the arm instant into a silently swallowed drag():
++    // the caller's arbitration machine has already committed to `dragging`,
++    // the row never lifts, and no rejection callback ever runs — a dead
++    // gesture with the band stranded. activateDragOnUI validates the live
++    // session on the UI thread (the only thread that can be authoritative)
++    // and routes every stale/rejected activation through
++    // onDragActivationRejected -> onDragCancel -> onDragTerminate, so the
++    // caller always learns the drag did not start. With no JS-observed
++    // session yet, id 0 can never match: gestureSessionId starts at 0 and
++    // onBegin only ever publishes ids >= 1, so that case rejects cleanly.
++    const sessionId = currentGestureSessionRef.current?.id ?? 0;
  
      const { onDragBegin } = propsRef.current;
      if (index !== undefined) {
 -      spacerIndexAnim.value = index;
 -      activeIndexAnim.value = index;
 +      runOnUI(activateDragOnUI)(
-+        gestureSession.id,
++        sessionId,
 +        index,
 +        cellData?.measurements.offset ?? -1,
 +        cellData?.measurements.size ?? -1,
 +        Boolean(cellData)
 +      );
 +      activeDragRef.current = {
-+        sessionId: gestureSession.id,
++        sessionId,
 +        index,
 +      };
        setActiveKey(activeKey);
        onDragBegin?.(index);
      }
-@@ -218,8 +299,25 @@ function DraggableFlatListInner<T>(props: DraggableFlatListProps<T>) {
+@@ -218,8 +312,25 @@ function DraggableFlatListInner<T>(props: DraggableFlatListProps<T>) {
      props.onRelease?.(index);
    });
  
@@ -258,7 +278,7 @@ index 7c88afc..6d5719c 100644
        const { onDragEnd, data } = props;
  
        const newData = [...data];
-@@ -238,26 +336,6 @@ function DraggableFlatListInner<T>(props: DraggableFlatListProps<T>) {
+@@ -238,26 +349,6 @@ function DraggableFlatListInner<T>(props: DraggableFlatListProps<T>) {
      props.onPlaceholderIndexChange?.(index);
    });
  
@@ -285,7 +305,7 @@ index 7c88afc..6d5719c 100644
    useAnimatedReaction(
      () => {
        return spacerIndexAnim.value;
-@@ -271,11 +349,21 @@ function DraggableFlatListInner<T>(props: DraggableFlatListProps<T>) {
+@@ -271,11 +362,21 @@ function DraggableFlatListInner<T>(props: DraggableFlatListProps<T>) {
    );
  
    const gestureDisabled = useSharedValue(false);
@@ -308,7 +328,7 @@ index 7c88afc..6d5719c 100644
        panGestureState.value = evt.state;
      })
      .onUpdate((evt) => {
-@@ -286,8 +374,15 @@ function DraggableFlatListInner<T>(props: DraggableFlatListProps<T>) {
+@@ -286,8 +387,15 @@ function DraggableFlatListInner<T>(props: DraggableFlatListProps<T>) {
          : evt.translationY;
        touchTranslate.value = translation;
      })
@@ -325,7 +345,7 @@ index 7c88afc..6d5719c 100644
        // Set touch val to current translate val
        isTouchActiveNative.value = false;
        const translation = horizontalAnim.value
-@@ -299,6 +394,7 @@ function DraggableFlatListInner<T>(props: DraggableFlatListProps<T>) {
+@@ -299,6 +407,7 @@ function DraggableFlatListInner<T>(props: DraggableFlatListProps<T>) {
  
        // Only call onDragEnd if actually dragging a cell
        if (activeIndexAnim.value === -1 || disabled.value) return;
@@ -333,7 +353,7 @@ index 7c88afc..6d5719c 100644
        disabled.value = true;
        runOnJS(onRelease)(activeIndexAnim.value);
        const springTo = placeholderOffset.value - activeCellOffset.value;
-@@ -309,14 +405,64 @@ function DraggableFlatListInner<T>(props: DraggableFlatListProps<T>) {
+@@ -309,14 +418,64 @@ function DraggableFlatListInner<T>(props: DraggableFlatListProps<T>) {
            runOnJS(onDragEnd)({
              from: activeIndexAnim.value,
              to: spacerIndexAnim.value,
@@ -399,7 +419,7 @@ index 7c88afc..6d5719c 100644
      .onTouchesUp(() => {
        // Turning this into a worklet causes timing issues. We want it to run
        // just after the finger lifts.
-@@ -324,7 +470,9 @@ function DraggableFlatListInner<T>(props: DraggableFlatListProps<T>) {
+@@ -324,7 +483,9 @@ function DraggableFlatListInner<T>(props: DraggableFlatListProps<T>) {
      });
  
    if (dragHitSlop) panGesture.hitSlop(dragHitSlop);
@@ -410,7 +430,7 @@ index 7c88afc..6d5719c 100644
      const activeOffset = [-activationDistanceProp, activationDistanceProp];
      if (props.horizontal) {
        panGesture.activeOffsetX(activeOffset);
-@@ -332,6 +480,21 @@ function DraggableFlatListInner<T>(props: DraggableFlatListProps<T>) {
+@@ -332,6 +493,21 @@ function DraggableFlatListInner<T>(props: DraggableFlatListProps<T>) {
        panGesture.activeOffsetY(activeOffset);
      }
    }
@@ -432,7 +452,7 @@ index 7c88afc..6d5719c 100644
  
    const onScroll = useStableCallback((scrollOffset: number) => {
      props.onScrollOffsetChange?.(scrollOffset);
-@@ -373,8 +536,9 @@ function DraggableFlatListInner<T>(props: DraggableFlatListProps<T>) {
+@@ -373,8 +549,9 @@ function DraggableFlatListInner<T>(props: DraggableFlatListProps<T>) {
        horizontal={!!props.horizontal}
        layoutAnimationDisabled={layoutAnimationDisabled}
      >
@@ -444,7 +464,7 @@ index 7c88afc..6d5719c 100644
            ref={containerRef}
            onLayout={onContainerLayout}
 diff --git a/node_modules/react-native-draggable-flatlist/src/components/NestableDraggableFlatList.tsx b/node_modules/react-native-draggable-flatlist/src/components/NestableDraggableFlatList.tsx
-index 1559352..33eb5de 100644
+index 1559352..b2edd53 100644
 --- a/node_modules/react-native-draggable-flatlist/src/components/NestableDraggableFlatList.tsx
 +++ b/node_modules/react-native-draggable-flatlist/src/components/NestableDraggableFlatList.tsx
 @@ -1,5 +1,5 @@
@@ -463,18 +483,22 @@ index 1559352..33eb5de 100644
  
      const onSuccess = (_x: number, y: number) => {
        listVerticalOffset.value = y;
-@@ -74,6 +74,10 @@ function NestableDraggableFlatListInner<T>(
+@@ -74,6 +74,14 @@ function NestableDraggableFlatListInner<T>(
      }
    );
  
 +  const onDragTerminate = useStableCallback(() => {
 +    setOuterScrollEnabled(true);
++    // PASEO-B5-REVIEW(A1): chain the app-level seam too — this prop is
++    // passed AFTER {...props}, so without the chain a nestable consumer's
++    // onDragTerminate would be silently swallowed by the inner list.
++    props.onDragTerminate?.();
 +  });
 +
    const onAnimValInit: DraggableFlatListProps<T>["onAnimValInit"] = useStableCallback(
      (params) => {
        setListHoverOffset(params.hoverOffset);
-@@ -95,6 +99,7 @@ function NestableDraggableFlatListInner<T>(
+@@ -95,6 +103,7 @@ function NestableDraggableFlatListInner<T>(
        outerScrollOffset={outerScrollOffset}
        onDragBegin={onDragBegin}
        onDragEnd={onDragEnd}

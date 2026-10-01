@@ -60,6 +60,16 @@ export interface DraggableListProps<T> {
   /** Called when drag interaction ends (finger released). */
   onDragRelease?: () => void;
   /**
+   * Native-only (B5-REVIEW A1): fires when a drag that had already begun
+   * (`drag()` landed) is CANCELLED by the list library — RNGH's pan failed
+   * mid-drag (app backgrounded, system interrupt, another recognizer stole
+   * the stream), the library rejected the activation, or the list unmounted
+   * mid-drag. NO `onDragEnd` will ever follow a termination: screens that
+   * lock scroll/refresh for the drag band must release the band from here,
+   * or it strands until the next touch on a draggable row.
+   */
+  onDragTerminate?: () => void;
+  /**
    * Native-only: use the nestable draggable-flatlist variant for nested drag
    * lists coordinated by a shared NestableScrollContainer.
    */

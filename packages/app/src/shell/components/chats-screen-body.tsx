@@ -398,6 +398,42 @@ export function ChatsScreenBody({ selectedAgentKey = null }: ShellScreenBodyProp
   );
   const archivedSet = useMemo(() => new Set(archivedIds), [archivedIds]);
 
+  // B5-REVIEW A4: previews of chats deleted on ANOTHER device never fire the
+  // local remove (shellAgentActions.forget), so they used to persist forever.
+  // Fold-time prune, gated HERE where the observation is known:
+  //   • a tick is a change of the aggregated directory (`agents` identity) —
+  //     host-status flips must not count, or the N>=2 guard shortens;
+  //   • an empty aggregate is never complete (initial load / every host
+  //     reconnecting — the blank wave B5-SUB survives must not also wipe the
+  //     memory it survives with);
+  //   • only servers ONLINE at the tick observed their directory; an offline
+  //     host's rows are legitimately absent, so its keys neither count nor
+  //     reset (multi-host: host B refreshing cannot prune host A's previews
+  //     while A sleeps).
+  // statuses/hostIds ride a ref precisely so they do NOT re-trigger the fold
+  // (render-phase mirror = the hook's releaseRef pattern).
+  const pruneAbsentPreviews = usePaseoGoStickyPreviewStore((state) => state.pruneAbsent);
+  const directoryObservationRef = useRef({ hostIds, statuses });
+  directoryObservationRef.current = { hostIds, statuses };
+  useEffect(() => {
+    const present = new Set<string>();
+    for (const agent of agents) {
+      present.add(`${agent.serverId}:${agent.id}`);
+    }
+    const { hostIds: tickHostIds, statuses: tickStatuses } = directoryObservationRef.current;
+    const observedServers = new Set(
+      tickHostIds.filter((serverId) => tickStatuses.get(serverId) === "online"),
+    );
+    pruneAbsentPreviews({
+      complete: present.size > 0,
+      present,
+      // Key prefix = serverId (keys are built `${serverId}:${agentId}`); a
+      // malformed split matches no observed server — the fail-safe direction
+      // (never prune what we cannot attribute).
+      isServerObserved: (key) => observedServers.has(key.slice(0, key.lastIndexOf(":"))),
+    });
+  }, [agents, pruneAbsentPreviews]);
+
   // One pass over the directory into derivation inputs; grouping/sorting/unread are
   // the pure derive module's job (and its unit tests' subject). The archived filter
   // inverts the membership: only archived rows enter, and neither the pin group nor
@@ -503,6 +539,23 @@ export function ChatsScreenBody({ selectedAgentKey = null }: ShellScreenBodyProp
     },
     [dragLockHandoff],
   );
+
+  // B5-REVIEW A1 (批次五 review): a drag CANCELLED after drag() landed (RNGH's
+  // pan failed mid-drag — app backgrounded, system interrupt, another
+  // recognizer stole the stream; activation rejected; list unmounted) never
+  // runs the drop handler, and B5-F15 made press_out inert in `dragging` — so
+  // without a cancel seam the band stranded: scrollEnabled=false, refresh
+  // disabled, the swipe gate up, until the next touch on a draggable row
+  // self-healed the machine. Device red frame (evidence/B5-REVIEW/A1):
+  // background the app mid-drag → foreground → every scroll eaten
+  // (a1-31/a1-32; the trace shows `lib onDragCancel` fire with NO lock
+  // release). The patched library's onDragTerminate is that signal — release
+  // through the SAME consume-once handoff the drop uses, so a real drop that
+  // still lands afterwards is inert, and a terminate without a recorded drag
+  // (the drag-inert belt) is inert too.
+  const handleDragTerminate = useCallback(() => {
+    dragLockHandoff.release();
+  }, [dragLockHandoff]);
 
   // C20 device finding #2: the native ScrollView steals a vertical drag at
   // ~12-20px, before the movement-based drag() can lift the row (the pre-C20
@@ -773,6 +826,7 @@ export function ChatsScreenBody({ selectedAgentKey = null }: ShellScreenBodyProp
               refreshControlEnabled={gestureBand.refreshEnabled}
               ListEmptyComponent={listEmpty}
               extraData={listExtraData}
+              onDragTerminate={handleDragTerminate}
               testID="shell-chats-list"
             />
           </Animated.View>

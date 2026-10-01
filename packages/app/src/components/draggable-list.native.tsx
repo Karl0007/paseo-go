@@ -35,6 +35,7 @@ export function DraggableList<T>({
   refreshControlEnabled,
   waitFor,
   onDragBegin: onDragBeginProp,
+  onDragTerminate,
   nestable = false,
 }: DraggableListProps<T>) {
   const { theme } = useUnistyles();
@@ -143,6 +144,10 @@ export function DraggableList<T>({
       activationDistance={20}
       onDragBegin={handleDragBegin}
       onRelease={handleRelease}
+      // B5-REVIEW A1: the library's cancellation seam (pan failed mid-drag /
+      // activation rejected / unmount) — forwarded verbatim; no local state
+      // rides it (onRelease already cleared isDragging on the same path).
+      onDragTerminate={onDragTerminate}
       // @ts-ignore - waitFor is supported by RNGH FlatList but missing from DraggableFlatList types
       waitFor={waitFor}
       refreshControl={refreshControl}

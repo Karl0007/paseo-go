@@ -82,3 +82,78 @@ describe("remember (keep-old-value fold)", () => {
     expect(usePaseoGoStickyPreviewStore.getState().previews).toBe(before);
   });
 });
+// B5-REVIEW A4 (批次五 review) — the other half of the lifecycle: chats deleted
+// on ANOTHER device never fire shellAgentActions.remove, so without a fold-time
+// prune their entries persist forever. The prune may only trust COMPLETE ticks:
+// a transient empty directory or a reconnecting host must never wipe the memory
+// the whole B5-SUB fix depends on — hence the N>=2 consecutive-absence rule and
+// the per-server observation gate.
+describe("pruneAbsent (deleted-elsewhere cleanup, A4)", () => {
+  const tick = (present: string[], opts?: { complete?: boolean; observedServers?: string[] }) =>
+    usePaseoGoStickyPreviewStore.getState().pruneAbsent({
+      complete: opts?.complete ?? true,
+      present: new Set(present),
+      isServerObserved: (key) =>
+        (opts?.observedServers ?? ["srv"]).includes(key.slice(0, key.lastIndexOf(":"))),
+    });
+
+  it("one absent complete tick does NOT clear (the transient-blank guard)", () => {
+    usePaseoGoStickyPreviewStore.getState().remember("srv:a", "消息");
+    tick([]);
+    expect(usePaseoGoStickyPreviewStore.getState().previews).toEqual({ "srv:a": "消息" });
+  });
+
+  it("two consecutive absent complete ticks clear, and the clear persists", async () => {
+    usePaseoGoStickyPreviewStore.getState().remember("srv:a", "消息");
+    tick([]);
+    tick([]);
+    expect(usePaseoGoStickyPreviewStore.getState().previews).toEqual({});
+    const raw = await AsyncStorage.getItem(PERSIST_KEY);
+    expect(JSON.parse(raw!).state.previews).toEqual({});
+  });
+
+  it("a reappearance resets the streak (a flaky directory is never a deletion)", () => {
+    usePaseoGoStickyPreviewStore.getState().remember("srv:a", "消息");
+    tick([]);
+    tick(["srv:a"]);
+    tick([]);
+    expect(usePaseoGoStickyPreviewStore.getState().previews).toEqual({ "srv:a": "消息" });
+  });
+
+  it("an incomplete tick (empty directory / reconnect) neither counts nor clears", () => {
+    usePaseoGoStickyPreviewStore.getState().remember("srv:a", "消息");
+    tick([]); // streak 1
+    tick([], { complete: false }); // transient empty — must not reach the prune line
+    expect(usePaseoGoStickyPreviewStore.getState().previews).toEqual({ "srv:a": "消息" });
+  });
+
+  it("a key whose server was not observed this tick never counts (offline host)", () => {
+    usePaseoGoStickyPreviewStore.getState().remember("srv:a", "消息");
+    tick([], { observedServers: [] });
+    tick([], { observedServers: [] });
+    tick([], { observedServers: [] });
+    expect(usePaseoGoStickyPreviewStore.getState().previews).toEqual({ "srv:a": "消息" });
+  });
+
+  it("only the absent keys go; observed-and-present neighbours stay, and a no-op fold is identity-stable", () => {
+    usePaseoGoStickyPreviewStore.getState().remember("srv:a", "旧");
+    usePaseoGoStickyPreviewStore.getState().remember("srv:b", "新");
+    tick(["srv:b"]);
+    const before = usePaseoGoStickyPreviewStore.getState().previews;
+    tick(["srv:b"]);
+    expect(before).not.toBe(usePaseoGoStickyPreviewStore.getState().previews);
+    expect(usePaseoGoStickyPreviewStore.getState().previews).toEqual({ "srv:b": "新" });
+    const settled = usePaseoGoStickyPreviewStore.getState().previews;
+    tick(["srv:b"]);
+    expect(usePaseoGoStickyPreviewStore.getState().previews).toBe(settled);
+  });
+
+  it("forget drops the key's pending absence streak too (no stale count resurrecting)", () => {
+    usePaseoGoStickyPreviewStore.getState().remember("srv:a", "消息");
+    tick([]); // streak 1 for srv:a
+    usePaseoGoStickyPreviewStore.getState().forget("srv:a");
+    usePaseoGoStickyPreviewStore.getState().remember("srv:a", "复活");
+    tick([]); // streak must restart at 1, not finish at 2
+    expect(usePaseoGoStickyPreviewStore.getState().previews).toEqual({ "srv:a": "复活" });
+  });
+});
