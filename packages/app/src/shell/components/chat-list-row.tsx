@@ -1,9 +1,9 @@
 // Chat list row (DESIGN §4; WeChat-shaped since B4-ROW / batch-4 F4): project tile |
-// title `项目-worktree[-备注]` with the running spinner and the absolute time on its
-// right | unread badge (C18: dot only on idle rows, count pill only while approvals
-// pend) | subtitle by priority `[草稿] `+draft > `[需要回复] `+preview > preview
-// (`我: ` when the last message is the user's) > 占位小字 (B5-SUB: the line is
-// ALWAYS there) | four-state light | ⋯ overflow.
+// title `项目(worktree)`, or the shell rename alone (D21, B6-TITLE) — with the running
+// spinner and the absolute time on its right | unread badge (C18: dot only on idle
+// rows, count pill only while approvals pend) | subtitle by priority
+// `[草稿] `+draft > `[需要回复] `+preview > preview (`我: ` when the last message is the
+// user's) > 占位小字 (B5-SUB: the line is ALWAYS there) | four-state light | ⋯ overflow.
 // The clock lives in its own `<Text>`, so a minute tick never reaches the row; the
 // draft read lives in the ROW (R4-13: the a11y label has to speak the subtitle, and
 // `accessibilityLabel` replaces all child text), which is why a composer keystroke
@@ -303,9 +303,14 @@ function ChatRowInner({
     () => ({ key: agent.key, serverId: agent.serverId, agentId: agent.agent.id }),
     [agent.key, agent.serverId, agent.agent.id],
   );
-  // Ruling 4: 标题 = 项目-worktree[-备注] (备注 = the manual `agent.title`). The
-  // shell alias still wins outright when set — it is an explicit rename, and C33's
-  // rename screen, the menu title and the delete confirm all read this value.
+  // D21 (B6-TITLE / batch-6 F18): the row's 备注 is the shell rename and nothing
+  // else. `agent.title` is NOT fed in — the daemon stamps it at birth with the
+  // first prompt truncated (`deriveInitialAgentTitle`), so a session the user never
+  // renamed used to render its prompt excerpt as the whole title line, which is not
+  // the F12 default format. `buildChatRowTitle` keeps the `note` parameter for a
+  // future explicit 备注 source; today the row passes none and the alias below wins
+  // outright (C33's rename screen, the menu title and the delete confirm all read
+  // the same alias).
   const projectName = useMemo(
     () =>
       resolveProjectPlacement({
@@ -319,9 +324,9 @@ function ChatRowInner({
       buildChatRowTitle({
         projectName,
         cwd: agent.agent.cwd,
-        note: agent.agent.title,
+        note: null,
       }),
-    [projectName, agent.agent.cwd, agent.agent.title],
+    [projectName, agent.agent.cwd],
   );
   const displayTitle = alias ?? (composedTitle.length > 0 ? composedTitle : t("chats.untitled"));
   // R4-13: the subtitle is built HERE so the row's a11y label can speak it (see

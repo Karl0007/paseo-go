@@ -3,8 +3,9 @@
 // unit-testable without React Native. No i18n here — translated fragments arrive
 // through `labels`, injected by the caller.
 //
-// Title  = 项目名(worktree)   (B5-TITLE/F12-D: parentheses; a 备注 = manual rename,
-//          `agent.title` — replaces the whole line instead of being appended)
+// Title  = 项目名(worktree)   (B5-TITLE/F12-D: parentheses; a 备注 = the shell
+//          rename (alias) alone — D21/B6-TITLE: `agent.title` is never a 备注, the
+//          daemon stamps it with the first prompt at birth)
 // Subtitle priority: [草稿]+draft text > [需要回复]+preview > [出错]+preview >
 //                    「我: 」/bare preview > 占位小字 (B5-SUB/F13: the second line is
 //                    ALWAYS there — an all-empty chain renders the translated
@@ -122,7 +123,12 @@ export interface ChatRowTitleInput {
   /** `resolveProjectPlacement().projectName` — the same source the row always used. */
   projectName: string;
   cwd: string;
-  /** `agent.title`: the manual rename, which becomes the trailing 备注 segment. */
+  /**
+   * An explicit 备注 (the shell rename lives OUTSIDE this builder: the row applies
+   * the alias before calling it, D21). `agent.title` MUST NOT be passed — a daemon
+   * stamps it with the first prompt at birth, so it is a provisional summary, not a
+   * rename. `null`/blank = no 备注, the default `项目(worktree)` renders.
+   */
   note: string | null | undefined;
 }
 
