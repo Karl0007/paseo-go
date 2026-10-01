@@ -945,6 +945,13 @@ export const RecentProviderSessionDescriptorPayloadSchema = z.object({
   // Absent means the provider offers no activity signal at all; false means
   // the provider checked and the transcript looks idle.
   looksActive: z.boolean().optional(),
+  // COMPAT(importSessionExistingMark): added 2026-10-01 (Paseo Go B5-IMPORT2),
+  // optional while clients support older daemons. Only present when the request
+  // asked `includeExisting: true` and this transcript is already a managed agent
+  // (native launch, import, or archived — resume-chain ancestors included).
+  // The shell renders 已导入/已归档 badges, disables the checkbox and routes the
+  // row tap to that agent. Absent = not existing, or a pre-B5 daemon.
+  existing: z.object({ agentId: z.string(), archived: z.boolean() }).optional(),
 });
 
 export type RecentProviderSessionDescriptorPayload = z.infer<
@@ -1409,6 +1416,13 @@ export const FetchRecentProviderSessionsRequestMessageSchema = z.object({
   since: z.string().optional(),
   limit: z.number().int().positive().max(200).optional(),
   query: z.string().optional(),
+  // COMPAT(importSessionIncludeExisting): added 2026-10-01 (Paseo Go B5-IMPORT2),
+  // optional while clients support older daemons. Absent/false keeps the pre-B5
+  // behavior byte-for-byte: sessions already managed as agents are filtered out
+  // and `filteredAlreadyImportedCount` reports how many were dropped.
+  // true = keep every candidate row and mark already-existing ones per entry via
+  // `existing` (D20: 导入页覆盖面对齐 omp resume，废除「已存在即剔除」).
+  includeExisting: z.boolean().optional(),
 });
 
 export const FetchAgentRequestMessageSchema = z.object({

@@ -3,7 +3,11 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { describe, expect, test } from "vitest";
 
-import { listOmpImportableSessions, readOmpImportSessionConfig } from "./session-descriptor.js";
+import {
+  listOmpImportableSessions,
+  readOmpImportSessionConfig,
+  resolveOmpResumeAncestorPaths,
+} from "./session-descriptor.js";
 
 async function writeSession(root: string, relativePath: string, lines: unknown[]): Promise<string> {
   const filePath = path.join(root, "sessions", relativePath);
@@ -272,5 +276,105 @@ describe("OMP session descriptor", () => {
 
     expect(byHandle.get(touched)?.looksActive).toBe(true);
     expect(byHandle.get(idle)?.looksActive).toBe(false);
+  });
+});
+
+// B5-IMPORT2（F17-4）：omp resume 写新文件、header `parentSession` 指旧文件；
+// 服务端 existing 判定靠这条链认领祖先 transcript。
+describe("resolveOmpResumeAncestorPaths", () => {
+  test("walks the parentSession chain oldest-first and stops at the root", async () => {
+    const root = await mkdtemp(path.join(tmpdir(), "paseo-omp-chain-"));
+    const cwd = path.join(root, "repo");
+    const grand = await writeSession(root, "project/grand.jsonl", [
+      { type: "title", id: "t", title: "Root", timestamp: "2026-06-01T00:00:00.000Z" },
+      { type: "session", id: "grand-id", timestamp: "2026-06-01T00:00:00.000Z", cwd },
+    ]);
+    const parent = await writeSession(root, "project/parent.jsonl", [
+      {
+        type: "session",
+        id: "parent-id",
+        timestamp: "2026-06-02T00:00:00.000Z",
+        cwd,
+        parentSession: grand,
+      },
+    ]);
+    const child = await writeSession(root, "project/child.jsonl", [
+      {
+        type: "session",
+        id: "child-id",
+        timestamp: "2026-06-03T00:00:00.000Z",
+        cwd,
+        parentSession: parent,
+      },
+    ]);
+
+    await expect(resolveOmpResumeAncestorPaths(child)).resolves.toEqual([parent, grand]);
+    await expect(resolveOmpResumeAncestorPaths(grand)).resolves.toEqual([]);
+  });
+
+  test("broken links, cycles and non-jsonl parents end the walk safely", async () => {
+    const root = await mkdtemp(path.join(tmpdir(), "paseo-omp-chain-guard-"));
+    const missing = path.join(root, "sessions", "gone.jsonl");
+    const start = await writeSession(root, "project/start.jsonl", [
+      {
+        type: "session",
+        id: "start-id",
+        timestamp: "2026-06-01T00:00:00.000Z",
+        cwd: root,
+        parentSession: missing,
+      },
+    ]);
+    await expect(resolveOmpResumeAncestorPaths(start)).resolves.toEqual([]);
+
+    const loopA = path.join(root, "sessions", "project", "a.jsonl");
+    const loopB = await writeSession(root, "project/b.jsonl", [
+      {
+        type: "session",
+        id: "b",
+        timestamp: "2026-06-01T00:00:00.000Z",
+        cwd: root,
+        parentSession: loopA,
+      },
+    ]);
+    await writeFile(
+      loopA,
+      `${JSON.stringify({ type: "session", id: "a", timestamp: "2026-06-01T00:00:00.000Z", cwd: root, parentSession: loopB })}\n`,
+      "utf8",
+    );
+    const walked = await resolveOmpResumeAncestorPaths(loopA);
+    expect(walked).toEqual([loopB]);
+
+    const textParent = await writeSession(root, "project/text-parent.jsonl", [
+      {
+        type: "session",
+        id: "tp",
+        timestamp: "2026-06-01T00:00:00.000Z",
+        cwd: root,
+        parentSession: "not-a-transcript",
+      },
+    ]);
+    await expect(resolveOmpResumeAncestorPaths(textParent)).resolves.toEqual([]);
+  });
+
+  test("honors the depth cap on pathological chains", async () => {
+    const root = await mkdtemp(path.join(tmpdir(), "paseo-omp-chain-cap-"));
+    const deepest = await writeSession(root, "project/deepest.jsonl", [
+      { type: "session", id: "deepest", timestamp: "2026-06-05T00:00:00.000Z", cwd: root },
+    ]);
+    let previous = deepest;
+    for (let index = 0; index < 40; index += 1) {
+      const next = await writeSession(root, `project/step-${index}.jsonl`, [
+        {
+          type: "session",
+          id: `step-${index}`,
+          timestamp: "2026-06-05T00:00:00.000Z",
+          cwd: root,
+          parentSession: previous,
+        },
+      ]);
+      previous = next;
+    }
+
+    await expect(resolveOmpResumeAncestorPaths(previous, 8)).resolves.toHaveLength(8);
   });
 });

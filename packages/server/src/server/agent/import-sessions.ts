@@ -11,6 +11,7 @@ import type { AgentPersistenceHandle, AgentProvider } from "./agent-sdk-types.js
 import { ensureAgentLoaded, type AgentLoaderManager } from "./agent-loading.js";
 import { unarchiveAgentState } from "./agent-prompt.js";
 import { toRecentProviderSessionDescriptorPayload } from "./agent-projections.js";
+import { resolveOmpResumeAncestorPaths } from "./providers/omp/session-descriptor.js";
 import type { WorkspaceProvisioningService } from "../session/workspace-provisioning/workspace-provisioning-service.js";
 import type { PersistedWorkspaceRecord } from "../workspace-registry.js";
 import type {
@@ -79,6 +80,12 @@ export interface ListImportableProviderSessionsResult {
   providerErrors: Array<{ provider: string; message: string }>;
 }
 
+/** Which managed agent a provider session already belongs to (B5-IMPORT2 `existing`). */
+interface ExistingAgentFacts {
+  agentId: string;
+  archived: boolean;
+}
+
 export interface ImportProviderSessionInput {
   request: NormalizedImportAgentRequest;
   workspaceProvisioning: Pick<WorkspaceProvisioningService, "runInImportWorkspace">;
@@ -125,6 +132,10 @@ export async function listImportableProviderSessions(
   input: ListImportableProviderSessionsInput,
 ): Promise<ListImportableProviderSessionsResult> {
   const { request, agentManager, agentStorage, providerSnapshotManager } = input;
+  // B5-IMPORT2 (D20): `includeExisting` flips the already-existing verdict from
+  // 「剔除」to「保留+标记」. Absent/false keeps the pre-B5 path byte-for-byte:
+  // existing rows are filtered and counted into `filteredAlreadyImportedCount`.
+  const includeExisting = request.includeExisting === true;
   const limit = request.limit ?? 20;
   const sinceTimestamp = parseRecentProviderSessionsSince(request.since);
   const providerFilter = request.providers ? new Set(request.providers) : undefined;
@@ -133,9 +144,18 @@ export async function listImportableProviderSessions(
     agentStorage,
     providerFilter,
   );
-  const importedHandles = importedSessions.handles;
+  const importedIndex = importedSessions.index;
   const query = normalizeImportSessionQuery(request.query);
-  const listingLimit = query ? IMPORT_SESSION_SEARCH_SCAN_LIMIT : limit + importedSessions.count;
+  // The backfill past filtered rows only matters when rows ARE filtered;
+  // includeExisting keeps every row, so `limit` listings are enough.
+  let listingLimit: number;
+  if (query) {
+    listingLimit = IMPORT_SESSION_SEARCH_SCAN_LIMIT;
+  } else if (includeExisting) {
+    listingLimit = limit;
+  } else {
+    listingLimit = limit + importedSessions.count;
+  }
 
   const listing = await agentManager.listImportableSessions({
     limit: listingLimit,
@@ -154,14 +174,16 @@ export async function listImportableProviderSessions(
     if (sinceTimestamp !== null && session.lastActivityAt.getTime() < sinceTimestamp) {
       continue;
     }
+    // metadata-generation 恒隐（B5-IMPORT2 裁定）：includeExisting 也不放行——
+    // 用户明示这类会话不进导入页。
     if (isMetadataGenerationSession(session)) {
       continue;
     }
-    if (
-      importedHandles.has(toProviderSessionHandleKey(session.provider, session.providerHandleId))
-    ) {
-      filteredAlreadyImportedCount += 1;
-      continue;
+    if (importedIndex.has(toProviderSessionHandleKey(session.provider, session.providerHandleId))) {
+      if (!includeExisting) {
+        filteredAlreadyImportedCount += 1;
+        continue;
+      }
     }
     candidates.push(session);
   }
@@ -169,11 +191,20 @@ export async function listImportableProviderSessions(
   const entries = candidates
     .sort((a, b) => b.lastActivityAt.getTime() - a.lastActivityAt.getTime())
     .slice(0, limit)
-    .map((descriptor) =>
-      toRecentProviderSessionDescriptorPayload(descriptor, {
+    .map((descriptor) => {
+      const payload = toRecentProviderSessionDescriptorPayload(descriptor, {
         providerLabel: providerSnapshotManager.getProviderLabel(descriptor.provider),
-      }),
-    );
+      });
+      if (includeExisting) {
+        const facts = importedIndex.get(
+          toProviderSessionHandleKey(descriptor.provider, descriptor.providerHandleId),
+        );
+        if (facts) {
+          payload.existing = { agentId: facts.agentId, archived: facts.archived };
+        }
+      }
+      return payload;
+    });
 
   return {
     entries,
@@ -373,18 +404,51 @@ async function collectImportedProviderSessions(
   agentManager: Pick<AgentManager, "listAgents">,
   agentStorage: Pick<AgentStorage, "list">,
   providerFilter: Set<string> | undefined,
-): Promise<{ handles: Set<string>; count: number }> {
-  const handles = new Set<string>();
+): Promise<{ index: Map<string, ExistingAgentFacts>; count: number }> {
+  const index = new Map<string, ExistingAgentFacts>();
+  // count keeps the pre-B5 semantics (distinct persistence.sessionId keys) — it
+  // sizes the filtered-row backfill (listingLimit) for the default mode.
   const sessions = new Set<string>();
   const records = await agentStorage.list();
+  // F17-4: an omp resume writes a NEW transcript whose header `parentSession`
+  // points at the file it resumed from; the agent handle only tracks the newest
+  // file. Walking the chain claims the ancestors too — same conversation,
+  // already managed (default mode filters them, includeExisting badges them).
+  const chainCache = new Map<string, Promise<string[]>>();
 
-  const collect = (
+  const addKey = (provider: string, handle: string, facts: ExistingAgentFacts): void => {
+    const key = toProviderSessionHandleKey(provider, handle);
+    const prev = index.get(key);
+    // Active claims win over archived ones — same direction as the daemon's
+    // duplicate-import rejection (checks activeRecord first) and as the shell's
+    // B4 handle index.
+    if (!prev || (prev.archived && !facts.archived)) {
+      index.set(key, facts);
+    }
+  };
+
+  const collect = async (
     provider: AgentProvider | StoredAgentRecord["provider"] | string,
     persistence: AgentPersistenceHandle | null | undefined,
-  ) => {
+    facts: ExistingAgentFacts,
+  ): Promise<void> => {
     if (!persistence || (providerFilter && !providerFilter.has(provider))) return;
     sessions.add(toProviderSessionHandleKey(provider, persistence.sessionId));
-    collectProviderSessionHandleKeys(handles, provider, persistence);
+    addKey(provider, persistence.sessionId, facts);
+    if (persistence.nativeHandle) {
+      addKey(provider, persistence.nativeHandle, facts);
+    }
+    if (provider !== "omp" || !persistence.nativeHandle?.toLowerCase().endsWith(".jsonl")) {
+      return;
+    }
+    let walk = chainCache.get(persistence.nativeHandle);
+    if (!walk) {
+      walk = resolveOmpResumeAncestorPaths(persistence.nativeHandle);
+      chainCache.set(persistence.nativeHandle, walk);
+    }
+    for (const ancestor of await walk) {
+      addKey(provider, ancestor, facts);
+    }
   };
 
   // R2-19 A-side: archivedAt is NOT an already-imported exemption. An archived
@@ -392,15 +456,24 @@ async function collectImportedProviderSessions(
   // user a double-import entry and under-reports filteredAlreadyImportedCount).
   // The revive path lives in importProviderSession (restore-as-same-agent,
   // covered by its own tests) and is deliberately untouched here.
-  for (const agent of agentManager.listAgents()) {
-    collect(agent.provider, agent.persistence);
-  }
-
   for (const record of records) {
-    collect(record.provider, record.persistence);
+    await collect(record.provider, record.persistence, {
+      agentId: record.id,
+      archived: record.archivedAt != null,
+    });
   }
 
-  return { handles, count: sessions.size };
+  const recordById = new Map(records.map((record) => [record.id, record]));
+  for (const agent of agentManager.listAgents()) {
+    await collect(agent.provider, agent.persistence, {
+      agentId: agent.id,
+      // The record is the archive truth (archiving a loaded tab keeps the agent
+      // object live); no record yet = freshly created = active.
+      archived: recordById.get(agent.id)?.archivedAt != null,
+    });
+  }
+
+  return { index, count: sessions.size };
 }
 
 function toProviderSessionHandleKey(provider: string, providerHandleId: string): string {
@@ -411,19 +484,4 @@ function isMetadataGenerationSession(input: { firstPromptPreview: string | null 
   return (
     input.firstPromptPreview?.trimStart().startsWith(METADATA_GENERATION_PROMPT_PREFIX) ?? false
   );
-}
-
-function collectProviderSessionHandleKeys(
-  target: Set<string>,
-  provider: AgentProvider | StoredAgentRecord["provider"] | string,
-  persistence: AgentPersistenceHandle | null | undefined,
-): void {
-  if (!persistence) {
-    return;
-  }
-
-  target.add(toProviderSessionHandleKey(provider, persistence.sessionId));
-  if (persistence.nativeHandle) {
-    target.add(toProviderSessionHandleKey(provider, persistence.nativeHandle));
-  }
 }

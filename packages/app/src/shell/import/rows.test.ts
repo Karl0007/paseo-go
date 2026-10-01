@@ -813,6 +813,69 @@ describe("buildImportRowBadgeMap aggregation (裁定 12 父行)", () => {
   });
 });
 
+// B5-IMPORT2（F17/D20）：徽标真值改由服务端 entry.existing 下发（请求
+// includeExisting=true，新 daemon 不再剔除已存在行）；壳侧目录索引降级为
+// 旧 daemon / 竞态窗口回退源。
+describe("server existing truth (B5-IMPORT2)", () => {
+  it("carries entry.existing onto the row; absent = null", () => {
+    const [marked, plain] = mapEntriesToImportRows(
+      [
+        omp("m", "2026-09-25T08:00:00.000Z", { existing: { agentId: "a1", archived: false } }),
+        omp("f", "2026-09-25T07:00:00.000Z"),
+      ],
+      () => null,
+    );
+    expect(marked.existing).toEqual({ agentId: "a1", archived: false });
+    expect(plain.existing).toBeNull();
+  });
+
+  it("server facts win over a conflicting shell index claim", () => {
+    const rows = mapEntriesToImportRows(
+      [omp("p", "2026-09-25T08:00:00.000Z", { existing: { agentId: "srv", archived: true } })],
+      () => null,
+    );
+    const index = buildImportAgentHandleIndex([
+      {
+        id: "stale",
+        provider: "omp",
+        archived: false,
+        persistence: { sessionId: "p" },
+      },
+    ]);
+    const badges = buildImportRowBadgeMap(buildImportTree(rows), index);
+    expect(badges.get("omp:p")).toEqual({ state: "archived", agentId: "srv" });
+  });
+
+  it("server facts badge without any shell directory index (old fallback empty)", () => {
+    const rows = mapEntriesToImportRows(
+      [
+        omp("a", "2026-09-25T08:00:00.000Z", { existing: { agentId: "x", archived: false } }),
+        omp("b", "2026-09-25T07:00:00.000Z", { existing: { agentId: "y", archived: true } }),
+        omp("c", "2026-09-25T06:00:00.000Z"),
+      ],
+      () => null,
+    );
+    const badges = buildImportRowBadgeMap(buildImportTree(rows), new Map());
+    expect(badges.get("omp:a")).toEqual({ state: "imported", agentId: "x" });
+    expect(badges.get("omp:b")).toEqual({ state: "archived", agentId: "y" });
+    expect(badges.has("omp:c")).toBe(false);
+  });
+
+  it("rows without server facts still fall back to the shell index (旧 daemon)", () => {
+    const rows = mapEntriesToImportRows([omp("legacy", "2026-09-25T08:00:00.000Z")], () => null);
+    const index = buildImportAgentHandleIndex([
+      {
+        id: "old-daemon-agent",
+        provider: "omp",
+        archived: false,
+        persistence: { sessionId: "legacy" },
+      },
+    ]);
+    const badges = buildImportRowBadgeMap(buildImportTree(rows), index);
+    expect(badges.get("omp:legacy")).toEqual({ state: "imported", agentId: "old-daemon-agent" });
+  });
+});
+
 // R4-06（开屏覆盖面收口）：徽标跳转的 opener 目标构造。链本身（R4 门→fork 门→
 // markRead→recordVisit→navigate）由 open-agent.test 钉死；这里钉的是「喂给链的
 // 事实」——分级门的三个输入必须原样来自目录行，缺了=pre-go.7 静默口径。

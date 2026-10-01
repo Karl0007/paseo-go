@@ -82,13 +82,17 @@ describe("useImportList query pass-through", () => {
       await Promise.resolve();
       await Promise.resolve();
     });
-    expect(fetchA).toHaveBeenCalledWith({ limit: 60 });
+    expect(fetchA).toHaveBeenCalledWith({ limit: 60, includeExisting: true });
     rerender({ query: "C13" });
     await act(async () => {
       await Promise.resolve();
       await Promise.resolve();
     });
-    expect(fetchA).toHaveBeenLastCalledWith({ limit: 60, query: "C13" });
+    expect(fetchA).toHaveBeenLastCalledWith({
+      limit: 60,
+      query: "C13",
+      includeExisting: true,
+    });
   });
 
   it("an old query's late response cannot overwrite the newest query's list", async () => {
@@ -118,8 +122,8 @@ describe("useImportList query pass-through", () => {
     });
     expect(result.current.listState.entries).toEqual([ENTRY_B]);
     expect(calls).toEqual([
-      { limit: 60, query: "old" },
-      { limit: 60, query: "new" },
+      { limit: 60, query: "old", includeExisting: true },
+      { limit: 60, query: "new", includeExisting: true },
     ]);
   });
 
@@ -159,8 +163,8 @@ describe("useImportList query pass-through", () => {
     expect(result.current.listState.status).toBe("ready");
     // Rejected at the identity guard: the stale closure never re-fetched.
     expect(calls).toEqual([
-      { limit: 60, query: "old" },
-      { limit: 60, query: "new" },
+      { limit: 60, query: "old", includeExisting: true },
+      { limit: 60, query: "new", includeExisting: true },
     ]);
   });
 

@@ -53,6 +53,13 @@ export interface ImportRow {
   parentIsRawId: boolean;
   /** C25「可能活跃」= descriptor looksActive===true；缺席/false 都不渲染。 */
   looksActive: boolean;
+  /**
+   * B5-IMPORT2: 服务端 `existing` 真值（请求带 includeExisting=true 时新 daemon
+   * 才下发；已导入={agentId,archived:false}，已归档=archived:true）。
+   * null=未标记（无匹配 / 旧 daemon）。有值优先于壳侧目录索引——服务端判定
+   * 还认识 omp resume 链祖先（F17-4），壳侧索引看不见那一层。
+   */
+  existing: ImportAgentHandleFacts | null;
 }
 
 /** 裸 id（非路径形态）的展示截断长度（R2-18：整串不是名字，截断即可辨认来源）。 */
@@ -133,6 +140,7 @@ export function mapEntriesToImportRows(
       parentLabel: parent?.text ?? null,
       parentIsRawId: parent?.raw ?? false,
       looksActive: entry.looksActive === true,
+      existing: entry.existing ?? null,
     });
   }
   // R2-14: unknown dates (null) sink below every trustworthy one (0=epoch 序).
@@ -454,6 +462,9 @@ export function buildImportToastParts(
 // omp 恢复后 sessionId 会变运行期 id、nativeHandle 才保住 transcript 路径，
 // 故两字段都要进索引）。匹配口径与服务端逐字节一致：provider 前缀 + 原串，
 // 不做路径归一——比服务端更宽会把「服务端其实允许导入」的行禁勾选。
+// B5-IMPORT2（F17）：新 daemon 起徽标真值改由响应 entry.existing 下发（请求
+// includeExisting=true，服务端不再剔除已存在行；判定还覆盖 omp resume 链祖先
+// ——壳侧索引看不见那一层）。本索引降级为旧 daemon / 竞态窗口的回退源。
 // ---------------------------------------------------------------------------
 
 /**
@@ -556,18 +567,23 @@ export interface ImportRowBadge {
  * - 父行聚合：自身无匹配且 childCount>0 且**全部后代都命中「已导入」**才标
  *   imported；部分命中或含归档子=不标（子各自标）；
  * - 自身命中优先于聚合（父自己是归档体就标「已归档」，不被子的 imported 盖掉）。
+ * B5-IMPORT2：行自身事实优先取服务端 `existing`（新 daemon 判定含 omp resume
+ * 链祖先，F17-4），缺席才回退壳侧目录索引（旧 daemon / 竞态窗口双保险）。
  */
 export function buildImportRowBadgeMap(
   treeItems: ReadonlyArray<ImportTreeItem>,
   index: ReadonlyMap<string, ImportAgentHandleFacts>,
 ): Map<string, ImportRowBadge> {
   const badges = new Map<string, ImportRowBadge>();
-  if (index.size === 0) return badges;
+  const hasServerFacts = treeItems.some(
+    (item) => item.kind === "session" && item.row.existing !== null,
+  );
+  if (index.size === 0 && !hasServerFacts) return badges;
   const own = new Map<string, ImportAgentHandleFacts>();
   const importedChildren = new Map<string, number>();
   for (const item of treeItems) {
     if (item.kind !== "session") continue;
-    const facts = classifyImportRowBadge(item.row, index);
+    const facts = item.row.existing ?? classifyImportRowBadge(item.row, index);
     if (!facts) continue;
     own.set(item.row.key, facts);
     if (item.depth === 1 && !facts.archived) {

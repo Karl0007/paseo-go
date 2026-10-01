@@ -5,9 +5,10 @@
 // n/m）→ 成功 toast → 返回对话列表，新条目出现后点开即完整 timeline（C4
 // opener）。B4-IMPORT（批次四 F6/F7 裁定 11/12）：树默认折叠子会话（父行
 // chevron+子计数，点 chevron 展开；搜索/过滤态强制展开；折叠态不持久化），
-// 行 handle 命中 agent 目录 persistence 时标「已导入/已归档」灰徽标+勾选禁用+
-// 点主体跳转（新 daemon 已在服务端把命中行滤掉，徽标是对旧 daemon/竞态窗口的
-// 双保险——实证链见卡报告）。重复导入按 daemon 的「already imported」错误归类
+// 行标「已导入/已归档」灰徽标+勾选禁用+点主体跳转。B5-IMPORT2（F17/D20）：
+// 请求带 includeExisting、limit 提至 200——新 daemon 不再剔除已存在行，徽标
+// 真值=响应 entry.existing（服务端判定，含 omp resume 链祖先）；壳侧目录索引
+// 降级为旧 daemon/竞态窗口回退。重复导入按 daemon 的「already imported」错误归类
 // 为幂等提示而非失败。状态判定/行映射/树/折叠/徽标/勾选/结果分类都在
 // @/shell/import/rows（纯逻辑，单测覆盖），屏只剩数据接线与渲染。KI-9 起本屏
 // 是 (detail) 根栈 push：返回按钮=router.back 真弹栈（与硬件/手势返回同款），
@@ -84,7 +85,9 @@ import { useSessionStore } from "@/stores/session-store";
 import { usePaseoGoReadStateStore } from "@/shell/stores/readState";
 import { usePaseoGoForkAckStore } from "@/shell/stores/forkAck";
 
-const IMPORT_LIST_LIMIT = 60;
+// B5-IMPORT2 (D20): 60→200=服务端 limit 上限；includeExisting 起列表不再剔除
+// 已存在行，行数≈omp resume 可见数，200 内一屏全覆盖（超出分页=后续卡）。
+const IMPORT_LIST_LIMIT = 200;
 // C23: 搜索防抖（对齐官方 import-session-sheet 姿势，卡口径 ~300ms）。
 const IMPORT_SEARCH_DEBOUNCE_MS = 300;
 
@@ -423,9 +426,10 @@ export default function ShellImportScreen() {
   // 被过滤掉的父自然让子成为孤儿组。
   const treeItems = useMemo(() => buildImportTree(rows), [rows]);
 
-  // B4-IMPORT 裁定 12: 行 handle ↔ agent 目录 persistence（sessionId/nativeHandle
-  // 双字段，服务端 listByProviderSession 同款口径）→ 已导入/已归档徽标表；
-  // 父行全子「已导入」才聚合标。目录未订阅到时 index 为空=全行维持现状。
+  // B4-IMPORT 裁定 12 → B5-IMPORT2: 徽标真值优先取服务端 entry.existing（新
+  // daemon，含 omp resume 链祖先判定）；行无标记时回退壳侧 handle 索引
+  // （agent 目录 persistence 双字段口径）——旧 daemon / 竞态窗口双保险。
+  // 父行全子「已导入」才聚合标。两源皆空=全行维持现状。
   const agentIndex = useImportAgentHandleIndex(serverId);
   const badgeMap = useMemo(
     () => buildImportRowBadgeMap(treeItems, agentIndex),

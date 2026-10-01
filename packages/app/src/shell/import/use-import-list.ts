@@ -18,7 +18,11 @@ import type { FetchRecentProviderSessionEntry } from "@getpaseo/client/internal/
 
 /** The one RPC the loader needs; `DaemonClient` satisfies it structurally. */
 export interface ImportListClient {
-  fetchRecentProviderSessions(input: { limit: number; query?: string }): Promise<{
+  fetchRecentProviderSessions(input: {
+    limit: number;
+    query?: string;
+    includeExisting?: boolean;
+  }): Promise<{
     entries: FetchRecentProviderSessionEntry[];
     filteredAlreadyImportedCount?: number;
     providerErrors?: Array<{ provider: string; message: string }>;
@@ -85,8 +89,11 @@ export function useImportList(
     const seq = ++requestSeq.current;
     setListState((prev) => ({ ...prev, status: "loading" }));
     try {
+      // B5-IMPORT2 (D20): includeExisting=true → 新 daemon 不再剔除已存在会话，
+      // 逐条挂 existing（徽标真值）；旧 daemon zod 剥未知键=照旧剔除，壳侧
+      // 目录索引继续兜底（rows.buildImportRowBadgeMap 回退源）。
       const payload = await client.fetchRecentProviderSessions(
-        query ? { limit, query } : { limit },
+        query ? { limit, query, includeExisting: true } : { limit, includeExisting: true },
       );
       if (seq !== requestSeq.current) return;
       setListState({

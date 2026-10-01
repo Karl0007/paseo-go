@@ -404,6 +404,78 @@ describe("workspace message schemas", () => {
     expect(response.payload.filteredAlreadyImportedCount).toBe(3);
   });
 
+  test("B5-IMPORT2: includeExisting request + existing entry mark parse; absent stays absent", () => {
+    const request = SessionInboundMessageSchema.parse({
+      type: "fetch_recent_provider_sessions_request",
+      requestId: "req-include-existing",
+      includeExisting: true,
+    });
+    if (request.type !== "fetch_recent_provider_sessions_request") {
+      throw new Error("expected fetch_recent_provider_sessions_request");
+    }
+    expect(request.includeExisting).toBe(true);
+
+    const response = SessionOutboundMessageSchema.parse({
+      type: "fetch_recent_provider_sessions_response",
+      payload: {
+        requestId: "req-include-existing",
+        entries: [
+          {
+            providerId: "omp",
+            providerLabel: "OMP",
+            providerHandleId: "C:/sessions/live.jsonl",
+            cwd: "/tmp/repo",
+            title: null,
+            firstPromptPreview: "first",
+            lastPromptPreview: "last",
+            lastActivityAt: "2026-10-01T00:00:00.000Z",
+            existing: { agentId: "agent-1", archived: false },
+          },
+          {
+            providerId: "omp",
+            providerLabel: "OMP",
+            providerHandleId: "C:/sessions/archived.jsonl",
+            cwd: "/tmp/repo",
+            title: null,
+            firstPromptPreview: "first",
+            lastPromptPreview: "last",
+            lastActivityAt: "2026-10-01T00:00:00.000Z",
+            existing: { agentId: "agent-2", archived: true },
+          },
+          {
+            providerId: "omp",
+            providerLabel: "OMP",
+            providerHandleId: "C:/sessions/free.jsonl",
+            cwd: "/tmp/repo",
+            title: null,
+            firstPromptPreview: "first",
+            lastPromptPreview: "last",
+            lastActivityAt: "2026-10-01T00:00:00.000Z",
+          },
+        ],
+      },
+    });
+    if (response.type !== "fetch_recent_provider_sessions_response") {
+      throw new Error("expected fetch_recent_provider_sessions_response");
+    }
+    expect(response.payload.entries.map((entry) => entry.existing)).toEqual([
+      { agentId: "agent-1", archived: false },
+      { agentId: "agent-2", archived: true },
+      undefined,
+    ]);
+  });
+
+  test("B5-IMPORT2: pre-B5 requests/responses parse with the fields absent", () => {
+    const request = SessionInboundMessageSchema.parse({
+      type: "fetch_recent_provider_sessions_request",
+      requestId: "req-legacy",
+    });
+    if (request.type !== "fetch_recent_provider_sessions_request") {
+      throw new Error("expected fetch_recent_provider_sessions_request");
+    }
+    expect(request.includeExisting).toBeUndefined();
+  });
+
   test("parses new and legacy import agent requests", () => {
     const newRequest = SessionInboundMessageSchema.parse({
       type: "import_agent_request",

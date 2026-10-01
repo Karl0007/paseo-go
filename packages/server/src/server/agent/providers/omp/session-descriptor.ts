@@ -331,6 +331,50 @@ function sessionPathKey(filePath: string): string {
   return looksLikeDefiniteWindowsPath(resolved) ? resolved.toLowerCase() : resolved;
 }
 
+// B5-IMPORT2 (F17-4): an omp resume does not append to the transcript it resumes
+// from — it writes a NEW file whose session header carries `parentSession`, the
+// path of the file it was resumed from. A managed agent's persistence handle
+// tracks only the newest file, so every ancestor in that chain used to stay a
+// separate, unclaimed row on the import list (screenshot F17: the row of the
+// very session the user was chatting in). Walking the chain here lets
+// server/agent/import-sessions.ts claim the whole chain as one existing agent.
+export async function resolveOmpResumeAncestorPaths(
+  sessionFile: string,
+  maxDepth = 32,
+): Promise<string[]> {
+  const ancestors: string[] = [];
+  const visited = new Set<string>([sessionPathKey(sessionFile)]);
+  let current = sessionFile;
+  for (let depth = 0; depth < maxDepth; depth += 1) {
+    const parent = await readOmpParentSessionPath(current);
+    if (!parent) break;
+    const key = sessionPathKey(parent);
+    if (visited.has(key)) break;
+    visited.add(key);
+    // Claim only ancestors that exist: a deleted transcript never surfaces as
+    // an import row, and the unreadable head also ends the walk there.
+    if (!(await readHeadChunk(parent))) break;
+    ancestors.push(parent);
+    current = parent;
+  }
+  return ancestors;
+}
+
+async function readOmpParentSessionPath(filePath: string): Promise<string | null> {
+  const chunk = await readHeadChunk(filePath);
+  if (!chunk) return null;
+  for (const line of chunk.split(/\r?\n/u)) {
+    const entry = parseJsonRecord(line.trim());
+    if (!entry || entry.type !== "session") continue;
+    // `parentSession` is the absolute transcript path omp wrote; anything that
+    // is not a .jsonl path (or a missing/unreadable file, handled upstream)
+    // ends the walk.
+    const parent = readNonEmptyString(entry.parentSession);
+    return parent && parent.toLowerCase().endsWith(".jsonl") ? parent : null;
+  }
+  return null;
+}
+
 async function readOmpSessionDescriptor(filePath: string): Promise<OmpSessionDescriptor | null> {
   // OMP may emit title/session_info lines before the session header.
   const headChunk = await readHeadChunk(filePath);

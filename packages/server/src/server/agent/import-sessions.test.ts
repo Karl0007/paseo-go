@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
-import { mkdirSync, mkdtempSync, realpathSync, rmSync, symlinkSync } from "node:fs";
+import { mkdirSync, mkdtempSync, realpathSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import type {
@@ -511,6 +511,235 @@ test("listImportableProviderSessions filters out metadata generation sessions", 
   expect(result.entries).toHaveLength(1);
   expect(result.entries[0].providerHandleId).toBe("real-handle");
   expect(result.filteredAlreadyImportedCount).toBe(0);
+});
+
+// B5-IMPORT2（F17/D20）：includeExisting 两态 + existing 判定覆盖 原生/导入/归档
+// 三路 + omp resume 链祖先（F17-4）。
+
+test("listImportableProviderSessions includeExisting keeps existing rows and marks native/imported/archived", async () => {
+  const cwd = "/tmp/project";
+  const sessions = [
+    makeImportableSession({
+      sessionId: "native-session",
+      nativeHandle: "native-handle",
+      cwd,
+      title: "Native live",
+      lastActivityAt: "2026-04-30T12:03:00.000Z",
+    }),
+    makeImportableSession({
+      sessionId: "imported-session",
+      nativeHandle: "imported-handle",
+      cwd,
+      title: "Imported",
+      lastActivityAt: "2026-04-30T12:02:00.000Z",
+    }),
+    makeImportableSession({
+      sessionId: "archived-session",
+      nativeHandle: "archived-handle",
+      cwd,
+      title: "Archived",
+      lastActivityAt: "2026-04-30T12:01:00.000Z",
+    }),
+    makeImportableSession({
+      sessionId: "free-session",
+      nativeHandle: "free-handle",
+      cwd,
+      title: "Free",
+      lastActivityAt: "2026-04-30T12:00:00.000Z",
+    }),
+  ];
+  const listImportableSessions = vi.fn(async (options?: { limit?: number }) =>
+    makeImportableSessionsResult(sessions.slice(0, options?.limit)),
+  );
+
+  const result = await listImportableProviderSessions({
+    request: makeRequest({ cwd, providers: ["codex"], limit: 4, includeExisting: true }),
+    agentManager: {
+      listAgents: () => [
+        makeManagedAgent({
+          id: "agent-native",
+          cwd,
+          sessionId: "native-session",
+          nativeHandle: "native-handle",
+        }),
+      ],
+      listImportableSessions,
+    } satisfies Pick<AgentManager, "listAgents" | "listImportableSessions">,
+    agentStorage: {
+      list: async () => [
+        {
+          id: "agent-imported",
+          provider: "codex",
+          persistence: {
+            provider: "codex",
+            sessionId: "imported-session",
+            nativeHandle: "imported-handle",
+          },
+        } as StoredAgentRecord,
+        {
+          id: "agent-archived",
+          provider: "codex",
+          archivedAt: "2026-04-30T13:00:00.000Z",
+          persistence: {
+            provider: "codex",
+            sessionId: "archived-session",
+            nativeHandle: "archived-handle",
+          },
+        } as StoredAgentRecord,
+      ],
+    } satisfies Pick<AgentStorage, "list">,
+    providerSnapshotManager: { getProviderLabel: () => "Codex" },
+  });
+
+  // includeExisting 不剔除 → 无需回填，listing 只要 limit 行。
+  expect(listImportableSessions).toHaveBeenCalledWith({
+    limit: 4,
+    providerFilter: new Set(["codex"]),
+    cwd,
+  });
+  expect(result.filteredAlreadyImportedCount).toBe(0);
+  expect(result.entries.map((entry) => [entry.providerHandleId, entry.existing])).toEqual([
+    ["native-handle", { agentId: "agent-native", archived: false }],
+    ["imported-handle", { agentId: "agent-imported", archived: false }],
+    ["archived-handle", { agentId: "agent-archived", archived: true }],
+    ["free-handle", undefined],
+  ]);
+});
+
+test("listImportableProviderSessions existing prefers the active agent over an archived claim", async () => {
+  // 归档存量 + 重新导入的活跃体共用一个 handle（B4 壳侧同规则）：标「已导入」
+  // 并可跳转活跃体，与服务端拒重复导入的取向一致。
+  const cwd = "/tmp/project";
+  const result = await listImportableProviderSessions({
+    request: makeRequest({ cwd, providers: ["claude"], includeExisting: true }),
+    agentManager: {
+      listAgents: () => [],
+      listImportableSessions: async () =>
+        makeImportableSessionsResult([
+          makeImportableSession({
+            provider: "claude",
+            sessionId: "shared-handle",
+            cwd,
+            lastActivityAt: "2026-04-30T12:00:00.000Z",
+          }),
+        ]),
+    } satisfies Pick<AgentManager, "listAgents" | "listImportableSessions">,
+    agentStorage: {
+      list: async () => [
+        {
+          id: "agent-old",
+          provider: "claude",
+          archivedAt: "2026-04-29T00:00:00.000Z",
+          persistence: { provider: "claude", sessionId: "shared-handle" },
+        } as StoredAgentRecord,
+        {
+          id: "agent-new",
+          provider: "claude",
+          persistence: { provider: "claude", sessionId: "shared-handle" },
+        } as StoredAgentRecord,
+      ],
+    } satisfies Pick<AgentStorage, "list">,
+    providerSnapshotManager: { getProviderLabel: () => "Claude Code" },
+  });
+
+  expect(result.entries[0].existing).toEqual({ agentId: "agent-new", archived: false });
+});
+
+test("listImportableProviderSessions claims omp resume-chain ancestors for the existing verdict", async () => {
+  // F17-4 实证（生产 home b0e1e6f7）：omp resume 写新 transcript，header
+  // `parentSession` 指旧文件；agent persistence 只跟最新文件。修复前旧文件行
+  // 既不剔除也不打标（截图「如果额外问题…」行=本会话祖先）。
+  const root = mkdtempSync(path.join(tmpdir(), "paseo-import-chain-"));
+  importTestDirectories.push(root);
+  const cwd = "/tmp/project";
+  const parentFile = path.join(root, "2026-09-26T00-00-00-000Z_parent.jsonl");
+  const childFile = path.join(root, "2026-09-30T00-00-00-000Z_child.jsonl");
+  writeFileSync(
+    parentFile,
+    `${JSON.stringify({ type: "session", id: "parent-id", cwd, timestamp: "2026-09-26T00:00:00.000Z" })}\n`,
+  );
+  writeFileSync(
+    childFile,
+    `${JSON.stringify({ type: "session", id: "child-id", cwd, timestamp: "2026-09-30T00:00:00.000Z", parentSession: parentFile })}\n`,
+  );
+  const sessions = [
+    makeImportableSession({
+      provider: "omp",
+      sessionId: "child-id",
+      nativeHandle: childFile,
+      cwd,
+      lastActivityAt: "2026-04-30T12:01:00.000Z",
+    }),
+    makeImportableSession({
+      provider: "omp",
+      sessionId: "parent-id",
+      nativeHandle: parentFile,
+      cwd,
+      lastActivityAt: "2026-04-30T12:00:00.000Z",
+    }),
+  ];
+  const agentManager = {
+    listAgents: () => [],
+    listImportableSessions: async () => makeImportableSessionsResult(sessions),
+  } satisfies Pick<AgentManager, "listAgents" | "listImportableSessions">;
+  const agentStorage = {
+    list: async () => [
+      {
+        id: "agent-omp",
+        provider: "omp",
+        persistence: { provider: "omp", sessionId: "child-id", nativeHandle: childFile },
+      } as StoredAgentRecord,
+    ],
+  } satisfies Pick<AgentStorage, "list">;
+  const providerSnapshotManager = { getProviderLabel: (provider: string) => provider };
+
+  // 默认态：祖先行=同一已管理会话的历史 → 剔除（修复前它漏网=双导入入口）。
+  const filtered = await listImportableProviderSessions({
+    request: makeRequest({ cwd, providers: ["omp"] }),
+    agentManager,
+    agentStorage,
+    providerSnapshotManager,
+  });
+  expect(filtered.entries).toEqual([]);
+  expect(filtered.filteredAlreadyImportedCount).toBe(2);
+
+  // includeExisting：两行都在、同标一个 agent。
+  const marked = await listImportableProviderSessions({
+    request: makeRequest({ cwd, providers: ["omp"], includeExisting: true }),
+    agentManager,
+    agentStorage,
+    providerSnapshotManager,
+  });
+  expect(marked.entries.map((entry) => [entry.providerHandleId, entry.existing])).toEqual([
+    [childFile, { agentId: "agent-omp", archived: false }],
+    [parentFile, { agentId: "agent-omp", archived: false }],
+  ]);
+});
+
+test("listImportableProviderSessions keeps metadata-generation sessions hidden under includeExisting", async () => {
+  // B5-IMPORT2 裁定（用户明示「那就不显示 metadata」）：恒隐，两态一致。
+  const cwd = "/tmp/project";
+  const result = await listImportableProviderSessions({
+    request: makeRequest({ cwd, providers: ["codex"], includeExisting: true }),
+    agentManager: {
+      listAgents: () => [],
+      listImportableSessions: async () =>
+        makeImportableSessionsResult([
+          makeImportableSession({
+            sessionId: "metadata-session",
+            nativeHandle: "metadata-handle",
+            cwd,
+            lastActivityAt: "2026-04-30T12:05:00.000Z",
+            firstPrompt:
+              "Generate metadata for a coding agent based on the user prompt.\nTitle: short descriptive label (<= 40 chars).",
+          }),
+        ]),
+    } satisfies Pick<AgentManager, "listAgents" | "listImportableSessions">,
+    agentStorage: { list: async () => [] } satisfies Pick<AgentStorage, "list">,
+    providerSnapshotManager: { getProviderLabel: () => "Codex" },
+  });
+
+  expect(result.entries).toEqual([]);
 });
 
 test("listImportableProviderSessions keeps realpath-equivalent cwd matches", async () => {
