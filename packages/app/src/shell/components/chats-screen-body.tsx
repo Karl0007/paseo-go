@@ -440,12 +440,18 @@ export function ChatsScreenBody({ selectedAgentKey = null }: ShellScreenBodyProp
 
   const [refreshing, setRefreshing] = useState(false);
   const refreshTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
-  // R4-09: the band, as a REF. Android's SwipeRefreshLayout intercepts a downward
-  // pull at the scroll top even with `scrollEnabled=false` (it only asks
-  // `canChildScrollUp()`), so locking the scroll does NOT suppress the refresh —
-  // and removing `onRefresh` to suppress it is exactly the F10 remount. The one
-  // lever that touches no prop shape is the callback itself: while a row gesture
-  // owns the touch, the pull is swallowed here.
+  // R4-09 + B5-NOREFRESH (F15): the band, as a REF. Android's SwipeRefreshLayout
+  // intercepts a downward pull at the scroll top even with `scrollEnabled=false`
+  // (it only asks `canChildScrollUp()`), and removing `onRefresh` to suppress it
+  // is exactly the F10 remount. PRIMARY suppression is now native: the band's
+  // `refreshEnabled=false` (gestureBand below → DraggableList's
+  // refreshControlEnabled) disables SwipeRefreshLayout itself — no intercept, no
+  // spinner, no callback — for the whole armed → menu → drag band. This swallow
+  // is the SECOND line of defense for what the disable can't cover: iOS (whose
+  // RefreshControl ignores `enabled`) and a pull whose native interception beat
+  // the prop commit — either way the reload still never fires while a row
+  // gesture owns the touch. The ref (not state) keeps `handleRefresh`'s identity
+  // stable: churning the RefreshControl's onRefresh prop is a shape change (F10).
   const gestureLiveRef = useRef(false);
   const handleRefresh = useCallback(() => {
     const swallowed = gestureLiveRef.current;
@@ -554,11 +560,13 @@ export function ChatsScreenBody({ selectedAgentKey = null }: ShellScreenBodyProp
     [actions, dragLockHandoff, pinnedIds, normalizedQuery],
   );
 
-  // KI-11 ruling ③ + B4-REGRESS F10: the gesture band's list props, all four from
-  // one pure function (drag-drop.ts) — the control stays MOUNTED, `refreshing`
-  // forced false, `scrollEnabled` frozen, and `containerStyle` the same flex:1
-  // object in both states. The 顶部向下拖 pull itself is swallowed in
-  // `handleRefresh` (R4-09): Android intercepts it regardless of `scrollEnabled`.
+  // KI-11 ruling ③ + B4-REGRESS F10 + B5-F15: the gesture band's list props, all
+  // five from one pure function (drag-drop.ts) — the control stays MOUNTED and
+  // goes natively DISABLED (`refreshControlEnabled=false`) for the band,
+  // `refreshing` is forced false, `scrollEnabled` freezes, and `containerStyle`
+  // is the same flex:1 object in both states. The 顶部向下拖 pull can no longer
+  // even start while the band lives; a callback that still lands (iOS, or a pull
+  // that beat the disable commit) is swallowed in `handleRefresh` (R4-09).
   const gestureBand = chatGestureBandProps({
     gestureLive: gestureLock,
     refreshing,
@@ -749,6 +757,7 @@ export function ChatsScreenBody({ selectedAgentKey = null }: ShellScreenBodyProp
               contentContainerStyle={styles.listContent}
               refreshing={gestureBand.refreshing}
               onRefresh={gestureBand.onRefresh}
+              refreshControlEnabled={gestureBand.refreshEnabled}
               ListEmptyComponent={listEmpty}
               extraData={listExtraData}
               testID="shell-chats-list"
