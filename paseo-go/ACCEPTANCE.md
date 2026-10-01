@@ -286,8 +286,9 @@
 
 - typecheck 全 workspace 0；oxlint 4599 文件 0/0；树净。
 - app 6328（+31）：**4 失败=W1 zh-CN 环境集，零新增**；server 6191（+13）：1 环境项；protocol 742（+2）：1 环境项。
+- ⚠ 生产停机事故入账（go.8 切换）：代理切换脚本以**会话子进程**（bash async）启动，turn 结束会话挂起→进程树被杀于 Stop 与装包之间，生产停 ~2h49m（用户察觉）。Main 手动原子恢复（sha 亲验→装→启→四条全绿）。教训入 RELEASE.md：**原子性≠持久性——生产切换必须 hub start persistent:true 或 schtasks 自脱离，禁代理会话内后台**。
 - 纪律事件×2 入账：①`git stash push -- packages/`（pathspec 过宽）短暂回滚他车在途文件（pop 全恢复，教训=禁 stash/checkout/reset，对照用只读 diff）；②git index 损坏一次（并发 git 写嫌疑），`rm .git/index && git reset` 秒级恢复。
 
 ## O5. 结论
 
-**批次五验收通过**。F12-F17 全兑现；review 10/10 红转绿零驳回；发布=v0.10.2-go.8（APK `<占位:发布后补>`）+生产 daemon 原子升级 go.8。开放项延续：真人手指复验三处（置顶拖拽/edge-back 正向/正常下拉刷新帧=注入面不可为）；A3 慢设备漂移帧、已归档徽标真机帧两缺口以线上契约证据替代（各卡 known_issue 在案）。
+**批次五验收通过**。F12-F17 全兑现；review 10/10 红转绿零驳回；发布=v0.10.2-go.8（APK sha256=`7a74bd10…d6b9`，22 资产，五帧装机验证含离线「未知」诚实态）+生产 daemon 原子升级 go.8。开放项延续：真人手指复验三处（置顶拖拽/edge-back 正向/正常下拉刷新帧=注入面不可为）；A3 慢设备漂移帧、已归档徽标真机帧两缺口以线上契约证据替代（各卡 known_issue 在案）。
