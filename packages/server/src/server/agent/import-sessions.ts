@@ -11,7 +11,10 @@ import type { AgentPersistenceHandle, AgentProvider } from "./agent-sdk-types.js
 import { ensureAgentLoaded, type AgentLoaderManager } from "./agent-loading.js";
 import { unarchiveAgentState } from "./agent-prompt.js";
 import { toRecentProviderSessionDescriptorPayload } from "./agent-projections.js";
-import { resolveOmpResumeAncestorPaths } from "./providers/omp/session-descriptor.js";
+import {
+  resolveOmpResumeAncestorPaths,
+  sessionPathKey,
+} from "./providers/omp/session-descriptor.js";
 import type { WorkspaceProvisioningService } from "../session/workspace-provisioning/workspace-provisioning-service.js";
 import type { PersistedWorkspaceRecord } from "../workspace-registry.js";
 import type {
@@ -72,6 +75,8 @@ export interface ListImportableProviderSessionsInput {
   agentManager: Pick<AgentManager, "listAgents" | "listImportableSessions">;
   agentStorage: Pick<AgentStorage, "list">;
   providerSnapshotManager: Pick<ProviderSnapshotManager, "getProviderLabel">;
+  /** Optional: the resume-chain walk warns when its depth cap truncates a live chain. */
+  logger?: Logger;
 }
 
 export interface ListImportableProviderSessionsResult {
@@ -131,20 +136,22 @@ export function normalizeImportAgentRequest(
 export async function listImportableProviderSessions(
   input: ListImportableProviderSessionsInput,
 ): Promise<ListImportableProviderSessionsResult> {
-  const { request, agentManager, agentStorage, providerSnapshotManager } = input;
+  const { request, agentManager, agentStorage, providerSnapshotManager, logger } = input;
   // B5-IMPORT2 (D20): `includeExisting` flips the already-existing verdict from
-  // 「剔除」to「保留+标记」. Absent/false keeps the pre-B5 path byte-for-byte:
-  // existing rows are filtered and counted into `filteredAlreadyImportedCount`.
+  // 「剔除」to「保留+标记」. Absent/false keeps the pre-B5 verdict RULE (existing
+  // rows are filtered and counted into `filteredAlreadyImportedCount`) — but the
+  // claim set itself grew in B5: resume-chain ancestors of a managed transcript
+  // are filtered here too, so the false-mode row set is not byte-identical.
   const includeExisting = request.includeExisting === true;
   const limit = request.limit ?? 20;
   const sinceTimestamp = parseRecentProviderSessionsSince(request.since);
   const providerFilter = request.providers ? new Set(request.providers) : undefined;
-  const importedSessions = await collectImportedProviderSessions(
+  const importedIndex = await collectImportedProviderSessions(
     agentManager,
     agentStorage,
     providerFilter,
+    logger,
   );
-  const importedIndex = importedSessions.index;
   const query = normalizeImportSessionQuery(request.query);
   // The backfill past filtered rows only matters when rows ARE filtered;
   // includeExisting keeps every row, so `limit` listings are enough.
@@ -154,7 +161,11 @@ export async function listImportableProviderSessions(
   } else if (includeExisting) {
     listingLimit = limit;
   } else {
-    listingLimit = limit + importedSessions.count;
+    // Size the backfill from the claim index, not the sessionId count: one managed
+    // agent can filter more listing rows than it has session ids (omp rows are
+    // keyed by transcript path, and each resume-chain ancestor filters one).
+    // Over-sizing fetches a few extra rows; under-sizing starves the window.
+    listingLimit = limit + importedIndex.size;
   }
 
   const listing = await agentManager.listImportableSessions({
@@ -179,7 +190,12 @@ export async function listImportableProviderSessions(
     if (isMetadataGenerationSession(session)) {
       continue;
     }
-    if (importedIndex.has(toProviderSessionHandleKey(session.provider, session.providerHandleId))) {
+    const existingFacts = findExistingAgentFacts(
+      importedIndex,
+      session.provider,
+      session.providerHandleId,
+    );
+    if (existingFacts) {
       if (!includeExisting) {
         filteredAlreadyImportedCount += 1;
         continue;
@@ -196,8 +212,10 @@ export async function listImportableProviderSessions(
         providerLabel: providerSnapshotManager.getProviderLabel(descriptor.provider),
       });
       if (includeExisting) {
-        const facts = importedIndex.get(
-          toProviderSessionHandleKey(descriptor.provider, descriptor.providerHandleId),
+        const facts = findExistingAgentFacts(
+          importedIndex,
+          descriptor.provider,
+          descriptor.providerHandleId,
         );
         if (facts) {
           payload.existing = { agentId: facts.agentId, archived: facts.archived };
@@ -404,11 +422,9 @@ async function collectImportedProviderSessions(
   agentManager: Pick<AgentManager, "listAgents">,
   agentStorage: Pick<AgentStorage, "list">,
   providerFilter: Set<string> | undefined,
-): Promise<{ index: Map<string, ExistingAgentFacts>; count: number }> {
+  logger: Logger | undefined,
+): Promise<Map<string, ExistingAgentFacts>> {
   const index = new Map<string, ExistingAgentFacts>();
-  // count keeps the pre-B5 semantics (distinct persistence.sessionId keys) — it
-  // sizes the filtered-row backfill (listingLimit) for the default mode.
-  const sessions = new Set<string>();
   const records = await agentStorage.list();
   // F17-4: an omp resume writes a NEW transcript whose header `parentSession`
   // points at the file it resumed from; the agent handle only tracks the newest
@@ -433,21 +449,32 @@ async function collectImportedProviderSessions(
     facts: ExistingAgentFacts,
   ): Promise<void> => {
     if (!persistence || (providerFilter && !providerFilter.has(provider))) return;
-    sessions.add(toProviderSessionHandleKey(provider, persistence.sessionId));
     addKey(provider, persistence.sessionId, facts);
-    if (persistence.nativeHandle) {
-      addKey(provider, persistence.nativeHandle, facts);
+    // nativeHandle is z.any() in the storage schema — a non-string is skipped,
+    // not thrown through (pre-B5 code tolerated it via template-literal
+    // stringification).
+    const nativeHandle =
+      typeof persistence.nativeHandle === "string" ? persistence.nativeHandle : null;
+    if (nativeHandle) {
+      addKey(provider, nativeHandle, facts);
     }
-    if (provider !== "omp" || !persistence.nativeHandle?.toLowerCase().endsWith(".jsonl")) {
+    if (provider !== "omp" || !nativeHandle?.toLowerCase().endsWith(".jsonl")) {
       return;
     }
-    let walk = chainCache.get(persistence.nativeHandle);
+    let walk = chainCache.get(nativeHandle);
     if (!walk) {
-      walk = resolveOmpResumeAncestorPaths(persistence.nativeHandle);
-      chainCache.set(persistence.nativeHandle, walk);
+      // A broken chain degrades to「祖先未知」: one unreadable transcript must not
+      // fail the whole listing request (the cached promise never rejects).
+      walk = resolveOmpResumeAncestorPaths(nativeHandle, undefined, logger).catch(() => []);
+      chainCache.set(nativeHandle, walk);
     }
     for (const ancestor of await walk) {
       addKey(provider, ancestor, facts);
+      // omp wrote `parentSession` with its own spelling; scanner rows come from
+      // readdir. On case-insensitive filesystems the two can differ in case only,
+      // so claim the folded key too — the same normalization omp's own
+      // parent-linking uses (sessionPathKey).
+      addKey(provider, sessionPathKey(ancestor), facts);
     }
   };
 
@@ -473,11 +500,25 @@ async function collectImportedProviderSessions(
     });
   }
 
-  return { index, count: sessions.size };
+  return index;
 }
 
 function toProviderSessionHandleKey(provider: string, providerHandleId: string): string {
   return `${provider}\0${providerHandleId}`;
+}
+
+function findExistingAgentFacts(
+  index: Map<string, ExistingAgentFacts>,
+  provider: string,
+  providerHandleId: string,
+): ExistingAgentFacts | undefined {
+  const direct = index.get(toProviderSessionHandleKey(provider, providerHandleId));
+  if (direct) return direct;
+  if (provider !== "omp") return undefined;
+  // omp handles are transcript paths; a claim written by the resume-chain walk
+  // (omp's own spelling) and a scanner row (readdir spelling) can differ in case
+  // only on case-insensitive filesystems.
+  return index.get(toProviderSessionHandleKey(provider, sessionPathKey(providerHandleId)));
 }
 
 function isMetadataGenerationSession(input: { firstPromptPreview: string | null }): boolean {

@@ -251,8 +251,11 @@ test("listImportableProviderSessions filters, sorts, limits, and projects import
     providerSnapshotManager: { getProviderLabel: () => "Codex" },
   });
 
+  // S1 (RevServer B5): backfill sizes from the claim index (sessionId + nativeHandle
+  // keys for both managed records), not the sessionId-only count — over-sizing is
+  // harmless, under-sizing starves the window when rows filter by other keys.
   expect(listImportableSessions).toHaveBeenCalledWith({
-    limit: 4,
+    limit: 6,
     providerFilter: new Set(["codex"]),
     cwd,
   });
@@ -715,6 +718,252 @@ test("listImportableProviderSessions claims omp resume-chain ancestors for the e
     [parentFile, { agentId: "agent-omp", archived: false }],
   ]);
 });
+
+test("listImportableProviderSessions sizes the backfill from the claim index when ancestors filter rows", async () => {
+  // S1 (RevServer B5): count 只数 persistence.sessionId key，但 omp 列表行按
+  // transcript 路径命中 nativeHandle/祖先 key —— 一条 resume 链剔除 2 行却只
+  // 贡献 1 的回填计量，(limit + count) 窗口被已管理行吃光，官方客户端少给行。
+  const root = mkdtempSync(path.join(tmpdir(), "paseo-import-backfill-"));
+  importTestDirectories.push(root);
+  const cwd = "/tmp/project";
+  const parentFile = path.join(root, "2026-09-26T00-00-00-000Z_parent.jsonl");
+  const childFile = path.join(root, "2026-09-30T00-00-00-000Z_child.jsonl");
+  const freshFile = path.join(root, "2026-09-29T00-00-00-000Z_fresh.jsonl");
+  writeFileSync(
+    parentFile,
+    `${JSON.stringify({ type: "session", id: "parent-id", cwd, timestamp: "2026-09-26T00:00:00.000Z" })}\n`,
+  );
+  writeFileSync(
+    childFile,
+    `${JSON.stringify({ type: "session", id: "child-id", cwd, timestamp: "2026-09-30T00:00:00.000Z", parentSession: parentFile })}\n`,
+  );
+  const sessions = [
+    makeImportableSession({
+      provider: "omp",
+      sessionId: "child-id",
+      nativeHandle: childFile,
+      cwd,
+      lastActivityAt: "2026-04-30T12:02:00.000Z",
+    }),
+    makeImportableSession({
+      provider: "omp",
+      sessionId: "parent-id",
+      nativeHandle: parentFile,
+      cwd,
+      lastActivityAt: "2026-04-30T12:01:00.000Z",
+    }),
+    makeImportableSession({
+      provider: "omp",
+      sessionId: "fresh-id",
+      nativeHandle: freshFile,
+      cwd,
+      lastActivityAt: "2026-04-30T12:00:00.000Z",
+    }),
+  ];
+  const listImportableSessions = vi.fn(async (options?: { limit?: number }) =>
+    makeImportableSessionsResult(sessions.slice(0, options?.limit)),
+  );
+
+  const result = await listImportableProviderSessions({
+    request: makeRequest({ cwd, providers: ["omp"], limit: 1 }),
+    agentManager: { listAgents: () => [], listImportableSessions },
+    agentStorage: {
+      list: async () => [
+        {
+          id: "agent-omp",
+          provider: "omp",
+          persistence: { provider: "omp", sessionId: "child-id", nativeHandle: childFile },
+        } as StoredAgentRecord,
+      ],
+    },
+    providerSnapshotManager: { getProviderLabel: (provider: string) => provider },
+  });
+
+  // 链剔除 2 行（child+祖先）；窗口必须足够深，limit=1 仍要给到下面那条 fresh。
+  expect(result.entries.map((entry) => entry.providerHandleId)).toEqual([freshFile]);
+  expect(result.filteredAlreadyImportedCount).toBe(2);
+});
+
+test("listImportableProviderSessions survives a resume-chain parent path that rejects on read", async () => {
+  // S2 (RevServer B5)：parentSession 可以指向一个目录名 *.jsonl —— open() 成功、
+  // handle.read() 拒绝（EISDIR；网络盘同形 EIO）。修复前该拒绝穿透 collect，
+  // 整个 fetch_recent_provider_sessions 变 rpc_error（两态、含官方客户端）。
+  const root = mkdtempSync(path.join(tmpdir(), "paseo-import-eisdir-"));
+  importTestDirectories.push(root);
+  const cwd = "/tmp/project";
+  const dirParent = path.join(root, "2026-09-26T00-00-00-000Z_dir.jsonl");
+  mkdirSync(dirParent);
+  const childFile = path.join(root, "2026-09-30T00-00-00-000Z_child.jsonl");
+  writeFileSync(
+    childFile,
+    `${JSON.stringify({ type: "session", id: "child-id", cwd, timestamp: "2026-09-30T00:00:00.000Z", parentSession: dirParent })}\n`,
+  );
+  const freshFile = path.join(root, "2026-09-29T00-00-00-000Z_fresh.jsonl");
+  const sessions = [
+    makeImportableSession({
+      provider: "omp",
+      sessionId: "child-id",
+      nativeHandle: childFile,
+      cwd,
+      lastActivityAt: "2026-04-30T12:01:00.000Z",
+    }),
+    makeImportableSession({
+      provider: "omp",
+      sessionId: "fresh-id",
+      nativeHandle: freshFile,
+      cwd,
+      lastActivityAt: "2026-04-30T12:00:00.000Z",
+    }),
+  ];
+  const agentManager = {
+    listAgents: () => [],
+    listImportableSessions: async () => makeImportableSessionsResult(sessions),
+  } satisfies Pick<AgentManager, "listAgents" | "listImportableSessions">;
+  const agentStorage = {
+    list: async () => [
+      {
+        id: "agent-omp",
+        provider: "omp",
+        persistence: { provider: "omp", sessionId: "child-id", nativeHandle: childFile },
+      } as StoredAgentRecord,
+    ],
+  } satisfies Pick<AgentStorage, "list">;
+  const providerSnapshotManager = { getProviderLabel: (provider: string) => provider };
+
+  const filtered = await listImportableProviderSessions({
+    request: makeRequest({ cwd, providers: ["omp"] }),
+    agentManager,
+    agentStorage,
+    providerSnapshotManager,
+  });
+  expect(filtered.entries.map((entry) => entry.providerHandleId)).toEqual([freshFile]);
+  expect(filtered.filteredAlreadyImportedCount).toBe(1);
+
+  const marked = await listImportableProviderSessions({
+    request: makeRequest({ cwd, providers: ["omp"], includeExisting: true }),
+    agentManager,
+    agentStorage,
+    providerSnapshotManager,
+  });
+  expect(marked.entries.map((entry) => entry.existing)).toEqual([
+    { agentId: "agent-omp", archived: false },
+    undefined,
+  ]);
+});
+
+test("listImportableProviderSessions tolerates a non-string persisted nativeHandle", async () => {
+  // S3 (RevServer B5)：nativeHandle 在持久化 schema 里是 z.any()
+  // （agent-projections.test 故意喂 { id: "native" }）。pre-B5 走模板字符串
+  // 容忍任何值；B5 守卫直接 .toLowerCase() 把整个列表请求炸成 rpc_error。
+  const cwd = "/tmp/project";
+  const sessions = [
+    makeImportableSession({
+      provider: "omp",
+      sessionId: "sess-1",
+      cwd,
+      lastActivityAt: "2026-04-30T12:01:00.000Z",
+    }),
+    makeImportableSession({
+      provider: "omp",
+      sessionId: "sess-2",
+      cwd,
+      lastActivityAt: "2026-04-30T12:00:00.000Z",
+    }),
+  ];
+  const result = await listImportableProviderSessions({
+    request: makeRequest({ cwd, providers: ["omp"] }),
+    agentManager: {
+      listAgents: () => [],
+      listImportableSessions: async () => makeImportableSessionsResult(sessions),
+    },
+    agentStorage: {
+      list: async () => [
+        {
+          id: "agent-omp",
+          provider: "omp",
+          persistence: { provider: "omp", sessionId: "sess-1", nativeHandle: { id: "native" } },
+        } as unknown as StoredAgentRecord,
+      ],
+    },
+    providerSnapshotManager: { getProviderLabel: (provider: string) => provider },
+  });
+  expect(result.entries.map((entry) => entry.providerHandleId)).toEqual(["sess-2"]);
+  expect(result.filteredAlreadyImportedCount).toBe(1);
+});
+
+test.skipIf(process.platform !== "win32")(
+  "listImportableProviderSessions claims case-drifted omp resume-chain ancestors",
+  async () => {
+    // S5 (RevServer B5)：omp 写 parentSession 用的是它当时的拼写，扫描行来自
+    // readdir —— 大小写不敏感文件系统上二者可能只差大小写。认领必须走 omp 自己
+    // parent-link 用的 sessionPathKey 折叠，否则漂移祖先行继续以双导入入口示人。
+    const root = mkdtempSync(path.join(tmpdir(), "paseo-import-casefold-"));
+    importTestDirectories.push(root);
+    const cwd = "/tmp/project";
+    const parentFile = path.join(root, "2026-09-26T00-00-00-000Z_Parent.jsonl");
+    const driftedParent = path.join(root, "2026-09-26T00-00-00-000Z_PARENT.JSONL");
+    const childFile = path.join(root, "2026-09-30T00-00-00-000Z_child.jsonl");
+    writeFileSync(
+      parentFile,
+      `${JSON.stringify({ type: "session", id: "parent-id", cwd, timestamp: "2026-09-26T00:00:00.000Z" })}\n`,
+    );
+    writeFileSync(
+      childFile,
+      `${JSON.stringify({ type: "session", id: "child-id", cwd, timestamp: "2026-09-30T00:00:00.000Z", parentSession: driftedParent })}\n`,
+    );
+    const sessions = [
+      makeImportableSession({
+        provider: "omp",
+        sessionId: "child-id",
+        nativeHandle: childFile,
+        cwd,
+        lastActivityAt: "2026-04-30T12:01:00.000Z",
+      }),
+      // 扫描行 = 磁盘拼写；omp 写进 child 头的是漂移拼写。
+      makeImportableSession({
+        provider: "omp",
+        sessionId: "parent-id",
+        nativeHandle: parentFile,
+        cwd,
+        lastActivityAt: "2026-04-30T12:00:00.000Z",
+      }),
+    ];
+    const agentManager = {
+      listAgents: () => [],
+      listImportableSessions: async () => makeImportableSessionsResult(sessions),
+    } satisfies Pick<AgentManager, "listAgents" | "listImportableSessions">;
+    const agentStorage = {
+      list: async () => [
+        {
+          id: "agent-omp",
+          provider: "omp",
+          persistence: { provider: "omp", sessionId: "child-id", nativeHandle: childFile },
+        } as StoredAgentRecord,
+      ],
+    } satisfies Pick<AgentStorage, "list">;
+    const providerSnapshotManager = { getProviderLabel: (provider: string) => provider };
+
+    const filtered = await listImportableProviderSessions({
+      request: makeRequest({ cwd, providers: ["omp"] }),
+      agentManager,
+      agentStorage,
+      providerSnapshotManager,
+    });
+    expect(filtered.entries).toEqual([]);
+    expect(filtered.filteredAlreadyImportedCount).toBe(2);
+
+    const marked = await listImportableProviderSessions({
+      request: makeRequest({ cwd, providers: ["omp"], includeExisting: true }),
+      agentManager,
+      agentStorage,
+      providerSnapshotManager,
+    });
+    expect(marked.entries.map((entry) => [entry.providerHandleId, entry.existing])).toEqual([
+      [childFile, { agentId: "agent-omp", archived: false }],
+      [parentFile, { agentId: "agent-omp", archived: false }],
+    ]);
+  },
+);
 
 test("listImportableProviderSessions keeps metadata-generation sessions hidden under includeExisting", async () => {
   // B5-IMPORT2 裁定（用户明示「那就不显示 metadata」）：恒隐，两态一致。

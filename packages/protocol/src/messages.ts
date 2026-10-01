@@ -946,8 +946,10 @@ export const RecentProviderSessionDescriptorPayloadSchema = z.object({
   // the provider checked and the transcript looks idle.
   looksActive: z.boolean().optional(),
   // COMPAT(importSessionExistingMark): added 2026-10-01 (Paseo Go B5-IMPORT2),
-  // optional while clients support older daemons. Only present when the request
-  // asked `includeExisting: true` and this transcript is already a managed agent
+  // optional while clients support older daemons (drop the optional when the
+  // supported client floor is >= the daemon version that ships it;
+  // target: 2026-12-01). Only present when the request asked
+  // `includeExisting: true` and this transcript is already a managed agent
   // (native launch, import, or archived — resume-chain ancestors included).
   // The shell renders 已导入/已归档 badges, disables the checkbox and routes the
   // row tap to that agent. Absent = not existing, or a pre-B5 daemon.
@@ -1417,9 +1419,13 @@ export const FetchRecentProviderSessionsRequestMessageSchema = z.object({
   limit: z.number().int().positive().max(200).optional(),
   query: z.string().optional(),
   // COMPAT(importSessionIncludeExisting): added 2026-10-01 (Paseo Go B5-IMPORT2),
-  // optional while clients support older daemons. Absent/false keeps the pre-B5
-  // behavior byte-for-byte: sessions already managed as agents are filtered out
-  // and `filteredAlreadyImportedCount` reports how many were dropped.
+  // optional while clients support older daemons (drop the optional when the
+  // supported client floor is >= the daemon version that ships it;
+  // target: 2026-12-01). Absent/false keeps the pre-B5 verdict RULE: sessions
+  // already managed as agents are filtered out and `filteredAlreadyImportedCount`
+  // reports how many were dropped. The claim set itself grew in B5 — resume-chain
+  // ancestors of a managed transcript are filtered (and counted) here too, so the
+  // false-mode row set is not byte-identical to pre-B5.
   // true = keep every candidate row and mark already-existing ones per entry via
   // `existing` (D20: 导入页覆盖面对齐 omp resume，废除「已存在即剔除」).
   includeExisting: z.boolean().optional(),

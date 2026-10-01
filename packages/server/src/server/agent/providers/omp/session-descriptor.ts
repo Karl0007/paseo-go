@@ -1,3 +1,4 @@
+import type { Logger } from "pino";
 import type { Dirent } from "node:fs";
 import { open, readdir, readFile, stat } from "node:fs/promises";
 import { homedir } from "node:os";
@@ -326,7 +327,7 @@ function findNestedParentPath(filePath: string, discovered: Set<string>): string
  * derived from the child's spelling, which can differ in case only on
  * case-insensitive filesystems, so Windows keys fold case.
  */
-function sessionPathKey(filePath: string): string {
+export function sessionPathKey(filePath: string): string {
   const resolved = path.resolve(filePath);
   return looksLikeDefiniteWindowsPath(resolved) ? resolved.toLowerCase() : resolved;
 }
@@ -341,11 +342,16 @@ function sessionPathKey(filePath: string): string {
 export async function resolveOmpResumeAncestorPaths(
   sessionFile: string,
   maxDepth = 32,
+  logger?: Logger,
 ): Promise<string[]> {
   const ancestors: string[] = [];
   const visited = new Set<string>([sessionPathKey(sessionFile)]);
   let current = sessionFile;
-  for (let depth = 0; depth < maxDepth; depth += 1) {
+  for (;;) {
+    // Paths are taken verbatim from transcript content. readHeadChunk only contains
+    // open() failures — handle.read() can still reject (EISDIR on a directory named
+    // *.jsonl, EIO on a dead network drive) — and one bad parentSession must degrade
+    // to「祖先未知」, not fail the whole import listing.
     const parent = await readOmpParentSessionPath(current);
     if (!parent) break;
     const key = sessionPathKey(parent);
@@ -353,7 +359,16 @@ export async function resolveOmpResumeAncestorPaths(
     visited.add(key);
     // Claim only ancestors that exist: a deleted transcript never surfaces as
     // an import row, and the unreadable head also ends the walk there.
-    if (!(await readHeadChunk(parent))) break;
+    if (!(await readHeadChunk(parent).catch(() => null))) break;
+    if (ancestors.length >= maxDepth) {
+      // The cap truncates silently otherwise — deeper ancestors stay unclaimed
+      // (still listed as fresh imports). Make the gap observable.
+      logger?.warn(
+        { sessionFile, maxDepth, ancestorCount: ancestors.length },
+        "OMP resume chain hit the ancestor-walk depth cap; deeper ancestors stay unclaimed",
+      );
+      break;
+    }
     ancestors.push(parent);
     current = parent;
   }
@@ -361,7 +376,7 @@ export async function resolveOmpResumeAncestorPaths(
 }
 
 async function readOmpParentSessionPath(filePath: string): Promise<string | null> {
-  const chunk = await readHeadChunk(filePath);
+  const chunk = await readHeadChunk(filePath).catch(() => null);
   if (!chunk) return null;
   for (const line of chunk.split(/\r?\n/u)) {
     const entry = parseJsonRecord(line.trim());

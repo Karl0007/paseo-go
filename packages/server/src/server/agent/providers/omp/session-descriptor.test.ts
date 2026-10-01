@@ -1,7 +1,8 @@
 import { mkdtemp, mkdir, utimes, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import { describe, expect, test } from "vitest";
+import { describe, expect, test, vi } from "vitest";
+import type { Logger } from "pino";
 
 import {
   listOmpImportableSessions,
@@ -376,5 +377,63 @@ describe("resolveOmpResumeAncestorPaths", () => {
     }
 
     await expect(resolveOmpResumeAncestorPaths(previous, 8)).resolves.toHaveLength(8);
+  });
+
+  test("a parent path that rejects on read (directory named *.jsonl) ends the walk", async () => {
+    // S2 (RevServer B5)：open() 对目录成功、handle.read() 才拒绝（EISDIR；网络盘
+    // 同形 EIO）。行走读的是 transcript 内容里的裸路径，必须降级为「祖先未知」，
+    // 不能把异常抛给整个导入列表请求。
+    const root = await mkdtemp(path.join(tmpdir(), "paseo-omp-chain-eisdir-"));
+    const dirParent = path.join(root, "sessions", "project", "dir.jsonl");
+    await mkdir(dirParent, { recursive: true });
+    const start = await writeSession(root, "project/start.jsonl", [
+      {
+        type: "session",
+        id: "start-id",
+        timestamp: "2026-06-01T00:00:00.000Z",
+        cwd: root,
+        parentSession: dirParent,
+      },
+    ]);
+    await expect(resolveOmpResumeAncestorPaths(start)).resolves.toEqual([]);
+  });
+
+  test("logs when the depth cap truncates a live chain", async () => {
+    // S4 (RevServer B5)：触顶截断此前不可见 —— 更深的祖先保持未认领。行为不变，
+    // 触顶时补一条 warn。
+    const root = await mkdtemp(path.join(tmpdir(), "paseo-omp-chain-cap-log-"));
+    const great = await writeSession(root, "project/great.jsonl", [
+      { type: "session", id: "great", timestamp: "2026-06-01T00:00:00.000Z", cwd: root },
+    ]);
+    const grand = await writeSession(root, "project/grand.jsonl", [
+      {
+        type: "session",
+        id: "grand",
+        timestamp: "2026-06-02T00:00:00.000Z",
+        cwd: root,
+        parentSession: great,
+      },
+    ]);
+    const parent = await writeSession(root, "project/parent.jsonl", [
+      {
+        type: "session",
+        id: "parent",
+        timestamp: "2026-06-03T00:00:00.000Z",
+        cwd: root,
+        parentSession: grand,
+      },
+    ]);
+    const warn = vi.fn();
+    await expect(
+      resolveOmpResumeAncestorPaths(parent, 1, { warn } as unknown as Logger),
+    ).resolves.toEqual([grand]);
+    expect(warn).toHaveBeenCalledTimes(1);
+
+    // 链在帽内自然终止 → 静默。
+    const quiet = vi.fn();
+    await expect(
+      resolveOmpResumeAncestorPaths(grand, 8, { warn: quiet } as unknown as Logger),
+    ).resolves.toEqual([great]);
+    expect(quiet).not.toHaveBeenCalled();
   });
 });
