@@ -254,3 +254,40 @@
 ## N5. 结论
 
 **批次四验收通过**。F1-F11 全兑现（含 F11 翻案、R2-full 关闭两处对原口径的实证修正）；review 33 卡全处置含 P1 销卡；终态门禁零新增失败。发布=v0.10.2-go.7（Releases，APK 本机出+CI 出 CLI/desktop）。开放项延续批次三三条+新增：真人手指复验两处（置顶拖拽/edge-back 正向激活，注入面不可归因）。
+
+---
+
+# 批次五增补（v0.10.2-go.8，2026-10-01；只增不改上文）
+
+> 口径源=`todo/BATCH5-ALIGNMENT.md`（F12-F17 + D19/D20 拍板）；review 台账=`review/B5-INDEX.md`（10 卡全 FIXED）。
+
+## O1. 用户拍板兑现（F12-F17）
+
+- ✅ **F12 标题格式**（`e90f27fee`）：默认=`项目(worktree)`；有备注只显示备注。
+- ✅ **F14 置顶往返消失 P1**（`ddaba9b0b`）：根因非数据层（守恒测钉死）=拖拽期卸载 RefreshControl→整表重挂→band 早释→SRF 劫杀 RNGH pan→库 stranded 位移。修=RefreshControl 恒挂载+enabled VALUE 通道+库 patch（heldTranslate 无活拖拽归零）。
+- ✅ **F15 长按拖动误触刷新**（`6fbeee0e2`）：与 F14 同源（remount 链）；gestureBand refreshEnabled 接线；真机带内下拉无 spinner 帧。
+- ✅ **F17 导入全量+existing 标记**（`b7aafb961`）：协议纯增 includeExisting/existing（COMPAT 带移除日期）；server 三路认领（原生/导入/归档+活跃优先）；**F17-4 根因实锤**=omp resume 写新 transcript 而 persistence 只跟最新文件→祖先链走查（深帽 32/环断/存在性校验）；metadata 恒隐（用户拍板）；壳徽标/禁勾选/点行直达；e2e 生产数据副本验过祖先行正确标记。
+- ✅ **F13 小字恒显**（`c5cbc639e`）：根因=pre-B4 记录 preview NULL+整对象替换洗掉已显示预览；修=stickyPreview 持久 store（缺失不清空）+全空占位「暂无消息」双语；三路径真机帧恒在。
+- ✅ **F16/D19 所有权两处可见**（`da8489125`）：列表标题后三态小标签恒在（原生/外部/未知，undefined=未知诚实）+会话页 C14 胶囊区同款 pill；单一纯函数判定三处共用。
+
+## O2. Review 轮（10 卡全 FIXED，`review/B5-INDEX.md`）
+
+- 双维 reviewer（app/server）均判 incorrect→修复车内置红测复核：10/10 红→绿，0 REJECTED。
+- FixServer5（`42d438807`）：S1 回填计量改 claim-index 尺寸；S2 EISDIR/read 拒绝炸全列表（Windows 实测红）→行走读全兜底；S3 非字符串 nativeHandle TypeError→typeof 守卫；S4 深帽触顶 warn；S5 祖先认领 key 走 sessionPathKey 折叠（win32 门控测）；S6 COMPAT 补 target 日期+「byte-for-byte」注释修正。
+- FixApp5（`b1f189524`）：A1 拖拽取消 band 冻结（**实机红绿帧**：拖拽中后台化→吞滚动→修复即复位）=onDragTerminate 透传接线；A2 删冗余 JS session 门（拒绝路径统一回卷）；A3 heldTranslate 衰减 withDelay(32) 避同帧竞态；A4 stickyPreview 连续两次完整 tick 缺席才 prune（离线主机/空目录不误清）。
+
+## O3. 触点与依赖面变化
+
+- 协议 messages.ts：includeExisting?/existing? 纯增（旧端剥键安全，两侧非 strict 已核）。
+- **node_modules patch 面 +1 行为改动**：`react-native-draggable-flatlist+4.0.3.patch`（heldTranslate 衰减归零+取消路径透传）；patch-package 失配=postinstall 响亮报错（非静默）。
+- server 新面：omp session-descriptor 祖先链走查、import-sessions claim-index、session.ts logger 透传。
+
+## O4. 终态门禁（编排者亲跑，HEAD 批次五末）
+
+- typecheck 全 workspace 0；oxlint 4599 文件 0/0；树净。
+- app 6328（+31）：**4 失败=W1 zh-CN 环境集，零新增**；server 6191（+13）：1 环境项；protocol 742（+2）：1 环境项。
+- 纪律事件×2 入账：①`git stash push -- packages/`（pathspec 过宽）短暂回滚他车在途文件（pop 全恢复，教训=禁 stash/checkout/reset，对照用只读 diff）；②git index 损坏一次（并发 git 写嫌疑），`rm .git/index && git reset` 秒级恢复。
+
+## O5. 结论
+
+**批次五验收通过**。F12-F17 全兑现；review 10/10 红转绿零驳回；发布=v0.10.2-go.8（APK `<占位:发布后补>`）+生产 daemon 原子升级 go.8。开放项延续：真人手指复验三处（置顶拖拽/edge-back 正向/正常下拉刷新帧=注入面不可为）；A3 慢设备漂移帧、已归档徽标真机帧两缺口以线上契约证据替代（各卡 known_issue 在案）。
