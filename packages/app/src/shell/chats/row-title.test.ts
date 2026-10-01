@@ -1,12 +1,17 @@
 // B4-ROW rulings 4-5 acceptance: the row's two text lines, as pure functions.
 // 标题 = 项目(worktree), or the 备注 alone when there is one (B5-TITLE/F12-D), with the
 // worktree segment dropping out when it merely repeats the project; 副标题 = 草稿 >
-// 需要回复 > 出错 > 预览 (「我: 」 for a user-role last message) > nothing, every tier
-// collapsed to one line.
+// 需要回复 > 出错 > 预览 (「我: 」 for a user-role last message) > 占位小字
+// (B5-SUB/F13: the line is ALWAYS there), every tier collapsed to one line.
 import { describe, expect, it } from "vitest";
-import { buildChatRowTitle, buildChatSubtitle, worktreeSegment } from "./row-title";
+import {
+  buildChatRowTitle,
+  buildChatSubtitle,
+  selectSubtitlePreview,
+  worktreeSegment,
+} from "./row-title";
 
-const LABELS = { draft: "草稿", userPrefix: "我: " };
+const LABELS = { draft: "草稿", userPrefix: "我: ", empty: "暂无消息" };
 
 describe("worktreeSegment", () => {
   it("reads the tail of a POSIX or a Windows path, and no trailing separator", () => {
@@ -147,11 +152,59 @@ describe("buildChatSubtitle", () => {
     ]);
   });
 
-  it("renders nothing for an absent preview and for an empty one", () => {
-    // B4-PREVIEW contract: undefined = old daemon, null = no messages — both are
-    // "no preview", and neither may leak the word "null" onto the row.
-    expect(buildChatSubtitle({ ...base, preview: undefined })).toEqual([]);
-    expect(buildChatSubtitle({ ...base, preview: null })).toEqual([]);
-    expect(buildChatSubtitle({ ...base, preview: "   \n " })).toEqual([]);
+  // B5-SUB (F13 口径: 任何情况下小字必须显示). The three wire postures of a
+  // missing preview (undefined = old daemon, null = "no messages", blank) all
+  // land on the placeholder — the second line never collapses.
+  it("falls back to the placeholder for an absent, null, or blank preview", () => {
+    expect(buildChatSubtitle({ ...base, preview: undefined })).toEqual([
+      { tone: "body", text: "暂无消息" },
+    ]);
+    expect(buildChatSubtitle({ ...base, preview: null })).toEqual([
+      { tone: "body", text: "暂无消息" },
+    ]);
+    expect(buildChatSubtitle({ ...base, preview: "   \n " })).toEqual([
+      { tone: "body", text: "暂无消息" },
+    ]);
+  });
+
+  it("the placeholder never displaces a real tier", () => {
+    // 草稿 / 状态标记 / 预览 each keep the line they always owned.
+    expect(buildChatSubtitle({ ...base, draftText: "草稿内容" })).toEqual([
+      { tone: "flag", text: "[草稿] " },
+      { tone: "body", text: "草稿内容" },
+    ]);
+    expect(buildChatSubtitle({ ...base, flagLabel: "出错" })).toEqual([
+      { tone: "flag", text: "[出错] " },
+    ]);
+    expect(buildChatSubtitle({ ...base, preview: "done" })).toEqual([
+      { tone: "body", text: "done" },
+    ]);
+  });
+
+  it("renders no segment when even the locale string is blank", () => {
+    // The one honest empty: nothing renderable exists. (No device locale does.)
+    expect(buildChatSubtitle({ ...base, labels: { ...LABELS, empty: "  " } })).toEqual([]);
+  });
+});
+
+describe("selectSubtitlePreview (B5-SUB keep-old-value read)", () => {
+  // The regression the card pins: 字段缺失时不清空已显示小字. A blank directory
+  // value (any wire posture) never wins over the shell-remembered preview; a
+  // real incoming value always does (the daemon re-derives on resume, and that
+  // newer fact must land).
+  it("keeps the remembered preview when the field goes missing", () => {
+    expect(selectSubtitlePreview(null, "上一条消息")).toBe("上一条消息");
+    expect(selectSubtitlePreview(undefined, "上一条消息")).toBe("上一条消息");
+    expect(selectSubtitlePreview("   ", "上一条消息")).toBe("上一条消息");
+  });
+
+  it("prefers the live directory value whenever it carries text", () => {
+    expect(selectSubtitlePreview("新消息", "上一条消息")).toBe("新消息");
+  });
+
+  it("reads null when neither source has anything (placeholder tier takes over)", () => {
+    expect(selectSubtitlePreview(null, null)).toBeNull();
+    expect(selectSubtitlePreview(undefined, undefined)).toBeNull();
+    expect(selectSubtitlePreview(" \n ", "")).toBeNull();
   });
 });

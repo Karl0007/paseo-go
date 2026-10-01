@@ -79,7 +79,8 @@
     "row": {
       "draft": "Draft",
       "needsReply": "Needs reply",
-      "me": "Me"
+      "me": "Me",
+      "noMessages": "No messages yet"
     },
     "ownership": {
       "badge": "External",

@@ -103,6 +103,7 @@ import { useShellSearchBackPriority } from "@/shell/search/use-shell-search-back
 import { resolveProjectPlacement } from "@/utils/project-placement";
 import { DETAIL, OFFICIAL, SHELL_TAB } from "@/shell/routes";
 import { usePaseoGoArchiveStore } from "@/shell/stores/archive";
+import { usePaseoGoStickyPreviewStore } from "@/shell/stores/stickyPreview";
 import { usePaseoGoPinsStore } from "@/shell/stores/pins";
 import { usePaseoGoReadStateStore } from "@/shell/stores/readState";
 import { useShellAgentActions, type ShellChatTarget } from "@/shell/shellAgentActions";
@@ -281,6 +282,18 @@ export function ChatsScreenBody({ selectedAgentKey = null }: ShellScreenBodyProp
   const markRead = usePaseoGoReadStateStore((state) => state.markRead);
 
   const actions = useShellAgentActions();
+
+  // B5-SUB (F13): fold every non-blank directory preview into the shell's
+  // keep-old-value store (blank never clears — the store guards that itself).
+  // The row falls back to this memory whenever the directory goes blank on a
+  // pre-B4 record, so pull-to-refresh / tab revalidation / daemon restart can
+  // never wipe a subtitle the list has already shown.
+  const rememberPreview = usePaseoGoStickyPreviewStore((state) => state.remember);
+  useEffect(() => {
+    for (const agent of agents) {
+      rememberPreview(`${agent.serverId}:${agent.id}`, agent.lastMessagePreview);
+    }
+  }, [agents, rememberPreview]);
 
   // C4: row taps enter the session through the official navigateToAgent tool family
   // (workspace route + open intent) with a push verb (the official dismissTo pops the

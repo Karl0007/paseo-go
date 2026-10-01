@@ -6,7 +6,9 @@
 // Title  = 项目名(worktree)   (B5-TITLE/F12-D: parentheses; a 备注 = manual rename,
 //          `agent.title` — replaces the whole line instead of being appended)
 // Subtitle priority: [草稿]+draft text > [需要回复]+preview > [出错]+preview >
-//                    「我: 」/bare preview > nothing.
+//                    「我: 」/bare preview > 占位小字 (B5-SUB/F13: the second line is
+//                    ALWAYS there — an all-empty chain renders the translated
+//                    placeholder, it never collapses the row).
 // The red bracket tiers come from `flagLabel`, which the row reads from
 // ACTIVITY_LABEL_KEY — the same map the C9 search haystack uses, so what a user
 // can see is what they can search.
@@ -24,6 +26,8 @@ export interface ChatSubtitleLabels {
   draft: string;
   /** 「我: 」/ "Me: " — already carries its separator, user-role previews only. */
   userPrefix: string;
+  /** 「暂无消息」/ "No messages yet" — B5-SUB: the all-empty fallback line. */
+  empty: string;
 }
 
 export interface ChatSubtitleInput {
@@ -48,6 +52,23 @@ export interface ChatSubtitleInput {
  */
 function singleLine(value: string | null | undefined): string {
   return (value ?? "").replace(/\s+/g, " ").trim();
+}
+
+/**
+ * B5-SUB (F13) keep-old-value read: the directory's incremental merge is a
+ * whole-object replace, and a pre-B4 daemon record reports `lastMessagePreview`
+ * as null even for chats WITH messages (the daemon flattens "not derived" to
+ * "no messages" — see evidence/B5-SUB/ws-frames-before.txt). The row therefore
+ * never trusts a blank incoming over the preview it has already shown: a blank
+ * (`undefined`/`null`/whitespace) falls back to the shell-remembered value.
+ */
+export function selectSubtitlePreview(
+  incoming: string | null | undefined,
+  remembered: string | null | undefined,
+): string | null {
+  if (typeof incoming === "string" && singleLine(incoming).length > 0) return incoming;
+  if (typeof remembered === "string" && singleLine(remembered).length > 0) return remembered;
+  return null;
 }
 
 export function buildChatSubtitle(input: ChatSubtitleInput): ChatSubtitleSegment[] {
@@ -75,8 +96,13 @@ export function buildChatSubtitle(input: ChatSubtitleInput): ChatSubtitleSegment
       text: input.previewRole === "user" ? `${input.labels.userPrefix}${preview}` : preview,
     });
   }
-  // A flagged chat with nothing said yet still shows its mark; a chat with neither
-  // mark nor message shows no second line at all.
+  // B5-SUB (F13 口径: 任何情况下小字必须显示): a chat with neither mark nor message
+  // shows the placeholder line, never a collapsed second line. A blank locale
+  // string is the one case that can still yield no segment — nothing renderable.
+  if (segments.length === 0) {
+    const empty = singleLine(input.labels.empty);
+    if (empty.length > 0) segments.push({ tone: "body", text: empty });
+  }
   return segments;
 }
 

@@ -79,7 +79,8 @@
     "row": {
       "draft": "草稿",
       "needsReply": "需要回复",
-      "me": "我"
+      "me": "我",
+      "noMessages": "暂无消息"
     },
     "ownership": {
       "badge": "外部",

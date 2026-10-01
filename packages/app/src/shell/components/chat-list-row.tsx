@@ -2,7 +2,8 @@
 // title `项目-worktree[-备注]` with the running spinner and the absolute time on its
 // right | unread badge (C18: dot only on idle rows, count pill only while approvals
 // pend) | subtitle by priority `[草稿] `+draft > `[需要回复] `+preview > preview
-// (`我: ` when the last message is the user's) | four-state light | ⋯ overflow.
+// (`我: ` when the last message is the user's) > 占位小字 (B5-SUB: the line is
+// ALWAYS there) | four-state light | ⋯ overflow.
 // The clock lives in its own `<Text>`, so a minute tick never reaches the row; the
 // draft read lives in the ROW (R4-13: the a11y label has to speak the subtitle, and
 // `accessibilityLabel` replaces all child text), which is why a composer keystroke
@@ -55,6 +56,7 @@ import { projectAvatarFor } from "@/shell/chats/project-avatar";
 import {
   buildChatSubtitle,
   buildChatRowTitle,
+  selectSubtitlePreview,
   type ChatSubtitleSegment,
 } from "@/shell/chats/row-title";
 import { useWechatTimeLabel } from "@/shell/chats/use-wechat-time-label";
@@ -69,6 +71,7 @@ import { useShellRowMenuStore } from "@/shell/components/chat-row-menu";
 import type { Rect } from "@/components/ui/menu";
 import { usePaseoGoArchiveStore } from "@/shell/stores/archive";
 import { usePaseoGoPinsStore } from "@/shell/stores/pins";
+import { usePaseoGoStickyPreviewStore } from "@/shell/stores/stickyPreview";
 import type { ShellAgentActions, ShellChatTarget } from "@/shell/shellAgentActions";
 import { resolveProjectPlacement } from "@/utils/project-placement";
 import type { SidebarStateBucket } from "@/utils/sidebar-agent-state";
@@ -339,16 +342,31 @@ function ChatRowInner({
     return record?.lifecycle === "active" ? record.input.text : "";
   });
   const flagKey = ACTIVITY_LABEL_KEY[agent.bucket];
+  // B5-SUB (F13): the directory merge is a whole-object replace and a pre-B4
+  // daemon record reports the preview as null even for chats WITH messages, so a
+  // blank incoming NEVER clears what the row has been showing — the shell store
+  // keeps the last non-blank preview per chat (persisted; folded on every
+  // directory pass by the screen). Selector returns a primitive: no new object
+  // per render.
+  const rememberedPreview = usePaseoGoStickyPreviewStore((state) => state.previews[agent.key]);
+  const subtitlePreview = useMemo(
+    () => selectSubtitlePreview(agent.agent.lastMessagePreview, rememberedPreview),
+    [agent.agent.lastMessagePreview, rememberedPreview],
+  );
   const subtitleSegments = useMemo(
     () =>
       buildChatSubtitle({
         draftText,
         flagLabel: flagKey ? t(flagKey) : null,
-        preview: agent.agent.lastMessagePreview,
+        preview: subtitlePreview,
         previewRole: agent.agent.lastMessageRole,
-        labels: { draft: t("chats.row.draft"), userPrefix: `${t("chats.row.me")}: ` },
+        labels: {
+          draft: t("chats.row.draft"),
+          userPrefix: `${t("chats.row.me")}: `,
+          empty: t("chats.row.noMessages"),
+        },
       }),
-    [draftText, flagKey, t, agent.agent.lastMessagePreview, agent.agent.lastMessageRole],
+    [draftText, flagKey, t, subtitlePreview, agent.agent.lastMessageRole],
   );
   // 停止 only acts on an abortable turn: running, or blocked on an approval.
   const stoppable = agent.bucket === "running" || agent.bucket === "needs_input";

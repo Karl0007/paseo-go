@@ -19,6 +19,7 @@ import { usePaseoGoArchiveStore } from "@/shell/stores/archive";
 import { usePaseoGoForkAckStore } from "@/shell/stores/forkAck";
 import { usePaseoGoPinsStore } from "@/shell/stores/pins";
 import { usePaseoGoReadStateStore } from "@/shell/stores/readState";
+import { usePaseoGoStickyPreviewStore } from "@/shell/stores/stickyPreview";
 
 /** The row an action targets; `key` is the same `${serverId}:${agentId}` the list uses. */
 export interface ShellChatTarget {
@@ -190,6 +191,7 @@ export function createShellAgentActions(deps: ShellAgentActionDeps): ShellAgentA
       usePaseoGoArchiveStore.getState().unarchive(target.key);
       usePaseoGoReadStateStore.getState().clear(target.key);
       usePaseoGoForkAckStore.getState().clear(target.key);
+      usePaseoGoStickyPreviewStore.getState().forget(target.key);
       notify(t("chats.toast.deleted"));
     },
     reorderPinned: (orderedKeys) => {
