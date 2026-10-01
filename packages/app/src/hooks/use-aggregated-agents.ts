@@ -106,6 +106,10 @@ export function useAggregatedAgents(options?: {
           // session header read the ownership pair; the official UI ignores it.
           ownership: agent.ownership ?? null,
           externalLooksActive: agent.externalLooksActive ?? null,
+          // Passed through as-is (no `?? null`): `undefined` and `null` are the same
+          // answer to the pill — the host never reported a birth — and this memo is
+          // already at the complexity ceiling.
+          origin: agent.origin,
         };
         const cacheKey = `${serverId}:${agent.id}`;
         const prev = prevAgentsRef.current.get(cacheKey);

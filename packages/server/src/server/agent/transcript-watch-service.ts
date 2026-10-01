@@ -56,6 +56,18 @@ const WATCH_RETENTION_MS = 30 * 24 * 60 * 60 * 1000;
  */
 const MAX_TAIL_READ_BYTES = 4 * 1024 * 1024;
 
+/**
+ * B6-OWN-HEAL (batch-6 F19/D22): how many not-yet-observed transcripts ONE discovery
+ * pass may attach. The startup sweep is the first real caller of discovery, and a
+ * store with hundreds of agents must not turn a daemon boot into hundreds of
+ * sequential path resolutions + stats in a single tick; the remainder is picked up by
+ * the following sweeps, and every agent the user actually looks at is in the newest
+ * slice (the batch is ordered by `updatedAt` desc).
+ */
+const DEFAULT_MAX_NEW_ATTACHMENTS_PER_SWEEP = 32;
+/** B6-OWN-HEAL: gap between attaches inside one batch (slow-mount throttle). */
+const DEFAULT_ATTACH_THROTTLE_MS = 25;
+
 export interface TranscriptWatchCandidate {
   agentId: string;
   provider: AgentProvider;
@@ -106,6 +118,10 @@ export interface TranscriptWatchServiceOptions {
    * on every restart.
    */
   onAttached?: (agentId: string, attachment: TranscriptAttachment) => Promise<void>;
+  /** B6-OWN-HEAL: discovery cap; see {@link DEFAULT_MAX_NEW_ATTACHMENTS_PER_SWEEP}. */
+  maxNewAttachmentsPerSweep?: number;
+  /** B6-OWN-HEAL: discovery throttle; 0 = no gap (tests). */
+  attachThrottleMs?: number;
 }
 
 interface WatchEntry {
@@ -126,6 +142,8 @@ export class TranscriptWatchService {
   private readonly statPollIntervalMs: number;
   private readonly debounceMs: number;
   private readonly maxWatchers: number;
+  private readonly maxNewAttachmentsPerSweep: number;
+  private readonly attachThrottleMs: number;
   private readonly env: NodeJS.ProcessEnv;
   private readonly listCandidates: () => Promise<TranscriptWatchCandidate[]>;
   private readonly onChange: (change: TranscriptChange) => Promise<void>;
@@ -136,7 +154,8 @@ export class TranscriptWatchService {
   private entrySeq = 0;
   private readonly entries = new Map<string, WatchEntry>();
   private sweepTimer: ReturnType<typeof setInterval> | null = null;
-  private sweepInFlight = false;
+  /** The running pass, or null while idle. See {@link sweep} / {@link tick}. */
+  private pass: Promise<void> | null = null;
   private stopped = false;
 
   constructor(options: TranscriptWatchServiceOptions) {
@@ -145,6 +164,9 @@ export class TranscriptWatchService {
       options.statPollIntervalMs ?? DEFAULT_TRANSCRIPT_STAT_POLL_INTERVAL_MS;
     this.debounceMs = options.debounceMs ?? DEFAULT_DEBOUNCE_MS;
     this.maxWatchers = options.maxWatchers ?? DEFAULT_MAX_WATCHERS;
+    this.maxNewAttachmentsPerSweep =
+      options.maxNewAttachmentsPerSweep ?? DEFAULT_MAX_NEW_ATTACHMENTS_PER_SWEEP;
+    this.attachThrottleMs = options.attachThrottleMs ?? DEFAULT_ATTACH_THROTTLE_MS;
     this.env = options.env ?? process.env;
     this.listCandidates = options.listCandidates;
     this.onChange = options.onChange;
@@ -152,18 +174,33 @@ export class TranscriptWatchService {
   }
 
   /**
-   * Start the sweep. The first tick also performs startup discovery: provider
-   * processes are daemon children, so after a restart every stored agent is
-   * unowned and may already have been continued elsewhere.
+   * Start the sweep. Provider processes are daemon children, so after a restart
+   * every stored agent is unowned and may already have been continued elsewhere —
+   * B6-OWN-HEAL (F19) makes that discovery run NOW instead of one interval from now:
+   * the whole point of the watcher is to answer 「谁在写这个会话」 for sessions the
+   * daemon is not writing, and waiting a minute on the first tick is what left the
+   * user's entire list on 「未知」 after every restart. Everything the first pass
+   * touches is `unref()`d and every failure it can hit is caught (inside `sweep` and
+   * per candidate inside `discover`), so a cold-start read failure degrades to the
+   * interval rather than to a daemon that never finishes booting.
    */
   start(): void {
     if (this.sweepTimer || this.stopped) {
       return;
     }
+    this.tick();
     this.sweepTimer = setInterval(() => {
-      void this.sweep();
+      this.tick();
     }, this.statPollIntervalMs);
     this.sweepTimer.unref();
+  }
+
+  /** The fire-and-forget path (startup, interval): skips while a pass is running. */
+  private tick(): void {
+    if (this.pass) {
+      return;
+    }
+    void this.sweep();
   }
 
   stop(): void {
@@ -235,34 +272,57 @@ export class TranscriptWatchService {
     entry.watcher = null;
   }
 
-  /** One sweep: discover newly eligible agents, then stat every attached cursor. */
+  /**
+   * Run one full pass and wait for it. A caller that asks for a sweep always gets
+   * one that observed the state as of NOW: while another pass is still running (the
+   * startup discovery batch, or an interval tick) this waits for it and then runs its
+   * own, so refresh-on-demand and the tests can never return having observed nothing.
+   * The timer path uses {@link tick}, which skips instead — a slow store must not
+   * queue passes behind itself.
+   */
   async sweep(): Promise<void> {
-    if (this.sweepInFlight || this.stopped) {
+    if (this.stopped) {
       return;
     }
-    this.sweepInFlight = true;
+    // Set synchronously (before the first await inside) so `tick` sees the pass and
+    // skips instead of stacking a second one behind it.
+    const pass = this.runQueuedPass(this.pass);
+    this.pass = pass;
+    try {
+      await pass;
+    } finally {
+      if (this.pass === pass) {
+        this.pass = null;
+      }
+    }
+  }
+
+  private async runQueuedPass(previous: Promise<void> | null): Promise<void> {
+    if (previous) {
+      await previous;
+      if (this.stopped) {
+        return;
+      }
+    }
+    await this.runSweep();
+  }
+
+  /** One pass: discover newly eligible agents, then stat every attached cursor. */
+  private async runSweep(): Promise<void> {
     try {
       const candidates = await this.listCandidates();
       const eligible = new Set<string>();
+      const undiscovered: TranscriptWatchCandidate[] = [];
       for (const candidate of candidates) {
         if (Date.now() - candidate.updatedAtMs > WATCH_RETENTION_MS) {
           continue;
         }
         eligible.add(candidate.agentId);
         if (!this.entries.has(candidate.agentId)) {
-          const attached = await this.attach(candidate);
-          // R4-03: hand a freshly established baseline to the caller for
-          // persistence; `attach()` callers that already persist (the manager's
-          // release path) go through their own commit, not this hook.
-          if (
-            attached &&
-            attached.baselineBytes !== null &&
-            attached.baselineBytes !== candidate.baselineBytes
-          ) {
-            await this.onAttached?.(candidate.agentId, attached);
-          }
+          undiscovered.push(candidate);
         }
       }
+      await this.discover(undiscovered);
       for (const agentId of Array.from(this.entries.keys())) {
         if (!eligible.has(agentId)) {
           this.detach(agentId);
@@ -273,8 +333,49 @@ export class TranscriptWatchService {
       }
     } catch (error) {
       this.logger.warn({ err: error }, "Transcript watch sweep failed");
-    } finally {
-      this.sweepInFlight = false;
+    }
+  }
+
+  /**
+   * B6-OWN-HEAL: attach this pass's share of the not-yet-observed candidates —
+   * newest activity first (those are the rows the user is looking at), capped so a
+   * big store spreads its cold-start reads over several sweeps, throttled between
+   * reads, and isolated per candidate: one unreadable transcript (deleted file, dead
+   * mount, provider with no transcript knowledge) must not cost the rest their
+   * observation. Same posture as the list projection's (B5-REVIEW S2/S3): a read
+   * failure is logged and skipped, never thrown at the caller.
+   */
+  private async discover(undiscovered: TranscriptWatchCandidate[]): Promise<void> {
+    if (undiscovered.length === 0) {
+      return;
+    }
+    undiscovered.sort((a, b) => b.updatedAtMs - a.updatedAtMs);
+    const batch = undiscovered.slice(0, this.maxNewAttachmentsPerSweep);
+    for (const [index, candidate] of batch.entries()) {
+      if (this.stopped) {
+        return;
+      }
+      try {
+        const attached = await this.attach(candidate);
+        // R4-03: hand a freshly established baseline to the caller for persistence;
+        // `attach()` callers that already persist (the manager's release path) go
+        // through their own commit, not this hook.
+        if (
+          attached &&
+          attached.baselineBytes !== null &&
+          attached.baselineBytes !== candidate.baselineBytes
+        ) {
+          await this.onAttached?.(candidate.agentId, attached);
+        }
+      } catch (error) {
+        this.logger.warn(
+          { err: error, agentId: candidate.agentId, provider: candidate.provider },
+          "Transcript watch discovery attach failed; relying on later sweeps",
+        );
+      }
+      if (this.attachThrottleMs > 0 && index < batch.length - 1) {
+        await delay(this.attachThrottleMs);
+      }
     }
   }
 
@@ -477,4 +578,14 @@ async function readTranscriptRange(
   } finally {
     await handle.close().catch(() => undefined);
   }
+}
+
+/** B6-OWN-HEAL: the discovery batch's inter-attach gap (unref'd: a pending gap must
+ * never hold the process open on shutdown). */
+function delay(ms: number): Promise<void> {
+  // Executor form on purpose: this package's TS lib predates `Promise.withResolvers`
+  // (es2024), and the gap must not become a reason to skip the throttle.
+  return new Promise((resolve) => {
+    setTimeout(resolve, ms).unref();
+  });
 }

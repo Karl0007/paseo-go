@@ -5694,6 +5694,9 @@ describe("agent snapshot MCP serialization", () => {
           lastMessageRole: null,
           ownership: "none",
           externalLooksActive: false,
+          // COMPAT(agentOrigin): B6-OWN-HEAL pure-add birth axis, carried through
+          // the list projection like the ownership pair above it.
+          origin: "launch",
           archivedAt: null,
           requiresAttention: false,
           attentionReason: null,
@@ -6063,6 +6066,8 @@ describe("agent snapshot MCP serialization", () => {
       lastMessageRole: null,
       ownership: "none",
       externalLooksActive: false,
+      // COMPAT(agentOrigin): B6-OWN-HEAL birth axis (see list_agents above).
+      origin: "launch",
       archivedAt: now,
       requiresAttention: false,
       attentionReason: null,

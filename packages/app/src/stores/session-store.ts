@@ -113,6 +113,11 @@ export interface Agent {
   // (and `externalLooksActive` as `false`). Official surfaces ignore both.
   ownership?: "paseo" | "external" | "none" | null;
   externalLooksActive?: boolean | null;
+  // COMPAT(agentOrigin): Paseo Go B6-OWN-HEAL protocol pure-add (see protocol
+  // messages.ts). The pill's third input — the BIRTH axis (launch | import) the row
+  // falls back to when `ownership` carries no live evidence. `undefined` = daemon
+  // predates the field, and the consumer keeps 未知 for exactly that case.
+  origin?: "launch" | "import" | null;
 }
 
 export interface WorkspaceDescriptor {

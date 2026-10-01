@@ -157,3 +157,39 @@ describe("ChatListRow title line (D21: alias > 项目(worktree))", () => {
     );
   });
 });
+
+// B6-OWN-HEAL (F19/D22): the row is one of the three surfaces that read the single
+// pill decision, and it is the only one whose a11y label re-derives it — so both are
+// pinned here against the fixture the pixels render.
+describe("ChatListRow ownership pill (D22 birth axis)", () => {
+  it("reads 原生 for an idle launched session and says it out loud", () => {
+    renderRow(agentFixture({ ownership: "none", externalLooksActive: false, origin: "launch" }));
+    expect(screen.getByTestId(`shell-chat-ownership-${KEY}`).textContent).toBe(
+      "chats.ownership.state.native",
+    );
+    expect(screen.getByTestId(`shell-chat-row-${KEY}`).getAttribute("aria-label")).toContain(
+      "chats.ownership.state.native",
+    );
+  });
+
+  it("reads 外部 for an idle imported session", () => {
+    renderRow(agentFixture({ ownership: "none", externalLooksActive: false, origin: "import" }));
+    expect(screen.getByTestId(`shell-chat-ownership-${KEY}`).textContent).toBe(
+      "chats.ownership.badge",
+    );
+  });
+
+  it("keeps 未知 when the host reported neither axis (pre-go.7)", () => {
+    renderRow(agentFixture({ ownership: undefined, externalLooksActive: undefined }));
+    expect(screen.getByTestId(`shell-chat-ownership-${KEY}`).textContent).toBe(
+      "chats.ownership.state.unknown",
+    );
+  });
+
+  it("lets live evidence win over birth", () => {
+    renderRow(agentFixture({ ownership: "paseo", externalLooksActive: false, origin: "import" }));
+    expect(screen.getByTestId(`shell-chat-ownership-${KEY}`).textContent).toBe(
+      "chats.ownership.state.native",
+    );
+  });
+});

@@ -466,12 +466,15 @@ function ChatRowInner({
 
   const activityLabelKey = ACTIVITY_LABEL_KEY[agent.bucket];
   // B5-OWNVIS (F16/D19, 用户拍板): the ownership pill on the title line is now
-  // ALWAYS there — 原生/外部/未知 (B4 rendered only the 外部 pair). The facts ride
-  // the COMPAT(agentOwnership) passthrough; a pre-go.7 daemon's undefined pair
-  // reads as 未知, which is the honest word for "an old host never told us".
+  // ALWAYS there — 原生/外部/未知 (B4 rendered only the 外部 pair). B6-OWN-HEAL
+  // (F19/D22) adds the third fact: with no live-writer evidence the pill answers
+  // from the COMPAT(agentOrigin) birth axis, so an idle launched session reads 原生
+  // and an imported one 外部 instead of 未知; 未知 is left to a host that reported
+  // neither axis.
   const ownershipView = ownershipPresentation({
     ownership: agent.agent.ownership,
     externalLooksActive: agent.agent.externalLooksActive,
+    origin: agent.agent.origin,
   });
   // The spinner is invisible to TalkBack, so 运行中 stays a spoken word even though
   // ruling 8 took it off the screen.
@@ -537,6 +540,7 @@ function ChatRowInner({
             <OwnershipBadge
               ownership={agent.agent.ownership}
               externalLooksActive={agent.agent.externalLooksActive}
+              origin={agent.agent.origin}
               testID={`shell-chat-ownership-${agent.key}`}
             />
             {showSpinner ? (

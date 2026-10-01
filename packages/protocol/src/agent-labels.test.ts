@@ -1,5 +1,6 @@
 import { describe, expect, test } from "vitest";
 import {
+  deriveAgentOrigin,
   getParentAgentIdFromLabels,
   getOpenAgentTabLabel,
   hasOpenAgentTab,
@@ -37,6 +38,21 @@ describe("agent label policy", () => {
     );
     expect(isImportedProviderSession({ labels: null })).toBe(false);
     expect(isImportedProviderSession({})).toBe(false);
+  });
+
+  // B6-OWN-HEAL (batch-6 F19/D22): the daemon's birth axis is read off this one
+  // stamp, so the pill can answer 原生/外部 for an idle session. Same literal-true
+  // policy as the badge above — a lookalike value never rewrites a session's birth.
+  test("derives the birth axis from the import stamp", () => {
+    expect(deriveAgentOrigin({ labels: { [IMPORTED_PROVIDER_SESSION_LABEL]: "true" } })).toBe(
+      "import",
+    );
+    expect(deriveAgentOrigin({ labels: {} })).toBe("launch");
+    expect(deriveAgentOrigin({ labels: { [IMPORTED_PROVIDER_SESSION_LABEL]: "TRUE" } })).toBe(
+      "launch",
+    );
+    expect(deriveAgentOrigin({ labels: null })).toBe("launch");
+    expect(deriveAgentOrigin({})).toBe("launch");
   });
 
   test("treats any true client-scoped open-tab label as open", () => {

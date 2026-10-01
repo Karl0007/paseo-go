@@ -26,6 +26,9 @@ export type AgentDirectoryEntry = Pick<
   // R4 send guard read the ownership pair off the directory entry.
   | "ownership"
   | "externalLooksActive"
+  // COMPAT(agentOrigin): Paseo Go B6-OWN-HEAL — the same badge reads the birth axis
+  // off the entry when the ownership pair says nothing.
+  | "origin"
 > & {
   pendingPermissionCount?: number;
 };

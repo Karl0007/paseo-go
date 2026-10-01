@@ -24,6 +24,7 @@ import {
   resolveStoredAgentUpdatedAt,
   toAgentPersistenceHandle,
 } from "../persistence-hooks.js";
+import { deriveAgentOrigin } from "@getpaseo/protocol/agent-labels";
 export type { ManagedAgent };
 
 interface ProjectionOptions {
@@ -140,6 +141,12 @@ export function toAgentPayload(
     // Companion of `ownership`: in the `external` state, does the external writer
     // still look alive (R4 warning / "external, running" badge)? `false` elsewhere.
     externalLooksActive: agent.ownership.externalLooksActive,
+    // COMPAT(agentOrigin): Paseo Go B6-OWN-HEAL (batch-6 F19/D22). The BIRTH axis,
+    // orthogonal to `ownership`: how this session came to live in the daemon's
+    // storage. `ownership` answers who holds it right now and goes back to `none`
+    // whenever no watcher has evidence; this answers the user's actual question —
+    // 原生还是非原生 — for an idle session with no live writer in evidence.
+    origin: deriveAgentOrigin(agent),
     status: agent.lifecycle,
     activeTurn: agent.activeTurnId
       ? {
@@ -271,6 +278,8 @@ export function buildStoredAgentPayload(
     lastMessagePreview: record.lastMessagePreview ?? null,
     lastMessageRole: record.lastMessageRole ?? null,
     ...projectStoredOwnership(record),
+    // COMPAT(agentOrigin): Paseo Go B6-OWN-HEAL birth axis — see toAgentPayload.
+    origin: deriveAgentOrigin(record),
     currentModeId: record.lastModeId ?? null,
     availableModes: [],
     pendingPermissions: [],
@@ -305,6 +314,7 @@ export function toAgentListItemPayload(agent: AgentSnapshotPayload): AgentListIt
     lastMessageRole: agent.lastMessageRole ?? null,
     ownership: agent.ownership ?? "none",
     externalLooksActive: agent.externalLooksActive ?? false,
+    origin: agent.origin ?? null,
     attentionReason: agent.attentionReason ?? null,
     attentionTimestamp: agent.attentionTimestamp ?? null,
     labels: agent.labels,

@@ -26,6 +26,15 @@ export interface OwnershipFacts {
   ownership: string | null | undefined;
   /** Protocol `externalLooksActive`; `undefined`/`null` read as `false`. */
   externalLooksActive: boolean | null | undefined;
+  /**
+   * Protocol `origin` (COMPAT(agentOrigin), B6-OWN-HEAL): the BIRTH axis — `launch`
+   * (a daemon provider process created the session) or `import` (the import screen
+   * adopted it). Optional on purpose: only the visible pill asks 「原生还是非原生」.
+   * The send guard and the pre-open guard ask 「is a foreign writer live RIGHT NOW」,
+   * a question birth never changes (D22: 发送守卫等 external 语义消费方不改), so they
+   * keep passing the pair alone and their semantics stay exactly as B4 shipped them.
+   */
+  origin?: string | null | undefined;
 }
 
 /**
@@ -47,11 +56,12 @@ export const OWNERSHIP_BADGE_LABEL_KEY: Record<OwnershipBadgeKind, string> = {
 /**
  * B5-OWNVIS (批次五 F16/D19, 用户拍板): ownership is not a warning-only axis —
  * the user must SEE who holds the session on both surfaces (列表标题后 + 会话页
- * 胶囊区), so every wire posture renders a word, never nothing. The three states
- * map the protocol union directly: `paseo` = 原生, `external` = 外部 (keeping the
- * B4 「外部·运行中」 live-writer split), and `none`/absent = 未知 — a pre-go.7
- * daemon (undefined) and a released writer with no external evidence (null) are
- * both honestly "we cannot tell", which is exactly what the COMPAT posture says.
+ * 胶囊区), so every wire posture renders a word, never nothing.
+ * B6-OWN-HEAL (批次六 F19/D22) sharpens what the third state means: `none`/absent
+ * is no longer the end of the question. With no live-writer evidence the pill
+ * answers from the BIRTH axis (see `ownershipPresentation`), so 未知 now survives
+ * only for the case that is genuinely unknowable from here — a daemon that never
+ * reported an ownership pair AND never reported a birth (pre-go.7 hosts).
  */
 export type OwnershipVisibilityState = "native" | "external" | "unknown";
 
@@ -73,7 +83,17 @@ export const OWNERSHIP_STATE_LABEL_KEY = {
   unknown: "chats.ownership.state.unknown",
 } as const;
 
-/** The ONE tri-state decision the row, the capsule and the a11y labels share. */
+/**
+ * The ONE decision the row, the capsule and the a11y labels share: the live-writer
+ * axis OVERWRITES the birth axis, it does not replace it (D22).
+ * 1. the watcher saw a foreign write (`external`) → 外部, B4's live-writer split;
+ * 2. a daemon-owned provider process holds it (`paseo`) → 原生;
+ * 3. no evidence either way — `none`/absent: idle, released, or a provider with no
+ *    observable transcript → answer by BIRTH: launched here → 原生, adopted by the
+ *    import screen → 外部; no birth reported at all → 未知.
+ * Step 3 used to answer 未知 unconditionally, which is why every pre-B4 record read
+ * 未知 forever and a daemon restart left the whole list there (the F19 report).
+ */
 export function ownershipPresentation(facts: OwnershipFacts): OwnershipPresentation {
   if (facts.ownership === "external") {
     const kind = ownershipBadgeKind(facts);
@@ -85,6 +105,15 @@ export function ownershipPresentation(facts: OwnershipFacts): OwnershipPresentat
   }
   if (facts.ownership === "paseo") {
     return { state: "native", labelKey: OWNERSHIP_STATE_LABEL_KEY.native, tone: "neutral" };
+  }
+  if (facts.origin === "launch") {
+    return { state: "native", labelKey: OWNERSHIP_STATE_LABEL_KEY.native, tone: "neutral" };
+  }
+  if (facts.origin === "import") {
+    // The plain 外部, never 外部·运行中: nothing was observed writing. The state→tone
+    // invariant holds (外部 is the one loud state) and the guard still passes — it
+    // reads `ownershipBadgeKind`, which only `ownership === "external"` can light.
+    return { state: "external", labelKey: OWNERSHIP_BADGE_LABEL_KEY.external, tone: "warning" };
   }
   return { state: "unknown", labelKey: OWNERSHIP_STATE_LABEL_KEY.unknown, tone: "outline" };
 }

@@ -29,6 +29,26 @@ export function isImportedProviderSession(agent: AgentLabelSource): boolean {
   return agent.labels?.[IMPORTED_PROVIDER_SESSION_LABEL] === "true";
 }
 
+/**
+ * How a session came to live in the daemon's storage (Paseo Go B6-OWN-HEAL, batch-6
+ * F19/D22 — the pill's 「原生还是非原生」 question when no live writer is in evidence):
+ * `launch` = a daemon provider process created it; `import` = the import screen
+ * adopted a session the user had been continuing in a terminal.
+ */
+export type AgentOrigin = "launch" | "import";
+
+/**
+ * The birth axis, read off the ONE provenance stamp the daemon owns — C22's import
+ * choke point (`IMPORTED_PROVIDER_SESSION_LABEL`, backfilled on re-import). Nothing
+ * new is persisted, so every record answers. The honest limit: a session adopted
+ * before that stamp existed is indistinguishable from a launched one and answers
+ * `launch`; clients keep their own 「unknown」 for the case they CAN detect — a daemon
+ * that never reports the axis (`origin` absent).
+ */
+export function deriveAgentOrigin(agent: AgentLabelSource): AgentOrigin {
+  return isImportedProviderSession(agent) ? "import" : "launch";
+}
+
 export function hasOpenAgentTab(labels: Record<string, unknown> | null | undefined): boolean {
   return Object.entries(labels ?? {}).some(
     ([label, value]) => isOpenAgentTabLabel(label) && value === "true",

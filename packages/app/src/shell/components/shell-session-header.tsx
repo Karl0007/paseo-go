@@ -544,6 +544,7 @@ function HeaderRowsText({
         <OwnershipBadge
           ownership={agent.ownership}
           externalLooksActive={agent.externalLooksActive}
+          origin={agent.origin}
           testID={`shell-session-ownership-${targetKey}`}
         />
         <ChatStatusLight agent={agent} bucket={bucket} />

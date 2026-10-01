@@ -31,12 +31,13 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
-function pillText(ownership: unknown, externalLooksActive: unknown): string {
+function pillText(ownership: unknown, externalLooksActive: unknown, origin?: unknown): string {
   cleanup(); // one pill per assertion — tests probe several postures in a row
   render(
     <OwnershipBadge
       ownership={ownership as string | null | undefined}
       externalLooksActive={externalLooksActive as boolean | null | undefined}
+      origin={origin as string | null | undefined}
       testID="pill"
     />,
   );
@@ -60,5 +61,31 @@ describe("OwnershipBadge tri-state rendering (always-on)", () => {
     expect(pillText("none", null)).toBe("chats.ownership.state.unknown");
     expect(pillText(null, null)).toBe("chats.ownership.state.unknown");
     expect(pillText(undefined, undefined)).toBe("chats.ownership.state.unknown");
+  });
+});
+
+// B6-OWN-HEAL (F19/D22): the pill's third input is the birth axis, and BOTH surfaces
+// (chat row, session capsule) mount this one renderer — so the words the device
+// frames show for an idle session are exactly these.
+describe("OwnershipBadge birth axis (B6-OWN-HEAL)", () => {
+  it("renders 原生 for a launched session with no live-writer evidence", () => {
+    expect(pillText("none", false, "launch")).toBe("chats.ownership.state.native");
+    // A daemon that reports the birth axis but has never observed this transcript
+    // (the pre-B4 record shape) is the case the F19 report was about.
+    expect(pillText(undefined, undefined, "launch")).toBe("chats.ownership.state.native");
+  });
+
+  it("renders the plain 外部 for an imported idle session — never 运行中", () => {
+    expect(pillText("none", false, "import")).toBe("chats.ownership.badge");
+    expect(pillText(null, true, "import")).toBe("chats.ownership.badge");
+  });
+
+  it("keeps live evidence above birth", () => {
+    expect(pillText("paseo", false, "import")).toBe("chats.ownership.state.native");
+    expect(pillText("external", true, "launch")).toBe("chats.ownership.badgeActive");
+  });
+
+  it("still says 未知 when neither axis was reported", () => {
+    expect(pillText("none", false, null)).toBe("chats.ownership.state.unknown");
   });
 });

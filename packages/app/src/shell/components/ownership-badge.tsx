@@ -3,13 +3,14 @@
 // and the session header capsule. The rules live in shell/chats/ownership.ts
 // (`ownershipPresentation`); this is the renderer.
 //
-// Visual contract: the pill is ALWAYS there — 原生 (paseo holds the session) /
+// Visual contract: the pill is ALWAYS there — 原生 (paseo holds the session, or the
+// session was born here and nobody else has written it: D22's birth axis) /
 // 外部·外部·运行中 (the B4 warning pair, unchanged: warning-tint with the
-// statusWarning word) / 未知 (none or a pre-go.7 daemon — we honestly cannot
-// tell). The two quiet states stay out of both existing markers' color stories
-// (BATCH4-ALIGNMENT F8.6): 原生 rides a neutral surface fill, 未知 a bare
-// outline — the WORD carries the state, the fill only grades loudness, and only
-// 外部 is allowed to shout.
+// statusWarning word) / 未知 (a host that reported neither an ownership pair nor a
+// birth — we honestly cannot tell). The two quiet states stay out of both existing
+// markers' color stories (BATCH4-ALIGNMENT F8.6): 原生 rides a neutral surface fill,
+// 未知 a bare outline — the WORD carries the state, the fill only grades loudness,
+// and only 外部 is allowed to shout.
 import { memo } from "react";
 import { Text, View } from "react-native";
 import { StyleSheet } from "react-native-unistyles";
@@ -29,16 +30,19 @@ const PILL_TONE_STYLE: Record<OwnershipPillTone, "pillWarning" | "pillNeutral" |
 export const OwnershipBadge = memo(function OwnershipBadge({
   ownership,
   externalLooksActive,
+  origin,
   testID,
 }: {
-  /** Protocol `ownership`; `undefined`/`null` read as `none` → 未知. */
+  /** Protocol `ownership`; `undefined`/`null` read as `none` → the birth axis. */
   ownership: string | null | undefined;
   /** Protocol `externalLooksActive`; `undefined`/`null` read as `false`. */
   externalLooksActive: boolean | null | undefined;
+  /** Protocol `origin` (COMPAT(agentOrigin)); absent keeps 未知 for an idle session. */
+  origin?: string | null;
   testID?: string;
 }) {
   const { t } = useTranslation(SHELL_I18N_NAMESPACE);
-  const presentation = ownershipPresentation({ ownership, externalLooksActive });
+  const presentation = ownershipPresentation({ ownership, externalLooksActive, origin });
   return (
     <View style={[styles.pill, styles[PILL_TONE_STYLE[presentation.tone]]]} testID={testID}>
       <Text

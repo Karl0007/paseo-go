@@ -883,6 +883,17 @@ export const AgentSnapshotPayloadSchema = z.object({
   // badge variant. Meaningless outside `external`; current daemons always send
   // `false` there. Consumers MUST read `undefined`/`null` as `false`.
   externalLooksActive: z.boolean().nullable().optional(),
+  // COMPAT(agentOrigin): added 2026-10-02 (Paseo Go B6-OWN-HEAL, batch-6 F19/D22).
+  // Pure-add BIRTH axis — how the session came to live in the daemon's storage — and
+  // orthogonal to `ownership`, which only ever answers who holds it RIGHT NOW:
+  // `launch` = a daemon provider process created it, `import` = the import screen
+  // adopted an external CLI session (`paseo.imported-provider-session`). The pill's
+  // third input: with no live writer in evidence (`ownership` none/absent) the shell
+  // answers 原生 for `launch` and 外部 for `import` instead of the pre-B6 「全列表恒
+  // 未知」. Daemons older than this build omit it, so it stays optional while clients
+  // support those hosts — consumers MUST read `undefined`/`null` as "birth not
+  // reported" and keep their own unknown state for it. Official clients ignore it.
+  origin: z.enum(["launch", "import"]).nullable().optional(),
 });
 
 export type AgentSnapshotPayload = z.infer<typeof AgentSnapshotPayloadSchema>;
@@ -917,6 +928,10 @@ export const AgentListItemPayloadSchema = z.object({
   // list_agents consumers.
   ownership: z.enum(["paseo", "external", "none"]).nullable().optional(),
   externalLooksActive: z.boolean().nullable().optional(),
+  // COMPAT(agentOrigin): added 2026-10-02 (Paseo Go B6-OWN-HEAL). Same pure-add
+  // birth axis and semantics as AgentSnapshotPayloadSchema.origin; carried through
+  // toAgentListItemPayload for MCP list_agents consumers.
+  origin: z.enum(["launch", "import"]).nullable().optional(),
 });
 
 export type AgentListItemPayload = z.infer<typeof AgentListItemPayloadSchema>;

@@ -148,5 +148,9 @@ export function normalizeAgentSnapshot(snapshot: AgentSnapshotPayload, serverId:
     // restore shows no badge until the directory re-syncs.
     ownership: snapshot.ownership ?? null,
     externalLooksActive: snapshot.externalLooksActive ?? null,
+    // COMPAT(agentOrigin): Paseo Go B6-OWN-HEAL pure-add birth axis; a daemon older
+    // than the build omits it and the pill keeps its 未知 state. Same posture as the
+    // ownership pair above: NOT projected back out by projectAgentSnapshot.
+    origin: snapshot.origin ?? null,
   };
 }

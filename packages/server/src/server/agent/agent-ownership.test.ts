@@ -8,7 +8,12 @@ import { createTestLogger } from "../../test-utils/test-logger.js";
 import { createTestAgentClient } from "../test-utils/fake-agent-client.js";
 import { AgentManager } from "./agent-manager.js";
 import { AgentStorage, type StoredAgentRecord } from "./agent-storage.js";
-import { buildStoredAgentPayload, toAgentPayload } from "./agent-projections.js";
+import { IMPORTED_PROVIDER_SESSION_LABEL } from "@getpaseo/protocol/agent-labels";
+import {
+  buildStoredAgentPayload,
+  toAgentListItemPayload,
+  toAgentPayload,
+} from "./agent-projections.js";
 import type {
   AgentClient,
   AgentPersistenceHandle,
@@ -381,10 +386,17 @@ describe("AgentManager ownership accounting", () => {
       // R3: the synced row reaches the chat-list projection without a reload.
       expect(record?.lastMessagePreview).toBe("continued at the desk");
       expect(record?.lastMessageRole).toBe("assistant");
-      expect(states.at(-1)).toMatchObject({ ownership: "external", externalLooksActive: false });
+      expect(states.at(-1)).toMatchObject({
+        ownership: "external",
+        externalLooksActive: false,
+        // B6-OWN-HEAL: the birth axis rides the live projection too — the pill must
+        // not blink to 未知 while a turn is running.
+        origin: "launch",
+      });
       expect(buildStoredAgentPayload(record!, ["claude"])).toMatchObject({
         ownership: "external",
         lastMessagePreview: "continued at the desk",
+        origin: "launch",
       });
 
       // R5: sending into it resumes a paseo-owned process and claims it back.
@@ -431,6 +443,43 @@ describe("AgentManager ownership accounting", () => {
       manager.stopTranscriptWatch();
       rmSync(work, { recursive: true, force: true });
     }
+  });
+});
+
+describe("agentOrigin projection (B6-OWN-HEAL birth axis)", () => {
+  const released = {
+    id: "agent-origin",
+    cwd: "/work/repo",
+    sessionId: "s-origin",
+    updatedAt: "2026-09-30T00:00:00.000Z",
+    baselineBytes: null,
+  };
+
+  function storedWithLabels(labels: Record<string, string>): StoredAgentRecord {
+    return { ...makeReleasedClaudeRecord(released), labels };
+  }
+
+  it("answers launch for a record the import screen never stamped", () => {
+    // The F19 case: pre-B4 records carry no ownership observation, which is why the
+    // pill used to have nothing to say. Birth is the fact that always answers.
+    expect(buildStoredAgentPayload(storedWithLabels({}), ["claude"]).origin).toBe("launch");
+  });
+
+  it("answers import for a session the import screen adopted", () => {
+    const imported = storedWithLabels({ [IMPORTED_PROVIDER_SESSION_LABEL]: "true" });
+    expect(buildStoredAgentPayload(imported, ["claude"]).origin).toBe("import");
+  });
+
+  it("reads the stamp, not a lookalike value", () => {
+    // `isImportedProviderSession` is literal "true"; anything else stays launch.
+    const forged = storedWithLabels({ [IMPORTED_PROVIDER_SESSION_LABEL]: "TRUE" });
+    expect(buildStoredAgentPayload(forged, ["claude"]).origin).toBe("launch");
+  });
+
+  it("carries the axis through the list projection (MCP list_agents parity)", () => {
+    const imported = storedWithLabels({ [IMPORTED_PROVIDER_SESSION_LABEL]: "true" });
+    const payload = buildStoredAgentPayload(imported, ["claude"]);
+    expect(toAgentListItemPayload(payload).origin).toBe("import");
   });
 });
 

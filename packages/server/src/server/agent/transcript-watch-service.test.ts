@@ -87,6 +87,8 @@ function createHarness(
     maxWatchers?: number;
     candidates?: () => Promise<TranscriptWatchCandidate[]>;
     onAttached?: (agentId: string, attachment: TranscriptAttachment) => Promise<void>;
+    /** B6-OWN-HEAL: discovery batch size; the tests pin the cap explicitly. */
+    maxNewAttachmentsPerSweep?: number;
   } = {},
 ): Harness {
   const file = join(work, "sessions", "--proj--", "2026-09-30_uuid.jsonl");
@@ -107,12 +109,16 @@ function createHarness(
     baselineBytes: input.baselineBytes ?? null,
     updatedAtMs: Date.now(),
   };
+
   const recorder = new ChangeRecorder();
   const service = new TranscriptWatchService({
     logger: createTestLogger(),
     // Long enough that no interval can fire inside a test; sweeps are explicit.
     statPollIntervalMs: 60 * 60 * 1000,
     maxWatchers: input.maxWatchers ?? 8,
+    maxNewAttachmentsPerSweep: input.maxNewAttachmentsPerSweep,
+    // No inter-attach gap: these tests assert the batch, not the wall clock.
+    attachThrottleMs: 0,
     listCandidates: input.candidates ?? (async () => [candidate]),
     onChange: recorder.push,
     onAttached: input.onAttached,
@@ -288,6 +294,95 @@ describe("sweep lifecycle", () => {
     await expect(
       harness.service.attach({ ...harness.candidate, agentId: "agent-2" }),
     ).resolves.toBeNull();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// B6-OWN-HEAL (batch-6 F19/D22): the startup discovery batch. A daemon restart
+// leaves every stored agent unobserved, and the pill used to sit on 「未知」 until
+// the first interval tick (60s) — or forever, for agents nobody ever opened. The
+// batch is what makes the list answer by itself: immediate, capped, throttled,
+// and never fatal (B5-REVIEW S2: a read failure may not cost anything else).
+// ---------------------------------------------------------------------------
+
+describe("startup discovery batch (B6-OWN-HEAL)", () => {
+  /** A stored agent with its own transcript on disk, at the given activity time. */
+  function storedAgent(
+    agentId: string,
+    updatedAtMs: number,
+    provider: AgentProvider = OMP_PROVIDER,
+  ): TranscriptWatchCandidate {
+    const file = join(work, "sessions", `${agentId}.jsonl`);
+    mkdirSync(dirname(file), { recursive: true });
+    writeFileSync(file, ompLine("user", `born in ${agentId}`, agentId));
+    return {
+      agentId,
+      provider,
+      persistence: { provider, sessionId: agentId, nativeHandle: file },
+      cwd: work,
+      baselineBytes: null,
+      updatedAtMs,
+    };
+  }
+
+  it("discovers the stored agents at start(), not one stat interval later", async () => {
+    // The harness interval is an hour, so anything observed here came from `start()`.
+    const handed: string[] = [];
+    const { promise, resolve } = Promise.withResolvers<void>();
+    const harness = createHarness({
+      onAttached: async (agentId) => {
+        handed.push(agentId);
+        resolve();
+      },
+    });
+    harness.service.start();
+    await promise;
+    expect(handed).toEqual(["agent-1"]);
+  });
+
+  it("attaches this pass's cap newest-first and finishes the rest on the next pass", async () => {
+    const older = storedAgent("agent-old", Date.now() - 60_000);
+    const middle = storedAgent("agent-mid", Date.now() - 30_000);
+    const newest = storedAgent("agent-new", Date.now());
+    const harness = createHarness({
+      candidates: async () => [older, middle, newest],
+      maxNewAttachmentsPerSweep: 2,
+    });
+
+    await harness.service.sweep();
+    // The rows the user is looking at heal first; the batch stays bounded.
+    expect(harness.service.watchedAgentIds).toEqual(["agent-new", "agent-mid"]);
+
+    await harness.service.sweep();
+    expect(harness.service.watchedAgentIds).toEqual(["agent-new", "agent-mid", "agent-old"]);
+  });
+
+  it("skips a candidate whose transcript it cannot locate and still watches the rest", async () => {
+    const blind = storedAgent("agent-blind", Date.now(), "opencode");
+    const observable = storedAgent("agent-seen", Date.now() - 1_000);
+    const harness = createHarness({ candidates: async () => [blind, observable] });
+
+    await harness.service.sweep();
+    expect(harness.service.watchedAgentIds).toEqual(["agent-seen"]);
+  });
+
+  it("survives one candidate's failed handoff instead of aborting the batch", async () => {
+    const failing = storedAgent("agent-a", Date.now());
+    const healthy = storedAgent("agent-b", Date.now() - 1_000);
+    const harness = createHarness({
+      candidates: async () => [failing, healthy],
+      onAttached: async (agentId) => {
+        if (agentId === "agent-a") {
+          throw new Error("storage write failed");
+        }
+      },
+    });
+
+    // Pre-fix the throw escaped the loop and the whole sweep — including every
+    // later candidate and every stat check — was skipped for that tick.
+    await expect(harness.service.sweep()).resolves.toBeUndefined();
+    expect(harness.service.watchedAgentIds).toEqual(["agent-a", "agent-b"]);
+    expect(harness.recorder.changes).toEqual([]);
   });
 });
 
