@@ -213,3 +213,44 @@
 ## M-结论
 
 **战略链 M1-M4 全部完成**。终态=一条供应链：`paseo-go` 分支 → GitHub Actions（tag 驱动）→ Releases（CLI tarball/APK/desktop）→ 生产 daemon+壳 APK+desktop 更新全指 fork。开放项+3：④APK CI runner 化（资源天花板，self-hosted 候选）⑤desktop 自动更新 prerelease 通道口径（文档化未改）⑥DEPLOY-NOTES diff 待用户点头落笔。
+
+---
+
+# 批次四增补（v0.10.2-go.7，2026-10-01；只增不改上文）
+
+> 口径源=`todo/BATCH4-ALIGNMENT.md`（F1-F11，18 项裁定）；review 台账=`review/B4-INDEX.md`（33 卡全处置）。
+
+## N1. 用户拍板兑现（F1-F11）
+
+- ✅ **F1/F2/F3 三 tab 单行顶栏**（`1812c6cf4`）：废 accessory 带→定高 60dp（工作区空白带消失）；胶囊「● 1/1」（圆点保留）；segment 上移标题行；窄列三级降级 全称→「活跃/归档」→纯图标（计数三档恒在）；等高测试改钉 60dp 新契约
+- ✅ **F4 对话栏微信化**（`222c57063`）：废 needs_attention 跳队（纯时间序）；项目 hash 色圆角 icon（首字符，同项目恒同色）；标题=`项目-worktree[-备注]`；时间挪右上+微信绝对格式（今天 HH:MM/昨天/星期X/MM-DD）；副标题优先级 `[草稿]`红>`[需要回复]`红>`[出错]`红>`我:`/裸预览；running 转圈
+- ✅ **F4 数据面 lastMessagePreview+role**（`043b1eacb`）：协议纯增（optional-nullable，旧 daemon 兼容）+server 投影/更新链/hydrate；ws 探针三态实录
+- ✅ **F5 横滑切页**（`4034afe59`）：Reanimated 水平手势（列宽 1/4 或尾速）切 进行中↔已归档，与 segment 同状态机；8 项手势冲突审计（垂直/长按/拖拽/下拉/边界/多指/搜索/回顶）；重挂面纪律守住
+- ✅ **F6/F7 导入屏**（`d6550dd21`）：默认折叠子会话（chevron+计数，搜索命中自动展开）；已导入/已归档显式徽标（handle 双字段匹配，勾选禁用，点行跳转）
+- ✅ **F8 所有权状态机**（server `fad6d0022` + UI `680940e1a`）：`ownership: paseo|external|none` 协议纯增（与出生标签正交）；transcript fs.watch+stat 轮询兜底；R2-lite 降级感知/R3 免刷新同步/R4 警告（按 provider 分级）/R5 转原生；**R2-full 永久关闭**（调研五 provider 零字节损坏，见 RESEARCH-provider-dual-write.md）；裁定 14 UI 强制=三态徽标+弹窗+翻转可见真机帧齐
+- ✅ **F9 返回键退搜索**（`9eb2d2570`）：统一 hook，优先级 菜单>搜索>页面（真机时序实锤）；四搜索面接入（文件屏枚举证伪官方无搜索态，实接壳自有 state）
+- ✅ **F10 长按回归修复**（`6ec69b112`）：根因=gestureLock 带翻转列表 props 触发整表重挂抹菜单（非 merge 回归，依赖版本未跳）；控件常驻+稳定 containerStyle，全壳侧
+- ✅ **F11 转场动画**（`c672e8d2c`）：**翻案**=根栈 animation:none 自上游 0.9.2 种子即存在（KI-9 静态帧假绿，动画从未真机证明过）；shell 模式 (detail)+h/[serverId] 挂 slide_from_right；中间态帧已抓到
+
+## N2. Review 轮（33 卡，`review/B4-INDEX.md`）
+
+- 四维 reviewer + 独立复核庭：21 CONFIRMED / 1 DOWNGRADE / 0 REJECTED；P1（watcher 滞留假 external）探针实锤+销卡复审 PASS
+- 修复批 A（server 12 卡 `6b9a72051`+`b78ddc113`）/B（chats 11 卡 `3071a132c`）/C（import+开屏覆盖面 5 卡 `5588ffb12`）
+- 尾单五（`5c7e5d634`/`0fa6859ef`/`e9a275a26`/`8530e40aa`/`7854255ab`）：M2 脚本 lint/website schema 机器闸/edge-back 单位混用/AgentSession.isAlive 直报/claude fork-on-send
+- 教训入账：测试钉住的现象本身可能是 bug（drag-drop.test）；静态帧不能证中间态（KI-9/R4-08）；小写盘符 cwd 崩 vitest 全局
+
+## N3. 触点终账（批次四净增）
+
+协议 messages.ts（preview 对+ownership 对，既有触点扩展）；server 新模块 agent-last-message/agent-ownership/provider-transcript/transcript-activity-probe/transcript-watch-service + agent-manager/projections/storage/persisted-config/config/bootstrap 扩展；**app 官方文件 4 白名单透传**（session-store/agent-snapshots/agent-directory/use-aggregated-agents，各 +2 行 COMPAT）+ styles/identity-colors.ts（第 5 触点，导出常量）+ electron-builder.yml（M4 前批）；余全壳侧。
+
+## N4. 终态门禁（编排者亲跑，HEAD 批次四末）
+
+- typecheck 全 workspace exit 0；oxlint 仓根 4595 文件 **0 warnings 0 errors**
+- app 6297 例：**4 失败全 W1 环境项**（zh-CN locale ×4）/ 0 pending → 零新增（较 M1 末 6162 增 135 用例）
+- server unit 6178：**1 失败环境项**（npm registry E404）/ 233 pending → 零新增
+- protocol 740：**1 失败环境项**（providers-snapshot 冷 AOT 超时，基线复现）→ 零新增
+- ⚠ 纪律事件：`core.autocrlf` 被某在途进程翻回 true（违 M1 永久 false 制）→ 终态门禁时恢复 false，树净无 churn
+
+## N5. 结论
+
+**批次四验收通过**。F1-F11 全兑现（含 F11 翻案、R2-full 关闭两处对原口径的实证修正）；review 33 卡全处置含 P1 销卡；终态门禁零新增失败。发布=v0.10.2-go.7（Releases，APK 本机出+CI 出 CLI/desktop）。开放项延续批次三三条+新增：真人手指复验两处（置顶拖拽/edge-back 正向激活，注入面不可归因）。
