@@ -1,6 +1,6 @@
 # Paseo Go — 接手入口（先读这页）
 
-> 手机优先的 Paseo 壳 app。当前状态：**战略链 M1-M4 全部完成**——上游已合流 v0.10.2（M1 merge `1789ebbca`）；CI 出包接管分发（M2，`Karl0007/paseo-go` Releases tag `v0.10.2-go.N`，版本系 `0.10.2-go.*`）；**生产 daemon 已切 fork**（M3，`@getpaseo/cli@0.10.2-go.6`，升级仪式=Releases tarball 重装+重启任务，禁 `npm update -g`）；客户端更新全指 fork Releases（M4，壳提示条+desktop feed 触点）。分支 `paseo-go/v0.1.0`。
+> 手机优先的 Paseo 壳 app。当前状态：**批次四已交付 v0.10.2-go.7**——对话栏微信化（项目 icon/纯时间序/最近消息/草稿可见/所有权徽标）、三 tab 单行顶栏、横滑切页、导入折叠+徽标、返回键退搜索、长按回归修复、转场动画（F11 翻案=从未有过，已补）；上游合流 v0.10.2（M1）+ CI 出包（M2）+ 生产 fork daemon（M3）+ 更新指向（M4）全链就绪。分支 `paseo-go/v0.1.0`。
 > 发布物：Releases `v0.10.2-go.6` = 22 资产（CLI win32/linux tarball + APK sha256=`e3ca12a0…`（merge 后首包，本机出）+ desktop win zip/linux tar.gz + 全 sha256 表 + latest 指针）；本机旧包 `cb074aff…2aaa`（v0.3.0）已被取代。
 > 公开镜像：`github.com/Karl0007/paseo-go`（单向重放，无证据历史；同步工具 `release/make-public-mirror.sh`）。
 > 开放项：①置顶拖拽真人手指复验（ACCEPTANCE §5 首行，自动化 26 样本已全绿）；②语音端到端待用户部署 STT/TTS 端点（VOICE-DEPLOY.md）；③Q10 平板设计事后审（预授权落地，留档待审）。
