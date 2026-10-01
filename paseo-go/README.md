@@ -15,6 +15,7 @@
 | 查验收证据/历史决策           | `ACCEPTANCE.md`（总对照表）→ `todo/<卡号>-*.md`（**归档只读**：每卡=口径+裁定+勘误，勿改历史，新决策写新卡）→ `evidence/<卡号>/` 截图                        |
 | 通知/推送相关                 | `NOTIFY.md`（含 EAS/FCM 不可达裁定）                                                                                                                         |
 | 重打 release APK              | `BUILD.md` §3.5 + `paseo-go/release/build-release-wsl.sh`（PHASES=0-4 幂等；**构建窗口纪律**：hermesc 5-9 分钟需整机 FreeVis≥23GB，停 metro/daemon/vitest）  |
+| 新机器部署服务端              | `DEPLOY.md`（装 CLI tarball→绑 Tailscale IP→常驻服务两禁忌→验收三条→升级回滚；无任何密钥/IP 明文，占位符照填）                                               |
 
 ## 关键事实速查
 
