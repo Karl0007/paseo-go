@@ -1,7 +1,8 @@
 // B4-ROW rulings 4-5 acceptance: the row's two text lines, as pure functions.
-// 标题 = 项目-worktree[-备注] with the worktree segment dropping out when it merely
-// repeats the project; 副标题 = 草稿 > 需要回复 > 出错 > 预览 (「我: 」 for a user-role
-// last message) > nothing, every tier collapsed to one line.
+// 标题 = 项目(worktree), or the 备注 alone when there is one (B5-TITLE/F12-D), with the
+// worktree segment dropping out when it merely repeats the project; 副标题 = 草稿 >
+// 需要回复 > 出错 > 预览 (「我: 」 for a user-role last message) > nothing, every tier
+// collapsed to one line.
 import { describe, expect, it } from "vitest";
 import { buildChatRowTitle, buildChatSubtitle, worktreeSegment } from "./row-title";
 
@@ -27,26 +28,26 @@ describe("buildChatRowTitle", () => {
     );
   });
 
-  it("appends the worktree for a checkout under .paseo/worktrees", () => {
+  it("wraps the worktree in parentheses for a checkout under .paseo/worktrees", () => {
     expect(
       buildChatRowTitle({
         projectName: "repo",
         cwd: "/srv/repo/.paseo/worktrees/fix-login",
         note: null,
       }),
-    ).toBe("repo-fix-login");
+    ).toBe("repo(fix-login)");
     expect(
       buildChatRowTitle({
         projectName: "repo",
         cwd: "C:\\work\\repo\\.paseo\\worktrees\\feat",
         note: null,
       }),
-    ).toBe("repo-feat");
+    ).toBe("repo(feat)");
   });
 
-  it("appends the manual rename as the trailing 备注 segment", () => {
+  it("shows the manual rename alone — no default summary, no project prefix", () => {
     expect(buildChatRowTitle({ projectName: "repo", cwd: "/srv/repo", note: "登录修复" })).toBe(
-      "repo-登录修复",
+      "登录修复",
     );
     expect(
       buildChatRowTitle({
@@ -54,17 +55,23 @@ describe("buildChatRowTitle", () => {
         cwd: "/srv/repo/.paseo/worktrees/feat",
         note: "ship it",
       }),
-    ).toBe("repo-feat-ship it");
+    ).toBe("ship it");
   });
 
-  it("drops a blank or whitespace-only note instead of trailing a dash", () => {
+  it("falls back to the default title for a blank or whitespace-only note", () => {
     expect(buildChatRowTitle({ projectName: "repo", cwd: "/srv/repo", note: "   " })).toBe("repo");
-    expect(buildChatRowTitle({ projectName: "repo", cwd: "/srv/repo", note: "" })).toBe("repo");
+    expect(
+      buildChatRowTitle({
+        projectName: "repo",
+        cwd: "/srv/repo/.paseo/worktrees/feat",
+        note: "",
+      }),
+    ).toBe("repo(feat)");
   });
 
   it("collapses a multiline note onto one line", () => {
     expect(buildChatRowTitle({ projectName: "repo", cwd: "/srv/repo", note: "a\n  b" })).toBe(
-      "repo-a b",
+      "a b",
     );
   });
 
@@ -76,7 +83,7 @@ describe("buildChatRowTitle", () => {
     ).toBe("paseo");
     expect(
       buildChatRowTitle({ projectName: "getpaseo/paseo", cwd: "/home/dev/paseo", note: "急" }),
-    ).toBe("paseo-急");
+    ).toBe("急");
     // A trailing separator must not invent an empty project.
     expect(buildChatRowTitle({ projectName: "org/repo/", cwd: "/srv/repo", note: null })).toBe(
       "repo",

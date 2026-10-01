@@ -3,7 +3,8 @@
 // unit-testable without React Native. No i18n here — translated fragments arrive
 // through `labels`, injected by the caller.
 //
-// Title  = 项目名-worktree[-备注]   (备注 = the manual rename, `agent.title`)
+// Title  = 项目名(worktree)   (B5-TITLE/F12-D: parentheses; a 备注 = manual rename,
+//          `agent.title` — replaces the whole line instead of being appended)
 // Subtitle priority: [草稿]+draft text > [需要回复]+preview > [出错]+preview >
 //                    「我: 」/bare preview > nothing.
 // The red bracket tiers come from `flagLabel`, which the row reads from
@@ -100,19 +101,23 @@ export interface ChatRowTitleInput {
 }
 
 /**
- * `项目-worktree[-备注]`. The worktree segment drops out when it repeats the project
- * (a plain checkout, where cwd's tail IS the project directory) so the common case
- * reads 「paseo」 and not 「paseo-paseo」. A `/` in the project name is a remote
- * owner/repo (deriveProjectName hands GitHub keys through as `getpaseo/paseo`) —
- * the row shows the repo short name, the owner adds noise at 14sp (B4-ROW tail).
+ * `项目(worktree)`, or the 备注 alone when there is one (B5-TITLE ruling F12/D: a
+ * manual rename IS the title — no default summary, no project prefix). The worktree
+ * segment drops out when it repeats the project (a plain checkout, where cwd's tail
+ * IS the project directory) so the common case reads 「paseo」 and not
+ * 「paseo(paseo)」. A `/` in the project name is a remote owner/repo
+ * (deriveProjectName hands GitHub keys through as `getpaseo/paseo`) — the row shows
+ * the repo short name, the owner adds noise at 14sp (B4-ROW tail).
  */
 export function buildChatRowTitle(input: ChatRowTitleInput): string {
+  const note = singleLine(input.note);
+  if (note.length > 0) {
+    return note;
+  }
   const projectSegments = singleLine(input.projectName).split("/").filter(Boolean);
   const project = projectSegments[projectSegments.length - 1] ?? "";
   const worktree = singleLine(worktreeSegment(input.cwd));
-  const note = singleLine(input.note);
   const worktreeIsProject =
     worktree.length > 0 && worktree.toLocaleLowerCase() === project.toLocaleLowerCase();
-  const head = worktree.length > 0 && !worktreeIsProject ? `${project}-${worktree}` : project;
-  return note.length > 0 ? `${head}-${note}` : head;
+  return worktree.length > 0 && !worktreeIsProject ? `${project}(${worktree})` : project;
 }
