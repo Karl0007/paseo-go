@@ -165,6 +165,17 @@ export function stepRowGesture(state: RowGestureState, event: RowGestureEvent): 
       return stepTouchMove(state, event.dx, event.dy);
 
     case "press_out":
+      // B5-F15 (device finding, evidence/B5-GESTURE): once the row is DRAGGING,
+      // a JS press_out is not the end of the touch — it is RNGH's pan taking
+      // the stream over at activation (~800ms after drag(), measured), or the
+      // cell churn that used to ride the wrapper's drag-time unmount. Ending
+      // the band here re-enabled the refresh control MID-DRAG: Android's
+      // SwipeRefreshLayout then intercepted the live pull, cancelled the pan
+      // (the drop never landed), and the guard was dead for the rest of the
+      // gesture — the F15 hole and the F14 stranding. `dragging` exits ONLY
+      // through the R2-01 `drag_end` (the screen's drop handler). A dead drag
+      // self-heals on the next touch: press_in re-owns the machine.
+      if (state.phase === "dragging") return { state, effects: NO_EFFECTS };
       // didLongPress survives the reset so the row's onPress can read it.
       return { state: { phase: "idle", didLongPress: state.didLongPress }, effects: NO_EFFECTS };
 

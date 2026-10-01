@@ -33,9 +33,10 @@
 // documents for custom activators ("call drag() from your own long-press/move
 // handler"), so deferring costs nothing.
 //
-// R2-01 (FIX-A): the native takeover means the JS press_out never arrives
-// after drag(), so the scroll lock (onGestureLockChange) would stay true for
-// the rest of the session. The drag lifecycle gets its own band-out release:
+// R2-01 (FIX-A): once drag() lifts the row, the JS stream ends without a
+// usable release — a press_out may or may not arrive (B5-F15 device finding:
+// RNGH's activation sends one mid-drag, which the machine now ignores), so the
+// scroll lock (onGestureLockChange) must never depend on it.
 // `drag()` hands the screen a release function (the onDragStart seam, same
 // frame), the screen runs it from its onDragEnd handler, and the release drives
 // the machine's `drag_end` edge — the phase machine stays the single source of

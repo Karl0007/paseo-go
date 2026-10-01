@@ -181,7 +181,7 @@ describe("useShellRowDragMenu KI-11 relay (ruling ②)", () => {
     expect(drag).toHaveBeenCalledTimes(1); // never a second drag() this touch
   });
 
-  it("press_out after the relay resets the stream; a fresh tap is not swallowed", () => {
+  it("press_out after the relay is inert; a fresh tap is not swallowed", () => {
     const { result } = setup();
     pressInAt(result);
     advance(250);
@@ -239,7 +239,10 @@ describe("useShellRowDragMenu scroll-lock guard (C20 device finding #2)", () => 
     expect(onGestureLockChange).toHaveBeenCalledTimes(2);
   });
 
-  it("keeps the lock across the menu open and the relay into dragging", () => {
+  it("keeps the lock across the menu open, the relay, AND the takeover press_out (B5-F15)", () => {
+    // The press_out that arrives when RNGH's pan activates mid-drag must NOT
+    // release the band — releasing it there re-enabled the refresh control
+    // while the finger was still pulling (the F15 hole; evidence/B5-GESTURE).
     const { result, onGestureLockChange } = lockSetup();
     pressInAt(result);
     advance(250); // armed + menu visible, still locked, no second call
@@ -247,8 +250,8 @@ describe("useShellRowDragMenu scroll-lock guard (C20 device finding #2)", () => 
     expect(onGestureLockChange).toHaveBeenCalledWith(true);
     moveBy(result, 11); // relay → dragging, still locked
     expect(onGestureLockChange).toHaveBeenCalledTimes(1);
-    pressOut(result);
-    expect(onGestureLockChange).toHaveBeenLastCalledWith(false);
+    pressOut(result); // RNGH takeover: inert — the band lives until drag_end
+    expect(onGestureLockChange).toHaveBeenCalledTimes(1);
   });
 
   it("a pre-arm scroll takeover never locks", () => {
@@ -271,10 +274,10 @@ describe("useShellRowDragMenu scroll-lock guard (C20 device finding #2)", () => 
   });
 });
 
-// R2-01 (FIX-A): after drag() the native RNGH stream owns the touch — no JS
-// press_out ever arrives, so the scroll lock must be releasable out-of-band by
-// the list's drop handler. The hook hands the screen a release in the SAME
-// frame as drag() (the onDragStart seam), the release runs the machine's
+// R2-01 (FIX-A): after drag() the native RNGH stream owns the touch — the JS
+// press_out it brings is inert (B5-F15), so the lock must be releasable out-of-
+// band by the list's drop handler. The hook hands the screen a release in the
+// SAME frame as drag() (the onDragStart seam), the release runs the machine's
 // drag_end edge (single source of truth — the screen never setState's the lock
 // itself), and the screen-side handoff consumes it exactly once per drop.
 describe("useShellRowDragMenu R2-01 out-of-band drag release", () => {

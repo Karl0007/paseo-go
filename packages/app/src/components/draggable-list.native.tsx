@@ -6,6 +6,7 @@ import DraggableFlatList, {
 } from "react-native-draggable-flatlist";
 import { useUnistyles } from "react-native-unistyles";
 import type { DraggableListProps, DraggableRenderItemInfo } from "./draggable-list.types";
+import { refreshControlPlan } from "./draggable-list.types";
 
 export type { DraggableListProps, DraggableRenderItemInfo };
 
@@ -31,6 +32,7 @@ export function DraggableList<T>({
   extraData,
   simultaneousGestureRef,
   gestureHostPresented,
+  refreshControlEnabled,
   waitFor,
   onDragBegin: onDragBeginProp,
   nestable = false,
@@ -81,25 +83,41 @@ export function DraggableList<T>({
     setIsDragging(false);
   }, []);
 
-  const showRefreshControl = Boolean(onRefresh) && (!isDragging || Boolean(refreshing));
+  // B5-PIN/B5-NOREFRESH: the control's presence depends ONLY on `onRefresh`
+  // (+ nestable) — dragging flips the native `enabled` VALUE, never the tree
+  // shape (unmounting here remounted every cell mid-drag; see refreshControlPlan).
+  const refreshPlan = refreshControlPlan({
+    onRefresh,
+    isDragging,
+    refreshing,
+    enabled: refreshControlEnabled,
+    nestable,
+  });
   const resolvedContainerStyle =
     containerStyle ?? (scrollEnabled ? SCROLL_ENABLED_FLEX_STYLE : undefined);
-  const shouldShowRefreshControl = showRefreshControl && !nestable;
   const ListComponent: typeof DraggableFlatList = (
     nestable ? (NestableDraggableFlatList as unknown) : DraggableFlatList
   ) as typeof DraggableFlatList;
 
   const refreshControl = useMemo(
     () =>
-      shouldShowRefreshControl ? (
+      refreshPlan.mounted ? (
         <RefreshControl
+          enabled={refreshPlan.enabled}
           refreshing={refreshing ?? false}
           onRefresh={onRefresh}
           tintColor={theme.colors.foregroundMuted}
           colors={refreshColors}
         />
       ) : undefined,
-    [shouldShowRefreshControl, refreshing, onRefresh, theme.colors.foregroundMuted, refreshColors],
+    [
+      refreshPlan.mounted,
+      refreshPlan.enabled,
+      refreshing,
+      onRefresh,
+      theme.colors.foregroundMuted,
+      refreshColors,
+    ],
   );
 
   return (

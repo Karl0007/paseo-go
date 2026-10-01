@@ -21,12 +21,14 @@
 // Ruling ③ (双向拖动不误触刷新): Android's SwipeRefreshLayout (RN RefreshControl)
 // intercepts a downward pull at the scroll top EVEN with scrollEnabled=false —
 // `ReactSwipeRefreshLayout.onInterceptTouchEvent` only asks `canChildScrollUp()`
-// (C20 device finding, re-read against RN source in the R4-09 复核), and the
-// official DraggableList wrapper only removes the control once the native drag has
-// begun — too late. `chatGestureBandProps` is the screen-side gate: the control
-// STAYS MOUNTED for the whole armed → menu → drag band (removing it is the F10
-// remount), `refreshing` is forced false, and the screen swallows the callback for
-// the band. A plain pull-down (never long-pressed, never armed) refreshes as usual.
+// (C20 device finding, re-read against RN source in the R4-09 复核). B5-NOREFRESH
+// (F15) closes the ruling's last holes: the control now goes NATIVELY DISABLED
+// (`enabled=false`, a value — never an unmount, the F10 lesson) for the whole
+// armed → menu → drag band, so it neither intercepts the pull nor shows its
+// spinner, and the wrapper's old drag-time unmount (which remounted every cell
+// mid-drag and killed the band it was guarding — the F14/F15 shared root cause,
+// evidence/B5-GESTURE) is gone. The screen's callback swallow stays as the
+// second line of defense. A plain pull-down refreshes as usual.
 import type { ShellAgentActions, ShellChatTarget } from "@/shell/shellAgentActions";
 
 /**
@@ -146,10 +148,24 @@ export function dispatchPinDrop(
  * shape. C20's device finding stands, and RN's source says why:
  * `ReactSwipeRefreshLayout.onInterceptTouchEvent` asks `canChildScrollUp()` and
  * never consults the ScrollView's `scrollEnabled` — at the scroll top a downward
- * pull IS intercepted even with scrolling locked. So `scrollEnabled={!gestureLive}`
- * freezes the list but does NOT suppress the refresh; the screen swallows the
- * callback for the whole armed → menu → drag band (`chats-screen-body.tsx`:
- * `gestureLiveRef` + `handleRefresh`), which changes no prop at all.
+ * pull IS intercepted even with scrolling locked.
+ *
+ * B5-NOREFRESH (F15) closed the two remaining holes in the R4-09 answer
+ * ("swallow the callback in handleRefresh"): (a) swallowing suppresses the
+ * RELOAD but never the native GESTURE — the SwipeRefreshLayout spinner still
+ * rode the pull (evidence/B5-GESTURE/11-f15-midpull.png); (b) the wrapper's
+ * old drag-time RefreshControl UNMOUNT remounted every cell at drag(), whose
+ * unmount cleanup released the band — `gestureLiveRef` read false for the
+ * rest of the very drag it was guarding (ReactNativeJS log: press_out 2-3ms
+ * after start_drag; a later release then went REFRESH-ALL). The lever that
+ * kills gesture AND spinner without a shape change is Android's
+ * `SwipeRefreshLayout.setEnabled(false)` — RN exposes it as the RefreshControl
+ * `enabled` prop. Hence `refreshEnabled: !gestureLive` below: OFF for the
+ * whole armed → menu → drag band (the control neither intercepts nor spins),
+ * ON the moment the band ends so a plain pull-down refreshes as usual. The
+ * handleRefresh swallow stays as the second line of defense (iOS ignores
+ * `enabled`; and a pull faster than the prop's commit can still start the
+ * native gesture before the disable lands — its callback is then swallowed).
  */
 export const CHATS_LIST_CONTAINER_STYLE: { flex: 1 } = { flex: 1 };
 
@@ -162,6 +178,7 @@ export function chatGestureBandProps<T extends () => void>(input: {
   refreshing: boolean;
   onRefresh: T;
   containerStyle: { flex: 1 };
+  refreshEnabled: boolean;
 } {
   return {
     // C20 device finding #2: the native ScrollView steals a vertical drag at
@@ -174,5 +191,8 @@ export function chatGestureBandProps<T extends () => void>(input: {
     // DEFINED in both states — presence is the remount surface (trigger ① above).
     onRefresh: input.onRefresh,
     containerStyle: CHATS_LIST_CONTAINER_STYLE,
+    // B5-F15: Android `RefreshControl enabled` — VALUE, not shape. The control
+    // stays mounted the whole band; it just cannot intercept or spin.
+    refreshEnabled: !input.gestureLive,
   };
 }

@@ -19,6 +19,7 @@ vi.mock("@react-native-async-storage/async-storage", () => {
   };
 });
 import { usePaseoGoPinsStore } from "@/shell/stores/pins";
+import { deriveChatSections, flattenChatSections } from "@/shell/chats/derive";
 import {
   CHATS_LIST_CONTAINER_STYLE,
   chatGestureBandProps,
@@ -240,7 +241,20 @@ describe("chatGestureBandProps (ruling ③ + B4-REGRESS F10)", () => {
       refreshing: false,
       onRefresh: handleRefresh,
       containerStyle: CHATS_LIST_CONTAINER_STYLE,
+      refreshEnabled: false,
     });
+  });
+
+  it("disables the control natively for the band, re-enables the moment it ends (B5-F15)", () => {
+    // The R4-09 swallow only stops the RELOAD — Android still raised its spinner
+    // mid-drag (evidence/B5-GESTURE/11-f15-midpull.png). `refreshEnabled` is the
+    // VALUE-channel kill switch (SwipeRefreshLayout.setEnabled): OFF for the
+    // whole armed → menu → drag band, ON outside it so the plain top pull-down
+    // still refreshes.
+    expect(band(true).refreshEnabled).toBe(false);
+    expect(band(true, true).refreshEnabled).toBe(false);
+    expect(band(false).refreshEnabled).toBe(true);
+    expect(band(false, true).refreshEnabled).toBe(true);
   });
 
   it("hands the SAME flex:1 container object to both states (F10 trigger ②, R4-19)", () => {
@@ -257,5 +271,146 @@ describe("chatGestureBandProps (ruling ③ + B4-REGRESS F10)", () => {
     expect(band(false).scrollEnabled).toBe(true);
     expect(band(false, true).refreshing).toBe(true);
     expect(band(false, false).refreshing).toBe(false);
+  });
+});
+
+// B5-PIN (F14 P1): the data-layer conservation contract. The device repro is
+// 非置顶项长按→拖到顶（置顶成功）→取消置顶 → 该项从列表消失; whatever the render-layer
+// mechanism turns out to be, the STORE + DERIVATION chain must never lose a row
+// across any pin↔unpin sequence. This drives the exact production chain —
+// derive → flatten → the library's drop splice (DraggableFlatList.onDragEnd's
+// `splice(from,1); splice(to,0,data[from])`) → decidePinDrop → dispatchPinDrop
+// against the REAL pins store and REAL actions → re-derive — and asserts after
+// every step: the visible row-key set equals the directory set (no 删而未插),
+// no duplicate FlatList keys, and pinnedIds stays duplicate-free.
+describe("pin↔unpin round-trip set conservation (B5-PIN/F14 regression)", () => {
+  interface Agent {
+    key: string;
+    serverId: string;
+    lastActivityAt: number;
+    attentionTimestamp: number | null;
+    bucket: "done";
+  }
+
+  const AGENT_KEYS = ["s1:a1", "s1:a2", "s1:a3", "s1:a4", "s1:a5", "s1:a6"];
+  const agents: Agent[] = AGENT_KEYS.map((key, i) => ({
+    key,
+    lastActivityAt: (i + 1) * 1000,
+    serverId: "s1",
+    attentionTimestamp: null,
+    bucket: "done" as const,
+  }));
+  const deriveInput = () => ({
+    agents,
+    archivedIds: [],
+    lastReadAt: {},
+    hostIds: ["s1"],
+    hostStatuses: new Map([["s1", "online" as const]]),
+  });
+
+  function visibleRows(): string[] {
+    const sections = deriveChatSections({
+      ...deriveInput(),
+      pinnedIds: usePaseoGoPinsStore.getState().pinnedIds,
+    });
+    return flattenChatSections(sections)
+      .filter((item) => item.type === "row")
+      .map((item) => item.key);
+  }
+
+  function assertConserved(step: string) {
+    const rows = visibleRows();
+    // No duplicate keys: a collision makes React/VirtualizedList silently drop
+    // one of the two cells — the classic "row vanished" renderer.
+    expect(new Set(rows).size, step).toBe(rows.length);
+    // Conservation: every directory agent is visible exactly once (all hosts
+    // online, nothing archived) — nothing deleted-without-reinsert.
+    expect(rows.map((key) => key.slice("row:".length)).sort(), step).toEqual(
+      [...AGENT_KEYS].sort(),
+    );
+    const pins = usePaseoGoPinsStore.getState().pinnedIds;
+    expect(new Set(pins).size, step).toBe(pins.length);
+  }
+
+  /** One library drop: splice the flat item from `from` to `to` exactly like
+   *  DraggableFlatList.onDragEnd does, then run the screen's handler pipeline. */
+  function dragDrop(droppedKey: string | null, to: number) {
+    const sections = deriveChatSections({
+      ...deriveInput(),
+      pinnedIds: usePaseoGoPinsStore.getState().pinnedIds,
+    });
+    const data = flattenChatSections(sections);
+    const from = data.findIndex((item) => item.key === `row:${droppedKey}`);
+    expect(from, `drag start row present: ${droppedKey}`).toBeGreaterThanOrEqual(0);
+    const newData = [...data];
+    const [moved] = newData.splice(from, 1);
+    newData.splice(Math.min(to, newData.length), 0, moved!);
+    const visibleRowKeys: string[] = [];
+    for (const item of newData) {
+      if (item.type === "row") visibleRowKeys.push(item.row.agent.key);
+    }
+    const { actions } = realActionsRef;
+    const decision = decidePinDrop({
+      droppedKey,
+      visibleRowKeys,
+      pinnedIds: usePaseoGoPinsStore.getState().pinnedIds,
+    });
+    dispatchPinDrop(decision, { actions, targetOf: targetOfKey });
+    return decision;
+  }
+
+  const realActionsRef = (() => {
+    const deps = {
+      t: (key: string) => key,
+      notify: vi.fn(),
+      reportError: vi.fn(),
+      getClient: vi.fn(() => null),
+      confirm: vi.fn(async () => true),
+      haptic: vi.fn(),
+    };
+    return { actions: createShellAgentActions(deps) };
+  })();
+
+  it("the card's exact repro: drag a row to the top (pins), menu-unpin, drag-out unpin — row set never changes", () => {
+    assertConserved("initial");
+
+    // 最旧的 非置顶项 s1:a1 拖到顶 → pin-at 0 → 置顶成功。
+    expect(dragDrop("s1:a1", 0)).toEqual({ kind: "pin-at", key: "s1:a1", index: 0 });
+    expect(usePaseoGoPinsStore.getState().pinnedIds).toContain("s1:a1");
+    assertConserved("after drag-pin");
+
+    // 取消置顶（菜单）→ 行必须回到 最近，绝不消失。
+    usePaseoGoPinsStore.getState().togglePin("s1:a1", false);
+    assertConserved("after menu-unpin");
+
+    // 再来一轮：置顶 → 拖出置顶组取消 → 守恒。
+    usePaseoGoPinsStore.getState().togglePin("s1:a1", true);
+    assertConserved("after menu-pin");
+    expect(dragDrop("s1:a1", 4).kind).toBe("unpin");
+    expect(usePaseoGoPinsStore.getState().pinnedIds).not.toContain("s1:a1");
+    assertConserved("after drag-unpin");
+  });
+
+  it("any seeded pin/unpin sequence (drag + menu, 300 steps) conserves the row set", () => {
+    let seed = 0x2f6e2b1;
+    const rand = (n: number) => {
+      seed = (seed * 1103515245 + 12345) & 0x7fffffff;
+      return seed % n;
+    };
+
+    for (let step = 0; step < 300; step += 1) {
+      const pick = AGENT_KEYS[rand(AGENT_KEYS.length)]!;
+      const roll = rand(4);
+      if (roll === 0) {
+        usePaseoGoPinsStore.getState().togglePin(pick, true);
+      } else if (roll === 1) {
+        usePaseoGoPinsStore.getState().togglePin(pick, false);
+      } else {
+        const rows = visibleRows();
+        const to = rand(rows.length);
+        dragDrop(pick, to);
+      }
+      assertConserved(`seeded step ${step} (roll=${roll} pick=${pick})`);
+    }
   });
 });

@@ -57,6 +57,54 @@ index 2abb4a2..8ca967f 100644
      outerScrollOffset?: Animated.SharedValue<number>;
      onAnimValInit?: (animVals: ReturnType<typeof useAnimatedValues>) => void;
      itemEnteringAnimation?: AnimateProps<Animated.View>["entering"];
+diff --git a/node_modules/react-native-draggable-flatlist/src/components/CellRendererComponent.tsx b/node_modules/react-native-draggable-flatlist/src/components/CellRendererComponent.tsx
+index e4e861a..ce17bea 100644
+--- a/node_modules/react-native-draggable-flatlist/src/components/CellRendererComponent.tsx
++++ b/node_modules/react-native-draggable-flatlist/src/components/CellRendererComponent.tsx
+@@ -10,6 +10,7 @@ import Animated, {
+   runOnUI,
+   useAnimatedStyle,
+   useSharedValue,
++  withTiming,
+ } from "react-native-reanimated";
+ import { useDraggableFlatListContext } from "../context/draggableFlatListContext";
+ import { isWeb } from "../constants";
+@@ -46,6 +47,7 @@ function CellRendererComponent<T>(props: Props<T>) {
+   const offset = useSharedValue(-1);
+   const size = useSharedValue(-1);
+   const heldTanslate = useSharedValue(0);
++  const holdReleased = useSharedValue(false);
+ 
+   const translate = useCellTranslate({
+     cellOffset: offset,
+@@ -60,8 +62,25 @@ function CellRendererComponent<T>(props: Props<T>) {
+     // the animated style may apply before the next paint, causing a flicker.
+     // Solution is to hold over the last animated value until the next onLayout.
+     // (Not required in web)
+-    if (translate.value && !isWeb) {
+-      heldTanslate.value = translate.value;
++    if (activeKey) {
++      holdReleased.value = false;
++      if (translate.value && !isWeb) {
++        heldTanslate.value = translate.value;
++      }
++    } else if (
++      !isWeb &&
++      !holdReleased.value &&
++      heldTanslate.value !== 0
++    ) {
++      // PASEO-B5: the hold only ever resets in onCellLayout — a cell whose
++      // frame does NOT change (a drop the parent declined to persist, or a
++      // cancelled drag) kept its mid-drag offset forever: the row rendered
++      // displaced over its neighbour and left a gap at its old slot (the
++      // "row vanished after a pin round-trip" family). With no live drag,
++      // decay the hold back to zero ONCE; cells that DID move re-layout and
++      // pin it to 0 outright, so reordered drops are unaffected.
++      holdReleased.value = true;
++      heldTanslate.value = withTiming(0, { duration: 160 });
+     }
+     const t = activeKey ? translate.value : heldTanslate.value;
+     return {
 diff --git a/node_modules/react-native-draggable-flatlist/src/components/DraggableFlatList.tsx b/node_modules/react-native-draggable-flatlist/src/components/DraggableFlatList.tsx
 index 7c88afc..6d5719c 100644
 --- a/node_modules/react-native-draggable-flatlist/src/components/DraggableFlatList.tsx
@@ -84,13 +132,13 @@ index 7c88afc..6d5719c 100644
 +    sessionId: number;
 +    index: number;
 +  } | null>(null);
-
+ 
    const {
      dragHitSlop = DEFAULT_PROPS.dragHitSlop,
 @@ -144,19 +156,88 @@ function DraggableFlatListInner<T>(props: DraggableFlatListProps<T>) {
      });
    }, [props.data, keyExtractor, keyToIndexRef]);
-
+ 
 +  const onDragCancel = useStableCallback((sessionId: number, index: number) => {
 +    if (activeDragRef.current?.sessionId !== sessionId) return;
 +    activeDragRef.current = null;
@@ -164,7 +212,7 @@ index 7c88afc..6d5719c 100644
 -      activeCellOffset.value = cellData.measurements.offset;
 -      activeCellSize.value = cellData.measurements.size;
 -    }
-
+ 
      const { onDragBegin } = propsRef.current;
      if (index !== undefined) {
 -      spacerIndexAnim.value = index;
@@ -186,7 +234,7 @@ index 7c88afc..6d5719c 100644
 @@ -218,8 +299,25 @@ function DraggableFlatListInner<T>(props: DraggableFlatListProps<T>) {
      props.onRelease?.(index);
    });
-
+ 
 +  const finalizeCancelledDrag = () => {
 +    "worklet";
 +    const activeIndex = activeIndexAnim.value;
@@ -208,12 +256,12 @@ index 7c88afc..6d5719c 100644
 +      if (activeDragRef.current?.sessionId !== sessionId) return;
 +      activeDragRef.current = null;
        const { onDragEnd, data } = props;
-
+ 
        const newData = [...data];
 @@ -238,26 +336,6 @@ function DraggableFlatListInner<T>(props: DraggableFlatListProps<T>) {
      props.onPlaceholderIndexChange?.(index);
    });
-
+ 
 -  // Handle case where user ends drag without moving their finger.
 -  useAnimatedReaction(
 -    () => {
@@ -239,13 +287,13 @@ index 7c88afc..6d5719c 100644
        return spacerIndexAnim.value;
 @@ -271,11 +349,21 @@ function DraggableFlatListInner<T>(props: DraggableFlatListProps<T>) {
    );
-
+ 
    const gestureDisabled = useSharedValue(false);
 +  const touchStartX = useSharedValue(0);
 +  const touchStartY = useSharedValue(0);
 +  const manualPanActivated = useSharedValue(false);
 +  const coordinatesDragWithExternalGesture = Boolean(props.simultaneousHandlers);
-
+ 
 -  const panGesture = Gesture.Pan()
 +  let panGesture = Gesture.Pan()
      .onBegin((evt) => {
@@ -278,7 +326,7 @@ index 7c88afc..6d5719c 100644
        isTouchActiveNative.value = false;
        const translation = horizontalAnim.value
 @@ -299,6 +394,7 @@ function DraggableFlatListInner<T>(props: DraggableFlatListProps<T>) {
-
+ 
        // Only call onDragEnd if actually dragging a cell
        if (activeIndexAnim.value === -1 || disabled.value) return;
 +      terminalHandled.value = true;
@@ -353,7 +401,7 @@ index 7c88afc..6d5719c 100644
        // just after the finger lifts.
 @@ -324,7 +470,9 @@ function DraggableFlatListInner<T>(props: DraggableFlatListProps<T>) {
      });
-
+ 
    if (dragHitSlop) panGesture.hitSlop(dragHitSlop);
 -  if (activationDistanceProp) {
 +  if (coordinatesDragWithExternalGesture) {
@@ -381,7 +429,7 @@ index 7c88afc..6d5719c 100644
 +    props.dragGestureHostPresented === false
 +      ? Gesture.Simultaneous(panGesture, Gesture.Manual().enabled(false))
 +      : panGesture;
-
+ 
    const onScroll = useStableCallback((scrollOffset: number) => {
      props.onScrollOffsetChange?.(scrollOffset);
 @@ -373,8 +536,9 @@ function DraggableFlatListInner<T>(props: DraggableFlatListProps<T>) {
@@ -408,17 +456,17 @@ index 1559352..33eb5de 100644
    useSharedValue,
 @@ -48,7 +48,7 @@ function NestableDraggableFlatListInner<T>(
    });
-
+ 
    const onListContainerLayout = useStableCallback(async ({ containerRef }) => {
 -    const nodeHandle = findNodeHandle(scrollableRef.current);
 +    const nodeHandle = scrollableRef.current;
-
+ 
      const onSuccess = (_x: number, y: number) => {
        listVerticalOffset.value = y;
 @@ -74,6 +74,10 @@ function NestableDraggableFlatListInner<T>(
      }
    );
-
+ 
 +  const onDragTerminate = useStableCallback(() => {
 +    setOuterScrollEnabled(true);
 +  });

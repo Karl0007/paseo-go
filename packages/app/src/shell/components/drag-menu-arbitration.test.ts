@@ -168,11 +168,19 @@ describe("drag-menu-arbitration: C20 menu→drag relay", () => {
     }
   });
 
-  it("press_out after the relay leaves the row dragging-clean: idle, press swallowed", () => {
-    const step = stepRowGesture(run([{ type: "press_in" }, armTick(), menuTick(), move(30)]), {
-      type: "press_out",
-    });
-    expect(step.state).toEqual({ phase: "idle", didLongPress: true });
+  it("press_out after the relay is INERT — the band ends only at drag_end (B5-F15)", () => {
+    // Device finding (evidence/B5-GESTURE): the JS press_out that follows the
+    // relay is RNGH's pan taking the stream over, not the finger lifting. The
+    // OLD exit-to-idle here re-enabled the refresh control mid-drag; Android
+    // then intercepted the live pull, cancelled the pan (drop lost, library
+    // state stranded — the F14 visual) and the guard was dead (the F15 hole).
+    const dragging = run([{ type: "press_in" }, armTick(), menuTick(), move(30)]);
+    const step = stepRowGesture(dragging, { type: "press_out" });
+    expect(step.state).toBe(dragging);
+    expect(step.effects).toEqual([]);
+    // The drop handler's drag_end stays the one terminator.
+    const end = stepRowGesture(step.state, { type: "drag_end" });
+    expect(end.state).toEqual({ phase: "idle", didLongPress: true });
   });
 });
 
@@ -213,11 +221,11 @@ function menuOpenState(): RowGestureState {
 }
 
 // R2-01 (FIX-A): once drag() has lifted the row, RNGH owns the stream natively —
-// the JS press_out never arrives (the hook's own header documents the takeover).
-// The list's drop handler therefore feeds a band-out `drag_end` release into the
-// machine; without it the phase stays `dragging` and the screen's scroll lock is
-// stranded forever. dragging is the ONLY phase that consumes it — a stray drop
-// must never kill a live press/arm/menu gesture.
+// the JS press_out that does arrive at pan takeover is inert (B5-F15), so the
+// list's drop handler's band-out `drag_end` is the dragging phase's only exit;
+// without it the phase stays `dragging` and the screen's scroll lock holds until
+// the next press_in re-owns the machine. dragging is the ONLY phase that
+// consumes drag_end — a stray drop must never kill a live press/arm/menu gesture.
 describe("drag-menu-arbitration: R2-01 out-of-band drag_end", () => {
   it("drag_end releases the dragging touch to idle, keeping the press swallow", () => {
     const dragging = run([{ type: "press_in" }, armTick(), move(9)]);
