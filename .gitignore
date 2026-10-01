@@ -93,7 +93,7 @@ app.json
 
 # Heap snapshots dumped by --heapsnapshot-near-heap-limit; keep them for debugging.
 *.heapsnapshot
-paseo-go/evidence/
+evidence/
 .tmp/
 packages/app/.tmp/
 packages/app/packages/
