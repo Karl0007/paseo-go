@@ -85,6 +85,10 @@
     "ownership": {
       "badge": "External",
       "badgeActive": "External · running",
+      "state": {
+        "native": "Native",
+        "unknown": "Unknown"
+      },
       "sendTitle": "This session may be running externally",
       "sendBody": "This session may be running in an external terminal. Continuing will start a new process from this session, which can fork the conversation.",
       "sendBodyCodex": "This session may be running in an external terminal. Nothing is lost, but the other side won't see this message.",

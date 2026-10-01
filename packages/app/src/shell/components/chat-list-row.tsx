@@ -76,8 +76,8 @@ import type { ShellAgentActions, ShellChatTarget } from "@/shell/shellAgentActio
 import { resolveProjectPlacement } from "@/utils/project-placement";
 import type { SidebarStateBucket } from "@/utils/sidebar-agent-state";
 import { isImportedProviderSession } from "@getpaseo/protocol/agent-labels";
+import { ownershipPresentation } from "@/shell/chats/ownership";
 import { OwnershipBadge } from "@/shell/components/ownership-badge";
-import { OWNERSHIP_BADGE_LABEL_KEY, ownershipBadgeKind } from "@/shell/chats/ownership";
 
 /** The derivation input widened with the live agent payload the row renders. */
 export interface ShellChatAgent {
@@ -460,10 +460,11 @@ function ChatRowInner({
   );
 
   const activityLabelKey = ACTIVITY_LABEL_KEY[agent.bucket];
-  // B4-OWNERSHIP-UI (ruling 14): the 「外部」 pill on the title line. The badge
-  // facts ride the COMPAT(agentOwnership) passthrough — a pre-go.7 daemon's
-  // undefined pair reads as `none` (no badge), so old hosts change nothing here.
-  const ownershipKind = ownershipBadgeKind({
+  // B5-OWNVIS (F16/D19, 用户拍板): the ownership pill on the title line is now
+  // ALWAYS there — 原生/外部/未知 (B4 rendered only the 外部 pair). The facts ride
+  // the COMPAT(agentOwnership) passthrough; a pre-go.7 daemon's undefined pair
+  // reads as 未知, which is the honest word for "an old host never told us".
+  const ownershipView = ownershipPresentation({
     ownership: agent.agent.ownership,
     externalLooksActive: agent.agent.externalLooksActive,
   });
@@ -478,7 +479,7 @@ function ChatRowInner({
     unread ? t("chats.a11yUnread") : null,
     activityLabelKey ? t(activityLabelKey) : null,
     agent.bucket === "running" ? t("chats.activity.running") : null,
-    ownershipKind ? t(OWNERSHIP_BADGE_LABEL_KEY[ownershipKind]) : null,
+    t(ownershipView.labelKey),
     dimmed ? t("chats.hostStatus.offline") : null,
   ]
     .filter(Boolean)
@@ -528,13 +529,11 @@ function ChatRowInner({
             <Text style={[styles.title, unread && styles.titleUnread]} numberOfLines={1}>
               {displayTitle}
             </Text>
-            {ownershipKind !== null ? (
-              <OwnershipBadge
-                ownership={agent.agent.ownership}
-                externalLooksActive={agent.agent.externalLooksActive}
-                testID={`shell-chat-ownership-${agent.key}`}
-              />
-            ) : null}
+            <OwnershipBadge
+              ownership={agent.agent.ownership}
+              externalLooksActive={agent.agent.externalLooksActive}
+              testID={`shell-chat-ownership-${agent.key}`}
+            />
             {showSpinner ? (
               <RunningSpinner
                 size={RUNNING_SPINNER_SIZE}

@@ -535,9 +535,12 @@ function HeaderRowsText({
         >
           {rows.primary}
         </Text>
-        {/* B4-OWNERSHIP-UI (ruling 14): same 「外部」 pill as the chat row, riding
-            the focused agent's COMPAT(agentOwnership) pair; the status light keeps
-            the far-right slot. */}
+        {/* B5-OWNVIS (F16/D19, 用户拍板): the ownership pill is 常驻 on the capsule —
+            原生/外部/未知 for the focused agent's COMPAT(agentOwnership) pair, the
+            same presentation the chat row wears. Only shell-sourced session screens
+            float this bar at all (visibility.ts gate), so the pill inherits the
+            capsule's 「仅壳来源会话屏」 rule verbatim. The status light keeps the
+            far-right slot. */}
         <OwnershipBadge
           ownership={agent.ownership}
           externalLooksActive={agent.externalLooksActive}
