@@ -68,6 +68,14 @@ const DEFAULT_MAX_NEW_ATTACHMENTS_PER_SWEEP = 32;
 /** B6-OWN-HEAL: gap between attaches inside one batch (slow-mount throttle). */
 const DEFAULT_ATTACH_THROTTLE_MS = 25;
 
+/**
+ * B6-REVIEW (RevB6 finding 1): how many candidates one discovery pass may *try*, as a
+ * multiple of the success budget. Since the cap counts successful attaches, an
+ * attempt-less pass would walk a store full of unresolvable rows end to end looking
+ * for winners; 2× keeps one pass bounded and still steps over a run of dead rows.
+ */
+const MAX_DISCOVERY_ATTEMPT_MULTIPLIER = 2;
+
 export interface TranscriptWatchCandidate {
   agentId: string;
   provider: AgentProvider;
@@ -153,6 +161,12 @@ export class TranscriptWatchService {
   ) => Promise<void>;
   private entrySeq = 0;
   private readonly entries = new Map<string, WatchEntry>();
+  /**
+   * B6-REVIEW: candidates whose transcript resolution came back empty. See
+   * {@link discover} for why the negative answer has to be remembered, and
+   * {@link detach} / {@link runSweep} for when it is forgotten.
+   */
+  private readonly unresolvable = new Set<string>();
   private sweepTimer: ReturnType<typeof setInterval> | null = null;
   /** The running pass, or null while idle. See {@link sweep} / {@link tick}. */
   private pass: Promise<void> | null = null;
@@ -236,6 +250,11 @@ export class TranscriptWatchService {
       env: this.env,
     });
     if (!transcriptPath) {
+      // B6-REVIEW: a permanent answer for opencode (shared database, no transcript
+      // file) and for any handle whose identity cannot be a transcript path (R4-31).
+      // Remembered so discovery stops paying for it; forgotten when the candidate
+      // leaves the watch set or the queue, since a worktree or rollout can come back.
+      this.unresolvable.add(candidate.agentId);
       return null;
     }
     const entry: WatchEntry = {
@@ -259,6 +278,10 @@ export class TranscriptWatchService {
 
   /** Stop observing: paseo took the session back, or the agent left the directory. */
   detach(agentId: string): void {
+    // B6-REVIEW: leaving the watch set forgets the negative resolution as well —
+    // before the entry lookup, because an unresolvable candidate never had an entry.
+    // `attach` routes through here, so an explicit attach always re-asks the provider.
+    this.unresolvable.delete(agentId);
     const entry = this.entries.get(agentId);
     if (!entry) {
       return;
@@ -322,12 +345,28 @@ export class TranscriptWatchService {
           undiscovered.push(candidate);
         }
       }
+      // B6-REVIEW: the unresolvable memory only covers rows still in the queue. A
+      // candidate that left it — dropped from the store, or aged past the retention
+      // window — earns a fresh attempt if it shows up again, because its transcript
+      // path may exist by then. Also bounds the set at `eligible.size`.
+      for (const agentId of Array.from(this.unresolvable)) {
+        if (!eligible.has(agentId)) {
+          this.unresolvable.delete(agentId);
+        }
+      }
       await this.discover(undiscovered);
       for (const agentId of Array.from(this.entries.keys())) {
         if (!eligible.has(agentId)) {
           this.detach(agentId);
         }
       }
+      // B6-REVIEW (RevB6 finding 1, minor): discovery keeps its place IN FRONT of the
+      // stat pass. A full batch delays the already-watched cursors by up to 31 throttle
+      // gaps plus one resolve each; that price buys the two properties the order was
+      // holding — an entry attached this pass is stat-checked this pass too, which is
+      // what digests a multi-megabyte backlog inside one pass (R4-23) instead of
+      // leaving its tail for the next interval — and the delay is now bounded by
+      // *successful* attaches: the doomed batch that ate ~970ms every minute is gone.
       for (const agentId of Array.from(this.entries.keys())) {
         await this.check(agentId);
       }
@@ -344,37 +383,60 @@ export class TranscriptWatchService {
    * mount, provider with no transcript knowledge) must not cost the rest their
    * observation. Same posture as the list projection's (B5-REVIEW S2/S3): a read
    * failure is logged and skipped, never thrown at the caller.
+   *
+   * B6-REVIEW (RevB6 finding 1): the cap counts successful attaches, not attempts.
+   * Counting attempts let a wall of candidates whose transcript cannot be resolved —
+   * opencode by design, a deleted claude worktree, an omp/pi handle that no longer
+   * looks like a transcript path, a rolled-away codex rollout, a record whose
+   * `updatedAt` failed to parse and fell back to `Date.now()` (so it sorts first every
+   * pass) — permanently own the newest-N window: every pass retried the same doomed
+   * batch and every observable session behind it starved, which is the exact F19
+   * starvation this batch exists to remove. An empty resolution is remembered in
+   * {@link unresolvable} and costs its one attempt ever; a resolution that THREW is
+   * not, because a dead mount comes back. Attempts stay bounded by
+   * {@link MAX_DISCOVERY_ATTEMPT_MULTIPLIER} so the memory can never turn into an
+   * unbounded per-pass scan.
    */
   private async discover(undiscovered: TranscriptWatchCandidate[]): Promise<void> {
     if (undiscovered.length === 0) {
       return;
     }
     undiscovered.sort((a, b) => b.updatedAtMs - a.updatedAtMs);
-    const batch = undiscovered.slice(0, this.maxNewAttachmentsPerSweep);
-    for (const [index, candidate] of batch.entries()) {
-      if (this.stopped) {
+    const maxAttempts = this.maxNewAttachmentsPerSweep * MAX_DISCOVERY_ATTEMPT_MULTIPLIER;
+    let attached = 0;
+    let attempted = 0;
+    for (const candidate of undiscovered) {
+      if (this.stopped || attached >= this.maxNewAttachmentsPerSweep || attempted >= maxAttempts) {
         return;
       }
+      if (this.unresolvable.has(candidate.agentId)) {
+        continue;
+      }
+      // The gap is paid before each attempt after the first: same throttle as the old
+      // batch, and never paid for a candidate this pass is not going to try.
+      if (this.attachThrottleMs > 0 && attempted > 0) {
+        await delay(this.attachThrottleMs);
+      }
+      attempted += 1;
       try {
-        const attached = await this.attach(candidate);
-        // R4-03: hand a freshly established baseline to the caller for persistence;
-        // `attach()` callers that already persist (the manager's release path) go
-        // through their own commit, not this hook.
-        if (
-          attached &&
-          attached.baselineBytes !== null &&
-          attached.baselineBytes !== candidate.baselineBytes
-        ) {
-          await this.onAttached?.(candidate.agentId, attached);
+        const attachment = await this.attach(candidate);
+        if (attachment) {
+          attached += 1;
+          // R4-03: hand a freshly established baseline to the caller for persistence;
+          // `attach()` callers that already persist (the manager's release path) go
+          // through their own commit, not this hook.
+          if (
+            attachment.baselineBytes !== null &&
+            attachment.baselineBytes !== candidate.baselineBytes
+          ) {
+            await this.onAttached?.(candidate.agentId, attachment);
+          }
         }
       } catch (error) {
         this.logger.warn(
           { err: error, agentId: candidate.agentId, provider: candidate.provider },
           "Transcript watch discovery attach failed; relying on later sweeps",
         );
-      }
-      if (this.attachThrottleMs > 0 && index < batch.length - 1) {
-        await delay(this.attachThrottleMs);
       }
     }
   }

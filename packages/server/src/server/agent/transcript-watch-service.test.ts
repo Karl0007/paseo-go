@@ -1,10 +1,11 @@
 import { appendFileSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { createTestLogger } from "../../test-utils/test-logger.js";
 import type { AgentPersistenceHandle, AgentProvider } from "./agent-sdk-types.js";
+import type { ProviderTranscriptInput } from "./provider-transcript.js";
 import {
   TranscriptWatchService,
   type TranscriptAttachment,
@@ -22,6 +23,32 @@ import {
 // detector is a `sweep()` the test calls itself. The one exception is the watcher
 // fast-path test, which exists precisely to prove the OS watcher fires; it awaits
 // the callback rather than a duration.
+
+// B6-REVIEW (RevB6 finding 1): the discovery memory set promises that a doomed
+// transcript resolution is paid ONCE per queued candidate. From the outside that is
+// invisible — `attach()` answers null either way — so resolution is spied on with a
+// passthrough (the session.test.ts pattern): behaviour untouched, calls countable.
+const resolveAttempts: string[] = [];
+
+vi.mock("./provider-transcript.js", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("./provider-transcript.js")>();
+  return {
+    ...actual,
+    resolveProviderTranscriptPath: async (input: ProviderTranscriptInput) => {
+      resolveAttempts.push(input.persistence?.nativeHandle ?? `${input.provider}:<none>`);
+      return actual.resolveProviderTranscriptPath(input);
+    },
+  };
+});
+
+/** How many passes tried to locate this candidate's transcript. */
+function resolutionAttemptsFor(candidate: TranscriptWatchCandidate): number {
+  const handle = candidate.persistence?.nativeHandle;
+  if (!handle) {
+    return 0;
+  }
+  return resolveAttempts.filter((attempt) => attempt === handle).length;
+}
 
 const OMP_PROVIDER: AgentProvider = "omp";
 
@@ -364,6 +391,100 @@ describe("startup discovery batch (B6-OWN-HEAL)", () => {
 
     await harness.service.sweep();
     expect(harness.service.watchedAgentIds).toEqual(["agent-seen"]);
+  });
+
+  it("does not let unresolvable candidates starve the sessions behind them", async () => {
+    // RevB6 finding 1: the cap counted *attempts*, so a wall of candidates whose
+    // transcript cannot be resolved (opencode has no transcript file by design, a
+    // deleted claude worktree, a stale omp handle) retook the newest-N window on
+    // every pass and the observable rows behind them were never watched — the
+    // live-writer axis stayed dead for exactly the sessions this batch heals.
+    const blind = Array.from({ length: 5 }, (_, index) =>
+      storedAgent(`agent-blind-${index}`, Date.now() - index, "opencode"),
+    );
+    const observable = [
+      storedAgent("agent-seen-A", Date.now() - 1_000),
+      storedAgent("agent-seen-B", Date.now() - 2_000),
+    ];
+    const harness = createHarness({
+      candidates: async () => [...blind, ...observable],
+      maxNewAttachmentsPerSweep: 2,
+    });
+
+    for (let pass = 0; pass < 4; pass += 1) {
+      await harness.service.sweep();
+    }
+    expect(harness.service.watchedAgentIds).toEqual(["agent-seen-A", "agent-seen-B"]);
+  });
+
+  it("pays a doomed transcript resolution once instead of every pass", async () => {
+    const blind = storedAgent("agent-blind-once", Date.now(), "opencode");
+    const harness = createHarness({ candidates: async () => [blind] });
+
+    await harness.service.sweep();
+    expect(resolutionAttemptsFor(blind)).toBe(1);
+
+    // Pre-fix every pass re-resolved the same doomed batch — ~775ms of attach
+    // throttle per minute, forever, for candidates that can never resolve.
+    await harness.service.sweep();
+    await harness.service.sweep();
+    expect(resolutionAttemptsFor(blind)).toBe(1);
+  });
+
+  it("bounds one pass's scan even when nothing resolves", async () => {
+    const blind = Array.from({ length: 10 }, (_, index) =>
+      storedAgent(`agent-blind-cap-${index}`, Date.now() - index, "opencode"),
+    );
+    const harness = createHarness({
+      candidates: async () => blind,
+      maxNewAttachmentsPerSweep: 2,
+    });
+
+    // Success budget 2 ⇒ attempt budget 4 (2×): a pass may not walk the whole store
+    // hunting for winners, yet it still advances, because every doomed row is tried
+    // exactly once ever. Three passes cover ten.
+    const before = resolveAttempts.length;
+    await harness.service.sweep();
+    expect(resolveAttempts.length - before).toBe(4);
+
+    for (let pass = 0; pass < 3; pass += 1) {
+      await harness.service.sweep();
+    }
+    expect(resolveAttempts.length - before).toBe(10);
+  });
+
+  it("forgets a candidate that left the queue — its transcript may exist by now", async () => {
+    let listed = true;
+    const blind = storedAgent("agent-blind-return", Date.now(), "opencode");
+    const harness = createHarness({ candidates: async () => (listed ? [blind] : []) });
+
+    await harness.service.sweep();
+    expect(resolutionAttemptsFor(blind)).toBe(1);
+
+    // Out of the store (or out of the retention window) ⇒ the negative answer is
+    // dropped, so a session resumed later gets a fresh discovery attempt.
+    listed = false;
+    await harness.service.sweep();
+    listed = true;
+    await harness.service.sweep();
+    expect(resolutionAttemptsFor(blind)).toBe(2);
+  });
+
+  it("forgets a candidate on detach", async () => {
+    const blind = storedAgent("agent-blind-detach", Date.now(), "opencode");
+    const harness = createHarness({ candidates: async () => [blind] });
+
+    await harness.service.sweep();
+    expect(resolutionAttemptsFor(blind)).toBe(1);
+
+    // Detaching forgets the negative answer — the path may exist by the next pass.
+    harness.service.detach("agent-blind-detach");
+    await harness.service.sweep();
+    expect(resolutionAttemptsFor(blind)).toBe(2);
+
+    // ...and the fresh answer is remembered again, not retried every pass.
+    await harness.service.sweep();
+    expect(resolutionAttemptsFor(blind)).toBe(2);
   });
 
   it("survives one candidate's failed handoff instead of aborting the batch", async () => {
