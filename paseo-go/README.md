@@ -1,7 +1,7 @@
 # Paseo Go — 接手入口（先读这页）
 
-> 手机优先的 Paseo 壳 app。当前状态：**批次五已交付 v0.10.2-go.8**（生产 daemon 同步 go.8）——标题=项目(worktree)/备注-only、小字恒显、所有权三态处处可见（列表标题后+会话页顶部）、导入页=resume 全量+已导入/已归档徽标、置顶往返不丢项、长按拖动不误触刷新；批次四微信化对话栏/单行顶栏/横滑切页/转场动画与 M1-M4 发布链全就绪。分支 `paseo-go/v0.1.0`。
-> 发布物：Releases `v0.10.2-go.8` = 22 资产（CLI win32=`850d170a…`/linux + APK sha256=`7a74bd10…d6b9`（本机出，五帧装机验证）+ desktop win/linux + 全 sha256 表 + latest 指针）。生产 daemon=`0.10.2-go.8`（升级仪式见 RELEASE.md，回滚件 go.7 在 .dev/）。
+> 手机优先的 Paseo 壳 app。当前状态：**批次六已交付 v0.10.2-go.9**（生产 daemon 同步 go.9）——列表标题=项目(worktree) 默认+备注只认壳重命名、所有权 pill 出生轴+活写者自愈（重启后全「未知」数秒清零）、导入页=resume 全量+已导入/已归档徽标、小字恒显、置顶往返不丢项、长按拖动不误触刷新；批次四微信化对话栏/单行顶栏与 M1-M4 发布链全就绪。分支 `paseo-go/v0.1.0`。
+> 发布物：Releases `v0.10.2-go.9` = 22 资产（CLI win32=`ee7787e4…`/linux + APK sha256=`5644091f…e6d5`（本机出，自愈前后帧实锤）+ desktop win/linux + 全 sha256 表 + latest 指针）。生产 daemon=`0.10.2-go.9`（升级/回滚仪式+清洁房部署=DEPLOY.md；回滚件 go.8 sha `850d170a…` 在 .dev/）。
 > 公开镜像：`github.com/Karl0007/paseo-go`（单向重放，无证据历史；同步工具 `release/make-public-mirror.sh`）。
 > 开放项：①置顶拖拽真人手指复验（ACCEPTANCE §5 首行，自动化 26 样本已全绿）；②语音端到端待用户部署 STT/TTS 端点（VOICE-DEPLOY.md）；③Q10 平板设计事后审（预授权落地，留档待审）。
 
