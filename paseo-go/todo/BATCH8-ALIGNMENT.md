@@ -32,3 +32,16 @@
 - **F22 拍板方向**：三态=语义色浅染底+同系深字（原生绿/外部琥珀/未知石板灰），明暗主题双套，禁高饱和大块。
 - **F23 拍板方向**：导入行版式对齐壳会话行；徽标优先级 **已归档 > 已导入**（归档态盖过导入态）。
 - **F24 处置**：立案诊断+修复卡（口径 a+c 组合为默认推荐，待用户确认）。
+
+## F25 原生→未知回跳（2026-10-02 09:4x，只读定位=已闭合，未修）
+
+**症状**：本会话（live，转圈中）pill 先「原生」、下拉刷新后回「未知」。
+
+**根因链（静态实锤）**：
+
+1. 列表首载/活体事件路径带两轴（agent_update 全 payload、fetch 全量 entries 均含 ownership/origin）→ pill 正确。
+2. 客户端 **replica-cache（持久化快照缓存）的 serializeAgent 白名单不含 ownership/externalLooksActive/origin**（replica-cache/index.ts:607-661 通篇无此三键；agent-snapshots.ts:153 注释自认「NOT projected back out by projectAgentSnapshot」）。
+3. 刷新路径经 replica 缓存回水化（deserializeAgent 产出的 Agent 无两轴）+ directory-sync 代际游标下服务端**空增量**不再重发全量 → 两轴就此丢失 → pill 落「未知」。
+4. B6-OWN-HEAL 当时把「不回投 strict replica cache」记为「冷缓存短暂未知」——**低估了**：不止冷启动，每次经缓存回水化的刷新都会回跳，live agent 也中招。
+
+**修复方向（待拍板后拆卡）**：serializeAgent 白名单+StoredAgent 类型+deserializeAgent/projectAgentSnapshot 补三键（纯客户端）；回归测=「带两轴 agent 过一遍缓存 round-trip 后字段仍在」+真机刷新不回跳帧。
