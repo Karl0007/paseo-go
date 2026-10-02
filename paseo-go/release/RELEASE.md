@@ -1,3 +1,14 @@
+# Paseo Go v0.10.2-go.11 落档（批次八发布，2026-10-02）
+
+- 内容=批次八 13 卡+review 14 卡全闭：微信行版式（时间右缘）/pill 三态染色/导入屏版式对齐+归档优先/claimedTotal 全量消歧+cwd 归一/replica-cache 两轴不回跳/横滑环切页+堆叠页全宽返回/文件页三段横滑（永不回卷，边界级联返回）/watcher 顺 omp resume 链正向迁移。review 轮抓到并修复 2 个逃逸 P1：F27 全宽返回此前**所有堆叠屏从未生效**（Portal 兄弟层收不到触点→(detail) 布局根重写）、workspace/me 换页动画未挂 surfaceStyle。
+- VERSION commit=`5152c6726`（stamp 链源）；tag `v0.10.2-go.11`（annotated，镜像锚 b97149f≡dev 5152c6726）。
+- 本机 APK sha256=`90bd0c415d727a2b0db9fd650fa6286a54b215f85ef50b0cf6f4163b95aac6d3`（105,779,256 B；go.9 prebuild 树复用=原生零差异；hbc stamp go.11×1/919c737c×1）。装机 Success（首装挂 3min=本机 adb server 僵死复现，kill-server 愈，与包无关）。帧 evidence/B11-RELEASE/01-05（关于页 stamp 实拍+a11y 双证；B8 观感帧 pill 台账 原生×12/外部×6/外部·运行中×2）。
+- 镜像 23 patches `am --keep-cr` 全过；树对账 EMPTY（ls-tree -r 全量 5377≡5377 含 mode+blob）；ff push `f2367c5..b97149f`。
+- CI run=`36994121545`：meta/CLI×2/desktop×2 全绿；APK job 红=16GB runner 驱逐七连（预期红）。先手建 release+挂本机 APK+sidecar → assemble=`36996234847` 绿（WIN-ZIP-MANIFEST-OK×3；body 全 sha：win32 CLI=`0c0b1494…e3c85`、APK≡本机；22 资产=go.9 同构）。
+- **生产 go.9→go.11**：`.dev/go11-cutover.ps1` 走 hub persistent（会话外纪律=go.7 教训）。18:38:16 BEGIN（双闸：目标 `0c0b1494…` + 回滚件 go.9 RB-SHA OK）→ INSTALLED 18:40:55 → HEALTH-OK 18:41:18 **实停机 181.9s** → 自检重试环 **#2 命中**（go.9 加的 provider 预热重试生效）→ DONE OK 18:41:39。**无回滚**；官方 CLI 兼容复跑绿。
+- 兼容性：协议纯增（claimedTotal optional），新旧客户端↔新旧 daemon 双向安全（说明行/cwd 归一自动沉默）。
+- 坑账：发布 agent 会话在切机完成后被回收（切机=持久 job 免疫，设计正确），本节由编排者接管补记；门禁首跑小写盘符 `c:/` 致 vitest 双实例 695 文件假红（BUILD.md 已知问题表已补）。
+
 # Paseo Go v0.10.2-go.10 落档（客户端 hotfix 线，2026-10-02）
 
 > 流水线同 go.9：tag `v0.10.2-go.10` → `fork-release.yml` → Releases 唯一分发源。GitHub: https://github.com/Karl0007/paseo-go/releases/tag/v0.10.2-go.10

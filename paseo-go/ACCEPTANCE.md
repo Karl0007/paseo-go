@@ -326,3 +326,22 @@
 - ✅ **F20 更新横幅压状态栏**（`bb4f595af`）：banner paddingTop=insets.top+SPACING[2]（壳正册 safe-area），流内下推不变；组件测 5 例+真机 uiautomator 硬证（文案 top y=88>状态栏带 72）。单文件布局修+测+帧=编排者自审替代 review 轮。
 - 发布=**v0.10.2-go.10 纯客户端线**（APK sha256=`75f7ba67…`，22 资产，装机 stamp 帧实拍）；**server/协议零变化，生产 daemon 保持 go.9**（兼容无碍）。
 - 小坑入账：assemble 首 dispatch 红=漏建 release（补建即绿，RELEASE.md 在案）；adb server 僵死一次（kill-server 复）。
+
+---
+
+# 批次八增补（v0.10.2-go.11，2026-10-02；只增不改上文）
+
+- ✅ **F21 微信行版式**（`1afc4a215`）：时间贴行右缘（titleTrailing 组 flexGrow1/flex-end/shrink0），长标题截断不挤时间；帧 B8-ROWPILL/01。
+- ✅ **F22 pill 三态染色**（同提交）：原生=success 浅染/外部=warning 浅染/未知初版中性；后 review 卡 10（`0a01c0a59`）按裁定 A 补中性 tint token（浅 1.20/字 6.43，暗 1.32/5.12）+对比度矩阵测进仓库；浅/暗帧 B8-REVF3。
+- ✅ **F23 导入屏版式对齐+归档优先**（`4f2e81363`）：icon 色块/时间右缘/副标题三段；mergeImportBadgeFacts 两源合并「任一归档即归档」；帧 05 同列表归档压导入实锤。provider glyph 退场=编排者裁定（对齐会话行）。
+- ✅ **F24 计数消歧**（`b3b2bb94f`）：协议纯增 claimedTotal（按 agent 去重全量）+说明行「共 N 个会话已是你的 agent · 列表展示最近 M 条」；daemon 存量 40=说明行 40 对上；Windows 反斜杠/盘符 cwd 归一（显示/匹配面，handle/认领键零污染）。review 卡 01（`1bc1fa1c8`）修 M 轴（=屏上折叠行数）+搜索态「命中」措辞+两行截断。
+- ✅ **F25 刷新回跳未知**（`4882451ea`）：replica-cache 白名单补 ownership/externalLooksActive/origin，round-trip 无损+旧行兜底；两轮重取不回跳帧 B8-CACHE/06-07。
+- ✅ **F26 环切页**（`fd3452f75`）：线性环 [进行中→已归档→工作区→我的] 双向循环跟手动画，段内滑并入（filter-swipe 三件删除）；adb 帧环 4 步+1 后退。
+- ✅ **F27 全宽右滑返回**（`fd3452f75`→review 卡 09 升级 P1 重写 `87186796c`）：首版 Portal 兄弟层收不到触点=**所有堆叠屏从未生效**（假帧曾掩盖，review 重拍戳破）；重写挂 (detail) 布局根，import/commands-edit 真机弹回帧 10/11/14/15。
+- ✅ **F28 watcher 顺链**（`92d78d457`）：观察单位=链；正向找叶子+链上累计游标（迁移不重置、重启跟链尾）；chase 30s/静默 5min 两档成本闸；真进程时间线+子文件预览句真机帧。
+- ✅ **F29 文件页三段横滑**（`20e17c8ef`）：线性非循环（**永不回卷**，用户钉死）+边界级联=内层 FAIL 同流让位祖先面（最左右滑=返回）；灰段退化/搜索态 blocked/横滚豁免；三帧 B8-FILESWIP。
+- ✅ **C21 兜底重写**（review 卡 14，`e7d2a8270`）：官方会话屏左缘带中段起滑真机证死→迁 ShellTabletSplitHost detail 槽祖先面；中段三组 pop+转场帧。
+- **review 轮**：5 维并行→12 卡立案→复核庭 7C/2D/0R→拍板 U6-A/U7-B(→卡13)/T3-A→三车修复（F1 `1bc1fa1c8`/F2 `87186796c`/F3 `0a01c0a59`）→P1 复审三查全 PASS→新产卡 14 闭。**抓到 2 个实现批逃逸 P1**（假帧掩盖的全宽返回、两格动画白挂）。
+- 终态门禁：app 失败集⊆W1 环境基线（locale×3+tz×1+forges×1）；protocol 1 项=本机 5s 超时既存（pre-count 判决实验+30s 全绿）；server 1 项=EBUSY 临时目录（W1 在案）；typecheck 全绿。
+- 发布：go.11 全链（APK `90bd0c41…`/22 资产/镜像对账 EMPTY）+**生产 go.9→go.11 实停机 181.9s 无回滚**（自检重试环 #2 命中）。
+- 遗留（在册）：搜索态「命中 200」截顶未标「+」（KI 缓办）；非默认暗色板 statusSuccess/Warning 字对比 <4.5（既存，另卡）；preview 键未进缓存冷启瞬空（KI-10 缓办）；置顶拖拽/真人下拉刷新/手指环滑动仍列真人复验单。
