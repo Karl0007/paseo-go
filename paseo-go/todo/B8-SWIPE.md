@@ -19,6 +19,10 @@
 - 新增 `packages/app/src/shell/gestures/**`（协调器/状态机）；改 `(shell)/_layout.tsx`、`shell/chats/filter-swipe.ts`、`shell/session-header/edge-swipe.ts`、`(detail)` 壳层。
 - 独占设备道（本卡最后跑，手势帧最重，避免被别卡覆盖）。
 
+## 实测输入（B8-CACHE 2026-10-02）
+
+adb 注入手势（`input swipe 300-2000ms`、`motionevent` 分段慢拉均试过）**触发不了现有下拉刷新**（RefreshControl 不响应注入，列表可正常滚动排除 band 卡死）。你的横滑帧若同样注入不响应，改走 uiautomator `swipe` 或 gestureInjector，仍不行则用状态机单测+人工帧并如实报 known_issue，勿硬耗。
+
 ## 验收
 
 - 状态机单测：环双向循环、豁免判定、堆叠页返回优先。
