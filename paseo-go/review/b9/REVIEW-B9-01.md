@@ -18,5 +18,11 @@ manager+watcher 集成测：live-idle omp 写子(mtime=now)→turn 结束→swee
 
 ## 复核（复核 Agent 填）
 
-结论：
+
+结论：CONFIRMED（P1 维持）
+
 理由/证据：
+1. 因果链逐跳核实：turn 结束 live-idle 仍进 watch 候选（agent-manager.ts:4053-4071，baselineBytes=live.ownership.baselineBytes，acquire 后=null）→ attach cursor===null → 首观察分支（transcript-watch-service.ts:694-701）对 subagent?.changed && count>0 无条件 reportSubagentActivity(:866-875)；refreshSubagentTree(:812-838) 用绝对 mtime 窗（LOOKS_ACTIVE_MTIME_WINDOW_MS=5min，provider-transcript.ts:47），确无 attach 时间地板 → onChange items=[] → applyLiveTranscriptChange(:4193-4194) ownershipOnExternalChange → derive(:96-104) 翻 external+ela=true。
+2. 实证（一次性 vitest 探针，manager+watcher+真实文件，跑完即删）：resume omp agent（idle、ownership=paseo、cursor 已清）→ 写新鲜子（mtime=now，模拟本 turn 自写）→ 一次 sweepTranscriptWatch → 断言 ownership.value==="external"、externalLooksActive===true、activeSubagents===1 全通过（=卡成立）。服务级探针：attach（baselineBytes=null）且新鲜子已存在 → 立即一条 change {items:[], activeSubagents:1, externalLooksActive:true}。
+3. 未被既有测挡：race-1 测（agent-ownership.test.ts "never attributes the daemon's own bytes"）只护主 transcript 通道（claude、无子树）；B9-SUBACT contagion 测是外来子的预期形态——自写区分正是「daemon 自写不误计」验收未实现项。
+4. P1 成立：app 内任何派子代理的 omp 会话 turn 结束后 ≤60s（sweep 周期）pill 翻「外部·运行中」，5min 窗内发送吃 R4 误报，衰减后停 external 直到下次 acquire。close 路径同型（observeReleasedTranscript → 同一首观察分支）。
