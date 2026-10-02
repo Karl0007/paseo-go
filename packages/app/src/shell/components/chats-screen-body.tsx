@@ -43,11 +43,13 @@
 // nothing (`decidePinDrop` + `dispatchPinDrop`, chats/drag-drop.ts). KI-11
 // ruling ③ gates the refresh control off for the whole row-gesture band, so a
 // long-pressed downward drag at the list top sorts instead of refreshing.
-// B4-SWIPE (批次四 F5 裁定 10): the list area also answers a horizontal swipe —
-// 进行中 ↔ 已归档. The swipe is not a second state machine: it calls the SAME
-// `setFilter` the header's segment presses, and the page turn is one surface
-// translating (chats/filter-swipe.ts + chats/use-chats-filter-swipe.ts). The gate
-// that keeps a live 置顶 drag from turning the page is `gestureLock` read as a
+// B4-SWIPE (批次四 F5 裁定 10) → B8-SWIPE (批次八 F26): the list area also answers
+// a horizontal swipe — 进行中↔已归档 is now slots 0↔1 of the tab 环
+// [进行中→已归档→工作区→我的→循环]. The swipe is still not a second state machine:
+// 环内 landing calls the SAME `setFilter` the header's segment presses, 跨环 lands
+// on the rail's own tab verb, and the turn is one surface translating
+// (shell/gestures/tab-ring.ts + use-shell-ring-swipe.ts). The gate that keeps a
+// live 置顶 drag (or the C9 搜索态, F27 互斥清单) from turning the page is read as a
 // shared value inside the worklet — never a flipped DraggableList prop.
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Text, View } from "react-native";
@@ -78,11 +80,13 @@ import { createChatOpener } from "@/shell/chats/open-agent";
 import { OWNERSHIP_OPEN_DIALOG_KEYS, OWNERSHIP_SEND_BODY_KEY } from "@/shell/chats/ownership";
 import { chatGestureBandProps, decidePinDrop, dispatchPinDrop } from "@/shell/chats/drag-drop";
 import {
-  FILTER_SWIPE_PAGE_ARCHIVED,
-  filterSwipePageForArchived,
-  type FilterSwipePage,
-} from "@/shell/chats/filter-swipe";
-import { useChatsFilterSwipe } from "@/shell/chats/use-chats-filter-swipe";
+  RING_SLOT_CHATS_ARCHIVED,
+  ringSectionForSlot,
+  ringSlotForView,
+  ringTabPathForSlot,
+  type RingSlot,
+} from "@/shell/gestures/tab-ring";
+import { useShellRingSwipe } from "@/shell/gestures/use-shell-ring-swipe";
 import { useChatsFilterJump } from "@/shell/chats/use-chats-filter-jump";
 import {
   ACTIVITY_LABEL_KEY,
@@ -574,18 +578,24 @@ export function ChatsScreenBody({ selectedAgentKey = null }: ShellScreenBodyProp
     setGestureLock(locked);
   }, []);
 
-  // B4-SWIPE (批次四 F5 裁定 10): 列表区横滑切 进行中↔已归档。状态源仍是上面的
-  // `filter`——手势落地只调用同一个 `setFilter`（点 segment 也是它），绝不另立一份
-  // 页状态；门是 `gestureLock`（行手势 arm→menu→drag 独占带）：拖拽期间禁切页。
+  // B8-SWIPE (批次八 F26): 列表区横滑 = tab 环的手势。状态源仍是上面的 `filter`——
+  // 环内落地只调用同一个 `setFilter`（点 segment 也是它），绝不另立一份页状态；
+  // 跨环目标（工作区/我的）走 rail 同款官方 tab 动词。门是 `gestureLock`（行手势
+  // arm→menu→drag 独占带）+ `searchActive`（F27 互斥清单：搜索态不切页）。
   // 位移/门都走 Reanimated 共享值，DraggableList 的 props 一个都不翻转
   // （B4-REGRESS 重挂面纪律：翻转列表 props 的状态带=整表重挂）。
-  const handleSwipePage = useCallback((page: FilterSwipePage) => {
-    setFilter(page === FILTER_SWIPE_PAGE_ARCHIVED ? "archived" : "active");
+  const handleRingSlot = useCallback((target: RingSlot) => {
+    if (ringSectionForSlot(target) === SHELL_TAB.chats) {
+      setFilter(target === RING_SLOT_CHATS_ARCHIVED ? "archived" : "active");
+    } else {
+      router.navigate(ringTabPathForSlot(target) as Href);
+    }
   }, []);
-  const swipe = useChatsFilterSwipe({
-    page: filterSwipePageForArchived(archivedOnly),
-    blocked: gestureLock,
-    onSwitchPage: handleSwipePage,
+  const ring = useShellRingSwipe({
+    section: SHELL_TAB.chats,
+    slot: ringSlotForView(SHELL_TAB.chats, archivedOnly),
+    blocked: gestureLock || searchActive,
+    onSwitchSlot: handleRingSlot,
   });
 
   // KI-11 ruling ④: the library hands back the whole list reordered; what the
@@ -802,15 +812,15 @@ export function ChatsScreenBody({ selectedAgentKey = null }: ShellScreenBodyProp
           <SidebarAgentListSkeleton />
         </View>
       ) : (
-        // B4-SWIPE: 换页面板=列表的父容器。手势挂在这层（列表的祖先，和官方 explorer
+        // B4-SWIPE→B8-SWIPE: 换页面板=列表的父容器。手势挂在这层（列表的祖先，和官方 explorer
         // 开合手势、壳 edge-back 同一拓扑），位移只动这层——列表自身、它的 props、
         // key、RefreshControl 全都不动。overflow:hidden 让「滑到墙外」真被裁掉
         // （iOS 默认溢出可见）；flex:1 保住列表尺寸。
-        <GestureDetector gesture={swipe.gesture}>
+        <GestureDetector gesture={ring.gesture}>
           <Animated.View
             collapsable={false}
-            style={[styles.swipeSurface, swipe.surfaceStyle]}
-            onLayout={swipe.onSurfaceLayout}
+            style={[styles.swipeSurface, ring.surfaceStyle]}
+            onLayout={ring.onSurfaceLayout}
           >
             <DraggableList
               key={`${listNonce}:${jump.nonce}`}

@@ -6,6 +6,13 @@
 // threshold set: horizontal activation distance for 返回, vertical escape to
 // the scroll view, and a leftward drag that is simply not ours.
 //
+// B8-SWIPE (F27): this resolver is ALSO the 堆叠页全宽右滑返回's direction lock —
+// `shell/gestures/swipe-machine.ts` calls it unchanged, the full-width overlay
+// simply drops the start-x band gate below. The band (`isInsideShellEdgeBand` +
+// `use-shell-edge-back-gesture`) stays as the official session screen's fallback:
+// its upstream scroll bodies cannot declare the horizontal exemption the
+// full-width swipe needs (卡片口径: 挂不住的部分保留左缘带兜底).
+//
 // The band itself lives in `use-shell-edge-back-gesture`; the official
 // left-open / right-open gestures are parked for the capsule's whole visible
 // span via the provider's symbol-keyed `setOpenGestureBlocked` (released on

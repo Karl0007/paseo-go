@@ -14,6 +14,8 @@
 // _layout，均重启生效；主题走官方 useAppSettings 覆盖口，即时生效。
 import { useCallback, useEffect, useMemo, useRef, type ReactNode } from "react";
 import { Pressable, ScrollView, Switch, Text, View } from "react-native";
+import { GestureDetector } from "react-native-gesture-handler";
+import Animated from "react-native-reanimated";
 import { router, type Href } from "expo-router";
 import { useTranslation } from "react-i18next";
 import { StyleSheet, withUnistyles } from "react-native-unistyles";
@@ -32,7 +34,9 @@ import { SHELL_I18N_NAMESPACE } from "@/shell/i18n";
 import { SHELL_GO_VERSION, SHELL_MODE_ENV_DEFAULT } from "@/shell/config";
 import { useShellUpdateStore, type ShellUpdatePhase } from "@/shell/update/state";
 import { buildShellOverview } from "@/shell/overview";
-import { OFFICIAL } from "@/shell/routes";
+import { OFFICIAL, SHELL_TAB } from "@/shell/routes";
+import { RING_SLOT_ME, ringTabPathForSlot, type RingSlot } from "@/shell/gestures/tab-ring";
+import { useShellRingSwipe } from "@/shell/gestures/use-shell-ring-swipe";
 import { useShellHostStatuses } from "@/shell/runtime/use-shell-host-statuses";
 import { clearPaseoGoLocalData, resetShellStores } from "@/shell/stores/clear-local-data";
 import { usePaseoGoSettingsStore, type ShellTab } from "@/shell/stores/settings";
@@ -351,120 +355,141 @@ export function MeScreenBody() {
     void reportUpdateCheck();
   }, [reportUpdateCheck]);
 
+  // B8-SWIPE (批次八 F26): 我的 tab = 环的第 4 格（终点格的左右邻居是 已归档/
+  // 进行中——环无边界）。落地只有官方 tab 动词一条路；本屏无搜索态/行拖拽，门空。
+  const handleRingSlot = useCallback((target: RingSlot) => {
+    router.navigate(ringTabPathForSlot(target) as Href);
+  }, []);
+  const ring = useShellRingSwipe({
+    section: SHELL_TAB.me,
+    slot: RING_SLOT_ME,
+    blocked: false,
+    onSwitchSlot: handleRingSlot,
+  });
+
   return (
     <View style={styles.screen}>
       {/* KI-12: 标题行搬出 ScrollView——顶栏固定不随滚动，与对话/工作区等高。 */}
       <ShellTabHeader title={t("me.title")} />
-      <ScrollView ref={scrollRef} style={styles.scroll} contentContainerStyle={styles.content}>
-        <Text style={styles.sectionHeader}>{t("me.overviewHeader")}</Text>
-        <View style={styles.card} testID="me-overview">
-          <Text style={styles.rowTitle}>
-            {overviewLoading
-              ? t("me.overviewLoading")
-              : t("me.overview", {
-                  hosts: overview.hostCount,
-                  projects: overview.projectCount,
-                  agents: overview.activeAgentCount,
-                })}
-          </Text>
-        </View>
+      {/* B8-SWIPE: 换页面板=滚动体的父容器（对话 tab 同款拓扑，位移只动这层）。 */}
+      <GestureDetector gesture={ring.gesture}>
+        <Animated.View
+          collapsable={false}
+          style={styles.swipeSurface}
+          onLayout={ring.onSurfaceLayout}
+        >
+          <ScrollView ref={scrollRef} style={styles.scroll} contentContainerStyle={styles.content}>
+            <Text style={styles.sectionHeader}>{t("me.overviewHeader")}</Text>
+            <View style={styles.card} testID="me-overview">
+              <Text style={styles.rowTitle}>
+                {overviewLoading
+                  ? t("me.overviewLoading")
+                  : t("me.overview", {
+                      hosts: overview.hostCount,
+                      projects: overview.projectCount,
+                      agents: overview.activeAgentCount,
+                    })}
+              </Text>
+            </View>
 
-        <Text style={styles.sectionHeader}>{t("me.officialHeader")}</Text>
-        <View style={styles.card}>
-          <SettingRow
-            title={t("me.globalSettings")}
-            hint={t("me.globalSettingsHint")}
-            onPress={handleOpenGlobalSettings}
-            testID="me-global-settings"
-          />
-          {hosts.map((host) => (
-            <HostSettingsRow
-              key={host.serverId}
-              host={host}
-              online={(statuses.get(host.serverId) ?? "connecting") === "online"}
-            />
-          ))}
-        </View>
+            <Text style={styles.sectionHeader}>{t("me.officialHeader")}</Text>
+            <View style={styles.card}>
+              <SettingRow
+                title={t("me.globalSettings")}
+                hint={t("me.globalSettingsHint")}
+                onPress={handleOpenGlobalSettings}
+                testID="me-global-settings"
+              />
+              {hosts.map((host) => (
+                <HostSettingsRow
+                  key={host.serverId}
+                  host={host}
+                  online={(statuses.get(host.serverId) ?? "connecting") === "online"}
+                />
+              ))}
+            </View>
 
-        <Text style={styles.sectionHeader}>{t("me.shellModeHeader")}</Text>
-        <View style={styles.card}>
-          <SettingRow
-            title={t("me.shellMode")}
-            hint={t("me.shellModeHint", { env: SHELL_MODE_ENV_DEFAULT ? "on" : "off" })}
-            testID="me-shell-mode-row"
-          >
-            <ThemedModeSwitch
-              testID="shell-mode-switch"
-              value={shellModeActive}
-              accessibilityLabel={t("me.shellMode")}
-              onValueChange={handleToggleShellMode}
-            />
-          </SettingRow>
-          <View style={styles.divider} />
-          <SettingRow title={t("me.theme")} hint={t("me.themeHint")} testID="me-theme-row">
-            <ChoiceChips
-              options={themeOptions}
-              value={themeChoice}
-              onSelect={handleSelectTheme}
-              testIdPrefix="me-theme"
-            />
-          </SettingRow>
-          <View style={styles.divider} />
-          <SettingRow
-            title={t("me.defaultTab")}
-            hint={t("me.defaultTabHint")}
-            testID="me-default-tab-row"
-          >
-            <ChoiceChips
-              options={defaultTabOptions}
-              value={defaultTab}
-              onSelect={handleSelectDefaultTab}
-              testIdPrefix="me-default-tab"
-            />
-          </SettingRow>
-          <View style={styles.divider} />
-          <SettingRow
-            title={t("me.notifications")}
-            hint={t("me.notificationsHint")}
-            testID="me-notifications-row"
-          >
-            <ThemedModeSwitch
-              testID="shell-notify-switch"
-              value={notifications}
-              accessibilityLabel={t("me.notifications")}
-              onValueChange={handleToggleNotifications}
-            />
-          </SettingRow>
-          <View style={styles.divider} />
-          <SettingRow
-            title={t("me.clearData")}
-            hint={t("me.clearDataHint")}
-            destructive
-            onPress={handleClearDataPress}
-            testID="me-clear-data"
-          />
-        </View>
+            <Text style={styles.sectionHeader}>{t("me.shellModeHeader")}</Text>
+            <View style={styles.card}>
+              <SettingRow
+                title={t("me.shellMode")}
+                hint={t("me.shellModeHint", { env: SHELL_MODE_ENV_DEFAULT ? "on" : "off" })}
+                testID="me-shell-mode-row"
+              >
+                <ThemedModeSwitch
+                  testID="shell-mode-switch"
+                  value={shellModeActive}
+                  accessibilityLabel={t("me.shellMode")}
+                  onValueChange={handleToggleShellMode}
+                />
+              </SettingRow>
+              <View style={styles.divider} />
+              <SettingRow title={t("me.theme")} hint={t("me.themeHint")} testID="me-theme-row">
+                <ChoiceChips
+                  options={themeOptions}
+                  value={themeChoice}
+                  onSelect={handleSelectTheme}
+                  testIdPrefix="me-theme"
+                />
+              </SettingRow>
+              <View style={styles.divider} />
+              <SettingRow
+                title={t("me.defaultTab")}
+                hint={t("me.defaultTabHint")}
+                testID="me-default-tab-row"
+              >
+                <ChoiceChips
+                  options={defaultTabOptions}
+                  value={defaultTab}
+                  onSelect={handleSelectDefaultTab}
+                  testIdPrefix="me-default-tab"
+                />
+              </SettingRow>
+              <View style={styles.divider} />
+              <SettingRow
+                title={t("me.notifications")}
+                hint={t("me.notificationsHint")}
+                testID="me-notifications-row"
+              >
+                <ThemedModeSwitch
+                  testID="shell-notify-switch"
+                  value={notifications}
+                  accessibilityLabel={t("me.notifications")}
+                  onValueChange={handleToggleNotifications}
+                />
+              </SettingRow>
+              <View style={styles.divider} />
+              <SettingRow
+                title={t("me.clearData")}
+                hint={t("me.clearDataHint")}
+                destructive
+                onPress={handleClearDataPress}
+                testID="me-clear-data"
+              />
+            </View>
 
-        <Text style={styles.sectionHeader}>{t("me.aboutHeader")}</Text>
-        <View style={styles.card} testID="me-about">
-          <SettingRow
-            title={t("me.shellVersion", { version: about.version })}
-            hint={t("me.upstream", { ref: about.upstreamRef })}
-            testID="me-about-row"
-          >
-            <ExternalLink href={about.licenseUrl} label={t("me.license")} testID="me-license" />
-          </SettingRow>
-          <View style={styles.divider} />
-          <SettingRow
-            title={t("me.checkUpdate")}
-            hint={t("me.checkUpdateHint", { version: SHELL_GO_VERSION })}
-            onPress={handleCheckUpdatePress}
-            testID="me-check-update"
-          >
-            <UpdateRowTrailing phase={updatePhase} latest={updateLatest} url={updateUrl} />
-          </SettingRow>
-        </View>
-      </ScrollView>
+            <Text style={styles.sectionHeader}>{t("me.aboutHeader")}</Text>
+            <View style={styles.card} testID="me-about">
+              <SettingRow
+                title={t("me.shellVersion", { version: about.version })}
+                hint={t("me.upstream", { ref: about.upstreamRef })}
+                testID="me-about-row"
+              >
+                <ExternalLink href={about.licenseUrl} label={t("me.license")} testID="me-license" />
+              </SettingRow>
+              <View style={styles.divider} />
+              <SettingRow
+                title={t("me.checkUpdate")}
+                hint={t("me.checkUpdateHint", { version: SHELL_GO_VERSION })}
+                onPress={handleCheckUpdatePress}
+                testID="me-check-update"
+              >
+                <UpdateRowTrailing phase={updatePhase} latest={updateLatest} url={updateUrl} />
+              </SettingRow>
+            </View>
+          </ScrollView>
+        </Animated.View>
+      </GestureDetector>
     </View>
   );
 }
@@ -473,6 +498,11 @@ const styles = StyleSheet.create((theme) => ({
   screen: {
     flex: 1,
     backgroundColor: theme.colors.surface0,
+  },
+  // B8-SWIPE: 换页面板（对话 tab 同款：flex:1 不塌尺寸，overflow:hidden 裁墙外）。
+  swipeSurface: {
+    flex: 1,
+    overflow: "hidden",
   },
   scroll: {
     flex: 1,

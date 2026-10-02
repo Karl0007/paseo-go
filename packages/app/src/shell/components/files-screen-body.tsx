@@ -19,7 +19,7 @@
 // list — accepted), the diff keeps its collapsed-file tree state (lifted here),
 // commits keep their query cache. Non-git checkouts gray the two git segments and
 // say why (official unsupported idiom: nothing to embed).
-import { useCallback, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { FlatList, Pressable, ScrollView, Text, View } from "react-native";
 import { router, type Href } from "expo-router";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
@@ -66,6 +66,7 @@ import {
 } from "@/shell/files/files-tabs";
 import { SearchModeBar } from "@/shell/components/search/search-mode-bar";
 import { useShellSearchBackPriority } from "@/shell/search/use-shell-search-back-priority";
+import { setStackBackBlocked } from "@/shell/gestures/stack-back-gate";
 import { FileSearchRow } from "@/shell/components/search/file-search-row";
 import { ContentSearchRow } from "@/shell/components/search/content-search-row";
 import { collectBrowsedWorkspaces, type FileSearchHit } from "@/shell/search/file-search";
@@ -403,6 +404,14 @@ export function FilesScreenBody({
     namePrefix: `${FILES_ROUTE_SEGMENT}/`,
     params: { serverId, workspaceId },
   });
+
+  // B8-SWIPE (F27 搜索态除外): 页内搜索 morph 打开时，全宽右滑属于搜索条，不是
+  // 返回——本屏向 stack-back 声明豁免（卸载释放）。diff 代码块的横向滚动走的是
+  // HorizontalScrollContext 声明性豁免（注册件），不在此门。
+  useEffect(() => {
+    setStackBackBlocked("files-search", search.active);
+    return () => setStackBackBlocked("files-search", false);
+  }, [search.active]);
 
   // ---- shared file wiring ------------------------------------------------------
   const workspaceStateKey = useMemo(

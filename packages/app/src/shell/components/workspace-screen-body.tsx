@@ -25,6 +25,8 @@
 // skeleton; pull-to-refresh re-pulls agents + directories.
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { FlatList, Pressable, RefreshControl, Text, View } from "react-native";
+import { GestureDetector } from "react-native-gesture-handler";
+import Animated from "react-native-reanimated";
 import { router, type Href } from "expo-router";
 import { useTranslation } from "react-i18next";
 import { StyleSheet } from "react-native-unistyles";
@@ -91,6 +93,8 @@ import {
 } from "@/shell/search/file-search";
 import { normalizeSearchQuery } from "@/shell/search/query";
 import { useShellSearchBackPriority } from "@/shell/search/use-shell-search-back-priority";
+import { RING_SLOT_WORKSPACE, ringTabPathForSlot, type RingSlot } from "@/shell/gestures/tab-ring";
+import { useShellRingSwipe } from "@/shell/gestures/use-shell-ring-swipe";
 import {
   buildWorkspaceTree,
   type ShellHostSection,
@@ -862,6 +866,18 @@ export function WorkspaceScreenBody({ selectedAgentKey = null }: ShellScreenBody
     [searching, handleSearchClose],
   );
 
+  // B8-SWIPE (批次八 F26): 工作区 tab = 环的第 3 格。横滑落地只有官方 tab 动词
+  // 一条路（rail 同款 `router.navigate(SHELL.*)`）；搜索态互斥沿用同一门（F27
+  // 互斥清单）。位移/门全走共享值，FlatList props 一个不翻转（重挂面纪律）。
+  const handleRingSlot = useCallback((target: RingSlot) => {
+    router.navigate(ringTabPathForSlot(target) as Href);
+  }, []);
+  const ring = useShellRingSwipe({
+    section: SHELL_TAB.workspace,
+    slot: RING_SLOT_WORKSPACE,
+    blocked: searchActive,
+    onSwitchSlot: handleRingSlot,
+  });
   const bodyBranch = pickWorkspaceBodyBranch({
     searchActive,
     showSkeleton,
@@ -940,7 +956,17 @@ export function WorkspaceScreenBody({ selectedAgentKey = null }: ShellScreenBody
           </Pressable>
         </ShellTabHeader>
       )}
-      {body}
+      {/* B8-SWIPE: 换页面板=内容区的父容器（对话 tab 同款拓扑：手势在祖先层，
+          位移只动这层；overflow:hidden 裁掉墙外，flex:1 保住列表尺寸）。 */}
+      <GestureDetector gesture={ring.gesture}>
+        <Animated.View
+          collapsable={false}
+          style={styles.swipeSurface}
+          onLayout={ring.onSurfaceLayout}
+        >
+          {body}
+        </Animated.View>
+      </GestureDetector>
       <CommandWorkspacePickerSheet
         open={pickerCommand !== null}
         options={pickerOptions}
@@ -955,6 +981,11 @@ const styles = StyleSheet.create((theme) => ({
   screen: {
     flex: 1,
     backgroundColor: theme.colors.surface0,
+  },
+  // B8-SWIPE: 换页面板（对话 tab 同款：flex:1 不塌尺寸，overflow:hidden 裁墙外）。
+  swipeSurface: {
+    flex: 1,
+    overflow: "hidden",
   },
   // KI-12: the header search icon shares the chats header's icon-button tokens.
   iconButton: {

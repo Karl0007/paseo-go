@@ -58,6 +58,7 @@ import { useShellSearchBackPriority } from "@/shell/search/use-shell-search-back
 import { SHELL_I18N_NAMESPACE } from "@/shell/i18n";
 import { IMPORT_ROUTE_NAME, OFFICIAL, SHELL } from "@/shell/routes";
 import { detailBack } from "@/shell/detail-back";
+import { setStackBackBlocked } from "@/shell/gestures/stack-back-gate";
 import {
   applyImportTreeCollapse,
   buildBadgeOpenTarget,
@@ -470,6 +471,14 @@ export default function ShellImportScreen() {
   useShellSearchBackPriority(searchActive, handleSearchClose, {
     name: IMPORT_ROUTE_NAME,
   });
+
+  // B8-SWIPE (F27 搜索态除外 + sheet 让位): 本屏声明式豁免全宽右滑返回——搜索
+  // morph 打开或 host 选择 sheet 在前时，右滑属于那个表面，不是返回。卸载即释放
+  // （effect cleanup），豁免不可能滞留到下一屏。
+  useEffect(() => {
+    setStackBackBlocked("import", searchActive || hostSheetOpen);
+    return () => setStackBackBlocked("import", false);
+  }, [searchActive, hostSheetOpen]);
 
   // F1 (review): the fetch lifecycle lives in useImportList — its stale-host guard
   // is what stops a mid-import host switch from letting A's closure overwrite B.

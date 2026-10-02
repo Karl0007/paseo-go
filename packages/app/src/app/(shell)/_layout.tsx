@@ -16,6 +16,7 @@ import { useShellUpdateCheck } from "@/shell/update/use-shell-update-check";
 import { ensureShellI18n, SHELL_I18N_NAMESPACE } from "@/shell/i18n";
 import { usePaseoGoSettingsStore, type ShellTab } from "@/shell/stores/settings";
 import { focusedShellTab, type NavStateLike } from "@/shell/focused-tab";
+import { setShellFrontmostSection } from "@/shell/gestures/ring-transition";
 
 ensureShellI18n();
 
@@ -136,6 +137,11 @@ export default function ShellTabsLayout() {
     const record = () => {
       const tab = focusedShellTab(navigation.getState() as unknown as NavStateLike | undefined);
       if (tab) lastFocusedTab = tab;
+      // B8-SWIPE: the same beat drives the ring's frontmost bus — the ONLY focus
+      // source that sees tabs on compact AND wide (the split column lives outside
+      // every navigator). null while a (detail)/official push is on top ⇒ the tab
+      // screens' ring gestures stand down (堆叠页返回优先, F27).
+      setShellFrontmostSection(tab);
     };
     record();
     return navigation.addListener("state", record);
