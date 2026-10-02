@@ -101,4 +101,4 @@
 - protocol：1 例失败 `messages.providers-snapshot`「bodyless」= 本机 AOT 动态 import 5.6s>5s 默认超时；**判决实验：回退 pre-COUNT messages.ts 重生成仍红、--testTimeout=30000 全绿** ⇒ 既存负载敏感项非批次八回归。
 - server：1 例失败 `execution-session.websocket` = `EBUSY rmdir` 临时目录（W1 在案 Windows 环境类）。
 - typecheck 全 workspace 绿（每提交 pre-commit + 门禁时点复跑）。
-- 坑账：门禁首跑用 `cd /c/...` 小写盘符 → vitest 双实例 695 文件假红（bg_1 作废）；大写 `C:/` 重跑为准。**BUILD.md 已知问题表待补一行（收口时）**。
+- 坑账：门禁首跑用 `cd /c/...` 小写盘符 → vitest 双实例 695 文件假红（bg_1 作废）；大写 `C:/` 重跑为准。**BUILD.md #8 已有同纪律，本次=踩坑复证**（教训：门禁命令模板应强制大写 cwd）。

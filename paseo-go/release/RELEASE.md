@@ -7,7 +7,7 @@
 - CI run=`36994121545`：meta/CLI×2/desktop×2 全绿；APK job 红=16GB runner 驱逐七连（预期红）。先手建 release+挂本机 APK+sidecar → assemble=`36996234847` 绿（WIN-ZIP-MANIFEST-OK×3；body 全 sha：win32 CLI=`0c0b1494…e3c85`、APK≡本机；22 资产=go.9 同构）。
 - **生产 go.9→go.11**：`.dev/go11-cutover.ps1` 走 hub persistent（会话外纪律=go.7 教训）。18:38:16 BEGIN（双闸：目标 `0c0b1494…` + 回滚件 go.9 RB-SHA OK）→ INSTALLED 18:40:55 → HEALTH-OK 18:41:18 **实停机 181.9s** → 自检重试环 **#2 命中**（go.9 加的 provider 预热重试生效）→ DONE OK 18:41:39。**无回滚**；官方 CLI 兼容复跑绿。
 - 兼容性：协议纯增（claimedTotal optional），新旧客户端↔新旧 daemon 双向安全（说明行/cwd 归一自动沉默）。
-- 坑账：发布 agent 会话在切机完成后被回收（切机=持久 job 免疫，设计正确），本节由编排者接管补记；门禁首跑小写盘符 `c:/` 致 vitest 双实例 695 文件假红（BUILD.md 已知问题表已补）。
+- 坑账：发布 agent 会话在切机完成后被回收（切机=持久 job 免疫，设计正确），本节由编排者接管补记；门禁首跑小写盘符 `c:/` 致 vitest 双实例 695 文件假红——BUILD.md 已知问题 #8 早有同口径纪律，编排者自己踩坑=纪律要贴到命令模板里而不只在文档里。
 
 # Paseo Go v0.10.2-go.10 落档（客户端 hotfix 线，2026-10-02）
 
