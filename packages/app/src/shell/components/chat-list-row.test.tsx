@@ -105,8 +105,11 @@ const ON_OPEN = vi.fn();
 const ACTIONS = {} as ShellAgentActions;
 const ROW: ChatRow<ShellChatAgent> = { agent: agentFixture(), unread: false, dimmed: false };
 
-function renderRow(agent: ShellChatAgent): void {
+function renderRow(agent: ShellChatAgent, overrides: { unread?: boolean } = {}): void {
   ROW.agent = agent;
+  // F32: `unread` is derive's row-level input, not an agent field — the marker tests
+  // arm it independently of the bucket.
+  ROW.unread = overrides.unread ?? false;
   render(<ChatListRow row={ROW} actions={ACTIONS} onOpen={ON_OPEN} />);
 }
 
@@ -211,8 +214,9 @@ describe("ChatListRow title line layout (F21 right-edge clock)", () => {
     const pill = screen.getByTestId(`shell-chat-ownership-${KEY}`);
     const time = screen.getByTestId(`shell-chat-time-${KEY}`);
     const trailing = time.parentElement as HTMLElement;
-    // Paint order on the line: title, pill 紧随, then the right-edge group —
-    // and the clock is that group's LAST child (the row's rightmost pixel).
+    // Paint order on the line: title, pill 紧随, then the right-edge group. F32
+    // moved the unread marker out from between spinner and clock, so the clock ends
+    // the group only when the row has no marker to wear (this fixture is read).
     expect(pill.previousElementSibling).toBe(title);
     expect(trailing.previousElementSibling).toBe(pill);
     expect(trailing.lastElementChild).toBe(time);
@@ -236,6 +240,69 @@ describe("ChatListRow title line layout (F21 right-edge clock)", () => {
     const kids = Array.from(trailing.children);
     expect(kids.indexOf(spinner)).toBeGreaterThanOrEqual(0);
     expect(kids.indexOf(spinner)).toBeLessThan(kids.indexOf(time));
+  });
+});
+
+// B9-BADGE (F32, 用户截图钉死): the unread indicator is ONE marker in ONE slot, and
+// that slot is the title line's LAST pixel — right of the clock. Order inside the
+// right-edge group: spinner → clock → marker. `count > 0` hands the slot to the count
+// pill; otherwise an idle unread row wears the dot; active rows wear neither.
+describe("ChatListRow right-edge unread slot (F32)", () => {
+  /** Both marker testIDs at once — a row that renders two fails the length check. */
+  const markers = (): HTMLElement[] =>
+    screen.queryAllByTestId(new RegExp(`^shell-chat-(unread|count)-${KEY}$`));
+
+  it("puts the unread dot right of the clock, as the line's last pixel", () => {
+    renderRow({ ...agentFixture(), bucket: "attention" }, { unread: true });
+    const time = screen.getByTestId(`shell-chat-time-${KEY}`);
+    const dot = screen.getByTestId(`shell-chat-unread-${KEY}`);
+    expect(dot.previousElementSibling).toBe(time);
+    expect((time.parentElement as HTMLElement).lastElementChild).toBe(dot);
+    expect(markers()).toHaveLength(1);
+  });
+
+  it("hands the same slot to the count pill while approvals pend — never two markers", () => {
+    // `done` + unread would show the dot on its own; count>0 takes the slot instead
+    // (C18: the pill is a state marker — permission requests carry no attention stamp,
+    // so it must not be gated on `unread`, and the dot steps aside for it).
+    renderRow({ ...agentFixture({ pendingPermissionCount: 3 }) }, { unread: true });
+    const time = screen.getByTestId(`shell-chat-time-${KEY}`);
+    const pill = screen.getByTestId(`shell-chat-count-${KEY}`);
+    expect(pill.previousElementSibling).toBe(time);
+    expect(pill.textContent).toBe("3");
+    expect(markers()).toHaveLength(1);
+  });
+
+  it("keeps the group order spinner → clock → marker on a running row", () => {
+    renderRow({ ...agentFixture({ pendingPermissionCount: 1 }), bucket: "running" });
+    const time = screen.getByTestId(`shell-chat-time-${KEY}`);
+    const spinner = screen.getByTestId(`shell-chat-running-${KEY}`);
+    const pill = screen.getByTestId(`shell-chat-count-${KEY}`);
+    const kids = Array.from((time.parentElement as HTMLElement).children);
+    expect(kids.indexOf(spinner)).toBe(0);
+    expect(kids.indexOf(time)).toBe(1);
+    expect(kids.indexOf(pill)).toBe(2);
+  });
+
+  it("wears no marker on an active unread row — status light + bold title carry it", () => {
+    renderRow({ ...agentFixture(), bucket: "needs_input" }, { unread: true });
+    expect(markers()).toHaveLength(0);
+    // The clock keeps the right edge to itself, i.e. nothing was left behind it.
+    const time = screen.getByTestId(`shell-chat-time-${KEY}`);
+    expect((time.parentElement as HTMLElement).lastElementChild).toBe(time);
+  });
+
+  it("shrinks the long title, never the clock or the marker", () => {
+    usePaseoGoPinsStore.setState({ aliases: { [KEY]: "长".repeat(80) } });
+    renderRow({ ...agentFixture(), bucket: "attention" }, { unread: true });
+    const time = screen.getByTestId(`shell-chat-time-${KEY}`);
+    const dot = screen.getByTestId(`shell-chat-unread-${KEY}`);
+    const trailing = time.parentElement as HTMLElement;
+    expect(trailing.style.flexShrink).toBe("0");
+    expect(time.style.flexShrink).toBe("0");
+    expect(dot.style.flexShrink).toBe("0");
+    expect(screen.getByTestId(`shell-chat-title-${KEY}`).style.flexShrink).toBe("1");
+    expect(trailing.lastElementChild).toBe(dot);
   });
 });
 

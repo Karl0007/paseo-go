@@ -1,7 +1,8 @@
 // Chat list row (DESIGN §4; WeChat-shaped since B4-ROW / batch-4 F4): project tile |
 // title `项目(worktree)`, or the shell rename alone (D21, B6-TITLE) — with the running
-// spinner and the absolute time on its right | unread badge (C18: dot only on idle
-// rows, count pill only while approvals pend) | subtitle by priority
+// spinner and the absolute time on its right | the unread marker — ONE slot, right
+// of the clock (F32; C18: dot only on idle rows, count pill only while approvals
+// pend) | subtitle by priority
 // `[草稿] `+draft > `[需要回复] `+preview > preview (`我: ` when the last message is the
 // user's) > 占位小字 (B5-SUB: the line is ALWAYS there) | four-state light | ⋯ overflow.
 // The clock lives in its own `<Text>`, so a minute tick never reaches the row; the
@@ -105,11 +106,16 @@ function selectionHaptic(): void {
   void Haptics.selectionAsync().catch(() => {});
 }
 
-// C18 双点收敛 — two independent judgements in the badge slot: the count pill is a
-// state marker (approvals pend) and renders on count>0 alone — permission requests
-// carry no attention stamp, so gating it on `unread` would make it vanish; the dot
-// is the unread mark and only ever shows on idle rows (showsUnreadDot) — active
-// buckets wear their state on the status light + bold title, never a second dot.
+// C18 双点收敛 + F32 (B9-BADGE) — the row wears ONE unread marker, in ONE slot, and
+// that slot is the title line's last pixel: right of the clock. Two judgements live
+// here — the count pill is a state marker (approvals pend) and renders on count>0
+// alone, because permission requests carry no attention stamp, so gating it on
+// `unread` would make it vanish; the dot is the unread mark and only ever shows on
+// idle rows (showsUnreadDot) — active buckets wear their state on the status light +
+// bold title, never a second dot. Whichever branch fires, the other stays unrendered,
+// so a row can never show two markers. Both members are circular (`borderRadius.full`),
+// shrink-0 chips sized to the line's small tier — the right-edge slot family
+// B9-SUBACT's 子任务×N badge joins.
 function ChatBadge({
   bucket,
   count,
@@ -123,7 +129,7 @@ function ChatBadge({
 }) {
   if (count > 0) {
     return (
-      <View style={styles.countBadge}>
+      <View style={styles.countBadge} testID={`shell-chat-count-${rowKey}`}>
         <Text style={styles.countBadgeText}>{count}</Text>
       </View>
     );
@@ -541,9 +547,12 @@ function ChatRowInner({
               origin={agent.agent.origin}
               testID={`shell-chat-ownership-${agent.key}`}
             />
-            {/* F21: the right-edge group — spinner (ruling 8: still left of the
-                time), the unread/count badge, then the clock as the row's last
-                pixel. It eats the leftover width, so the title truncates first. */}
+            {/* F21 + F32: the right-edge group — spinner (ruling 8: still left of
+                the time), the clock, then the unread slot as the row's last pixel.
+                F32 (B9-BADGE) moved the marker out from between spinner and clock:
+                the unread indicator is the line's rightmost thing, one marker per
+                row. The group eats the leftover width, so the title truncates
+                first and neither the clock nor the marker gets squeezed. */}
             <View style={styles.titleTrailing}>
               {showSpinner ? (
                 <RunningSpinner
@@ -552,15 +561,15 @@ function ChatRowInner({
                   testID={`shell-chat-running-${agent.key}`}
                 />
               ) : null}
+              <ChatTimestamp
+                at={agent.agent.lastActivityAt}
+                testID={`shell-chat-time-${agent.key}`}
+              />
               <ChatBadge
                 bucket={agent.bucket}
                 count={pendingCount}
                 unread={unread}
                 rowKey={agent.key}
-              />
-              <ChatTimestamp
-                at={agent.agent.lastActivityAt}
-                testID={`shell-chat-time-${agent.key}`}
               />
             </View>
           </View>
@@ -649,10 +658,11 @@ const styles = StyleSheet.create((theme) => ({
     alignItems: "center",
     gap: theme.spacing[2],
   },
-  // F21 (B8-ROWPILL): title + pill own the line's left, this group owns its right
-  // edge — flexGrow takes the leftover width, flex-end pins the content to it,
-  // flexShrink 0 means a long title squeezes the TITLE (ruling 6's posture), never
-  // the clock out of the row.
+  // F21 (B8-ROWPILL) + F32 (B9-BADGE): title + pill own the line's left, this group
+  // owns its right edge — flexGrow takes the leftover width, flex-end pins the
+  // content to it, flexShrink 0 means a long title squeezes the TITLE (ruling 6's
+  // posture), never the clock or the unread marker out of the row. Inside the group
+  // the order is spinner → clock → marker (F32: the marker is the row's last pixel).
   titleTrailing: {
     flexDirection: "row",
     alignItems: "center",
@@ -677,11 +687,14 @@ const styles = StyleSheet.create((theme) => ({
   titleUnread: {
     fontWeight: theme.fontWeight.bold,
   },
+  // F32: the marker is the line's last pixel, so it never shrinks — a long title
+  // truncates the TITLE (ruling 6), not the unread mark.
   unreadDot: {
     width: 8,
     height: 8,
     borderRadius: theme.borderRadius.full,
     backgroundColor: theme.colors.accent,
+    flexShrink: 0,
   },
   countBadge: {
     minWidth: 18,
@@ -691,6 +704,7 @@ const styles = StyleSheet.create((theme) => ({
     alignItems: "center",
     justifyContent: "center",
     backgroundColor: theme.colors.statusDotWarning,
+    flexShrink: 0,
   },
   countBadgeText: {
     fontSize: theme.fontSize.sm,
