@@ -375,7 +375,7 @@ export function MeScreenBody() {
       <GestureDetector gesture={ring.gesture}>
         <Animated.View
           collapsable={false}
-          style={styles.swipeSurface}
+          style={[styles.swipeSurface, ring.surfaceStyle]}
           onLayout={ring.onSurfaceLayout}
         >
           <ScrollView ref={scrollRef} style={styles.scroll} contentContainerStyle={styles.content}>

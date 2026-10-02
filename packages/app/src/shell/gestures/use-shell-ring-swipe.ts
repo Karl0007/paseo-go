@@ -149,9 +149,22 @@ export function useShellRingSwipe(input: {
     return unsubscribe;
   }, [section, frontmostSv, turningSv, tx, playEntry]);
 
-  /** 出场拍结束→落地：环内走本屏 setter，跨 tab 挂进场方向后走官方 tab 动词。 */
+  /**
+   * 出场拍结束→落地：环内走本屏 setter，跨 tab 挂进场方向后走官方 tab 动词。
+   *
+   * 落地前先复核出发条件（REVIEW-B8-03）：出场拍那 140ms 里用户可能已经点了 rail
+   * （frontmost→他 tab）或点了会话行（frontmost→堆叠页=null），JS 侧的导航比这次回调
+   * 先到。此时再 arm+navigate 就是把用户刚打开的东西弹掉（跨 tab 劫持），所以只有本
+   * section 仍在最前才提交；否则丢弃——表面归零（与焦点拍的普通点入同款写法：这块屏幕
+   * 在身后，跳变看不见，回焦时也不需要进场）、清 turning、不 arm 不 navigate。
+   */
   const land = useCallback(
     (target: RingSlot, direction: RingDirection) => {
+      if (getShellFrontmostSection() !== section) {
+        tx.value = 0;
+        turningSv.value = false;
+        return;
+      }
       directionRef.current = direction;
       if (ringSectionForSlot(target) === section) {
         localTargetRef.current = target;
@@ -160,7 +173,7 @@ export function useShellRingSwipe(input: {
       }
       switchSlotRef.current(target);
     },
-    [section],
+    [section, tx, turningSv],
   );
 
   const horizontalScroll = useHorizontalScrollOptional();

@@ -961,7 +961,7 @@ export function WorkspaceScreenBody({ selectedAgentKey = null }: ShellScreenBody
       <GestureDetector gesture={ring.gesture}>
         <Animated.View
           collapsable={false}
-          style={styles.swipeSurface}
+          style={[styles.swipeSurface, ring.surfaceStyle]}
           onLayout={ring.onSurfaceLayout}
         >
           {body}
