@@ -4325,6 +4325,13 @@ export const FetchRecentProviderSessionsResponseMessageSchema = z.object({
     requestId: z.string(),
     entries: z.array(RecentProviderSessionDescriptorPayloadSchema),
     filteredAlreadyImportedCount: z.number().int().nonnegative().optional(),
+    // COMPAT(importClaimedTotal): added 2026-10-02 (Paseo Go B8-COUNT, F24), optional
+    // while clients support older daemons. How many in-register agents claim a
+    // provider transcript at all — counted over the daemon's FULL claim index, so
+    // unlike `entries` it does not shrink with the return window (limit/search).
+    // The import screen renders 「共 N 个会话已是你的 agent」 from it; absent =
+    // pre-B8 daemon (or zero claims) and the line is not rendered.
+    claimedTotal: z.number().int().nonnegative().optional(),
     providerErrors: z
       .array(
         z.object({

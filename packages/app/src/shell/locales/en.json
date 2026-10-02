@@ -24,6 +24,8 @@
     "retry": "Retry",
     "empty": "No sessions available to import.",
     "alreadyHidden": "{{count}} already-imported sessions hidden",
+    "claimedSummary_one": "{{count}} session is already one of your agents · showing the {{shown}} most recent",
+    "claimedSummary_other": "{{count}} sessions are already your agents · showing the {{shown}} most recent",
     "searchPlaceholder": "Search sessions (title/preview/folder)",
     "searchEmpty": "No matching sessions.",
     "searchEmptyLocal": "No matching sessions (older hosts only filter loaded entries).",

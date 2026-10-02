@@ -291,6 +291,33 @@ describe("resolveDirectoryLabel", () => {
   it("falls back to the path when no project owns the directory", () => {
     expect(resolveDirectoryLabel("/tmp/scratch", projects)).toEqual({ name: "/tmp/scratch" });
   });
+
+  // B8-COUNT (F24 追加口径) acceptance — the project segment and the identity tile
+  // must hit the registered project across Windows spellings. The daemon's project
+  // registry stores `C:\work\paseo-go`; a transcript header spells the same
+  // directory `c:\work\paseo-go`, and a B8 daemon folds that to `C:/work/paseo-go`
+  // on the wire. All three land on one project; an unowned directory still prints
+  // the spelling it was handed (the identity fold's lower-case drive is for
+  // comparing, not for showing).
+  const windowsProjects = [
+    { rootPath: "C:\\work\\paseo-go", name: "Karl0007/paseo" },
+    { rootPath: "C:\\work\\paseo-go\\packages\\app", name: "paseo app" },
+  ];
+
+  it.each([
+    ["c:\\work\\paseo-go", { name: "Karl0007/paseo" }],
+    ["C:\\work\\paseo-go\\", { name: "Karl0007/paseo" }],
+    ["C:/work/paseo-go", { name: "Karl0007/paseo" }],
+    ["c:/work/paseo-go/packages/app/src", { name: "paseo app", detail: "src" }],
+  ])("hits the owning project through %s", (directory, expected) => {
+    expect(resolveDirectoryLabel(directory, windowsProjects)).toEqual(expected);
+  });
+
+  it("keeps the given spelling when no Windows project owns the directory", () => {
+    expect(resolveDirectoryLabel("C:/work/elsewhere", windowsProjects)).toEqual({
+      name: "C:/work/elsewhere",
+    });
+  });
 });
 
 describe("formatDirectoryLabel", () => {

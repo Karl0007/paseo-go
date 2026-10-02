@@ -3212,6 +3212,7 @@ test("fetch_recent_provider_sessions_request lists importable provider sessions 
   session.emit = (message) => emitted.push(message as { type: string; payload: unknown });
   session.agentManager.listAgents = () => [
     {
+      id: "live-agent",
       provider: "codex",
       persistence: {
         provider: "codex",
@@ -3357,6 +3358,9 @@ test("fetch_recent_provider_sessions_request lists importable provider sessions 
           },
         ],
         filteredAlreadyImportedCount: 2,
+        // B8-COUNT: 在册认领有两条（live agent + stored record），窗口只留 2 行
+        // ——计数故意不跟着窗走，这正是 F24 要对齐的那个口径。
+        claimedTotal: 2,
       },
     },
   ]);
@@ -3393,6 +3397,7 @@ test("fetch_recent_provider_sessions_request forwards providerFilter to agent ma
       payload: {
         requestId: "req-provider-filter",
         entries: [],
+        claimedTotal: 0,
         providerErrors: [{ provider: "claude", message: "Claude listing failed" }],
       },
     },
@@ -3406,6 +3411,7 @@ test("fetch_recent_provider_sessions_request reports filteredAlreadyImportedCoun
   session.emit = (message) => emitted.push(message as { type: string; payload: unknown });
   session.agentManager.listAgents = () => [
     {
+      id: "live-agent",
       provider: "codex",
       persistence: {
         provider: "codex",
@@ -3444,6 +3450,7 @@ test("fetch_recent_provider_sessions_request reports filteredAlreadyImportedCoun
         requestId: "req-all-imported",
         entries: [],
         filteredAlreadyImportedCount: 1,
+        claimedTotal: 1,
       },
     },
   ]);

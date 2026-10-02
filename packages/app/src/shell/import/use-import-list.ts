@@ -25,6 +25,7 @@ export interface ImportListClient {
   }): Promise<{
     entries: FetchRecentProviderSessionEntry[];
     filteredAlreadyImportedCount?: number;
+    claimedTotal?: number;
     providerErrors?: Array<{ provider: string; message: string }>;
   }>;
 }
@@ -33,6 +34,12 @@ export interface ImportListState {
   status: "loading" | "ready" | "error";
   entries: FetchRecentProviderSessionEntry[];
   alreadyImportedCount: number;
+  /**
+   * B8-COUNT (F24): 全量在册认领数（服务端 claim 索引口径，与返回窗无关）。
+   * `null` = 这台 daemon 没报这个字段（旧 daemon）或还没拿到响应——导入屏的
+   * 说明行按「有数才说」渲染，旧 daemon 上整行不出现。
+   */
+  claimedTotal: number | null;
   providerErrors: Array<{ provider: string; message: string }>;
   error: string | null;
 }
@@ -41,6 +48,7 @@ const INITIAL_STATE: ImportListState = {
   status: "loading",
   entries: [],
   alreadyImportedCount: 0,
+  claimedTotal: null,
   providerErrors: [],
   error: null,
 };
@@ -100,6 +108,7 @@ export function useImportList(
         status: "ready",
         entries: payload.entries,
         alreadyImportedCount: payload.filteredAlreadyImportedCount ?? 0,
+        claimedTotal: payload.claimedTotal ?? null,
         providerErrors: payload.providerErrors ?? [],
         error: null,
       });
@@ -109,6 +118,7 @@ export function useImportList(
         status: "error",
         entries: [],
         alreadyImportedCount: 0,
+        claimedTotal: null,
         providerErrors: [],
         error: error instanceof Error ? error.message : String(error),
       });

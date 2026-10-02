@@ -24,6 +24,7 @@ import {
   importProviderSession,
   listImportableProviderSessions,
   normalizeImportAgentRequest,
+  normalizeProviderSessionDisplayCwd,
 } from "./import-sessions.js";
 
 const directorySymlinkType = process.platform === "win32" ? "junction" : "dir";
@@ -216,6 +217,7 @@ test("listImportableProviderSessions filters, sorts, limits, and projects import
     listAgents: () =>
       [
         {
+          id: "agent-live",
           provider: "codex",
           persistence: {
             provider: "codex",
@@ -229,6 +231,7 @@ test("listImportableProviderSessions filters, sorts, limits, and projects import
   const agentStorage = {
     list: async () => [
       {
+        id: "agent-stored",
         provider: "codex",
         persistence: {
           provider: "codex",
@@ -261,6 +264,8 @@ test("listImportableProviderSessions filters, sorts, limits, and projects import
   });
   expect(result).toEqual({
     filteredAlreadyImportedCount: 2,
+    // B8-COUNT: 两条在册认领（live agent + stored record），与窗内剩几行无关。
+    claimedTotal: 2,
     providerErrors: [],
     entries: [
       {
@@ -1023,6 +1028,151 @@ test("listImportableProviderSessions keeps realpath-equivalent cwd matches", asy
   });
 
   expect(result.entries.map((entry) => entry.providerHandleId)).toEqual(["pi-handle"]);
+});
+
+test("listImportableProviderSessions counts claimedTotal over the full claim index, deduped by conversation", async () => {
+  // F24 根因=两口径不同轴：徽标只落在（agent ∩ 返回窗 ∩ handle 命中）的行上，
+  // 对话列表数=全部在册 agent。claimedTotal 报后者：窗外存量要算进去（本例
+  // agent-old 的 transcript 已被扫描窗甩掉，没有行可标），一个 agent 的多个
+  // key（sessionId/nativeHandle/resume 链祖先/大小写折叠拼法）只算一条会话。
+  const root = mkdtempSync(path.join(tmpdir(), "paseo-import-claimed-"));
+  importTestDirectories.push(root);
+  const cwd = "/tmp/project";
+  const parentFile = path.join(root, "2026-09-26T00-00-00-000Z_parent.jsonl");
+  const childFile = path.join(root, "2026-09-30T00-00-00-000Z_child.jsonl");
+  writeFileSync(
+    parentFile,
+    `${JSON.stringify({ type: "session", id: "parent-id", cwd, timestamp: "2026-09-26T00:00:00.000Z" })}\n`,
+  );
+  writeFileSync(
+    childFile,
+    `${JSON.stringify({ type: "session", id: "child-id", cwd, timestamp: "2026-09-30T00:00:00.000Z", parentSession: parentFile })}\n`,
+  );
+  // 窗内三行：一条被 agent-in-window 认领、两条是 agent-chain 的同一会话
+  // （现行 + 祖先），第四条 h-free 无人认领=唯一还能导入的行。
+  const listed = [
+    makeImportableSession({
+      sessionId: "s-in",
+      nativeHandle: "h-in",
+      cwd,
+      lastActivityAt: "2026-04-30T12:03:00.000Z",
+    }),
+    makeImportableSession({
+      provider: "omp",
+      sessionId: "child-id",
+      nativeHandle: childFile,
+      cwd,
+      lastActivityAt: "2026-04-30T12:02:00.000Z",
+    }),
+    makeImportableSession({
+      provider: "omp",
+      sessionId: "parent-id",
+      nativeHandle: parentFile,
+      cwd,
+      lastActivityAt: "2026-04-30T12:01:00.000Z",
+    }),
+    makeImportableSession({
+      sessionId: "s-free",
+      nativeHandle: "h-free",
+      cwd,
+      lastActivityAt: "2026-04-30T12:00:00.000Z",
+    }),
+  ];
+  const listImportableSessions = vi.fn(async (options?: { limit?: number; query?: string }) =>
+    options?.query
+      ? makeImportableSessionsResult([])
+      : makeImportableSessionsResult(listed.slice(0, options?.limit)),
+  );
+  const agentManager = {
+    listAgents: () => [],
+    listImportableSessions,
+  } satisfies Pick<AgentManager, "listAgents" | "listImportableSessions">;
+  const agentStorage = {
+    list: async () =>
+      [
+        {
+          id: "agent-in-window",
+          provider: "codex",
+          persistence: { provider: "codex", sessionId: "s-in", nativeHandle: "h-in" },
+        },
+        // 窗外存量：listing 根本不返回它的 transcript。
+        {
+          id: "agent-old",
+          provider: "codex",
+          archivedAt: "2026-04-29T00:00:00.000Z",
+          persistence: { provider: "codex", sessionId: "s-old", nativeHandle: "h-old" },
+        },
+        {
+          id: "agent-chain",
+          provider: "omp",
+          persistence: { provider: "omp", sessionId: "child-id", nativeHandle: childFile },
+        },
+      ] as StoredAgentRecord[],
+  } satisfies Pick<AgentStorage, "list">;
+  const providerSnapshotManager = { getProviderLabel: (provider: string) => provider };
+
+  const windowed = await listImportableProviderSessions({
+    request: makeRequest({ cwd, providers: ["codex", "omp"], limit: 1 }),
+    agentManager,
+    agentStorage,
+    providerSnapshotManager,
+  });
+  expect(windowed.entries.map((entry) => entry.providerHandleId)).toEqual(["h-free"]);
+  expect(windowed.claimedTotal).toBe(3);
+
+  // 搜索窗是另一条 limit/scanLimit 路径：一行不剩也不动全量计数。
+  const searched = await listImportableProviderSessions({
+    request: makeRequest({ cwd, providers: ["codex", "omp"], query: "no-such-session" }),
+    agentManager,
+    agentStorage,
+    providerSnapshotManager,
+  });
+  expect(searched.entries).toEqual([]);
+  expect(searched.claimedTotal).toBe(3);
+});
+
+test("normalizeProviderSessionDisplayCwd folds Windows spellings and leaves POSIX case alone", () => {
+  // 追加口径钉的等值对：同一目录的两种写法必须归一到同一串。
+  expect(normalizeProviderSessionDisplayCwd("c:\\work\\paseo-go")).toBe("C:/work/paseo-go");
+  expect(normalizeProviderSessionDisplayCwd("c:\\work\\paseo-go")).toBe(
+    normalizeProviderSessionDisplayCwd("C:/work/paseo-go"),
+  );
+  expect(normalizeProviderSessionDisplayCwd("C:\\work\\paseo-go\\")).toBe("C:/work/paseo-go");
+  expect(normalizeProviderSessionDisplayCwd("c:/work//paseo-go/./.dev")).toBe(
+    "C:/work/paseo-go/.dev",
+  );
+  expect(normalizeProviderSessionDisplayCwd("\\\\?\\c:\\work\\paseo-go")).toBe("C:/work/paseo-go");
+  expect(normalizeProviderSessionDisplayCwd("\\\\server\\share\\repo")).toBe("//server/share/repo");
+  // POSIX 大小写有意义（/home/User 与 /home/user 是两个目录）→ 原样返回。
+  expect(normalizeProviderSessionDisplayCwd("/home/User/Project")).toBe("/home/User/Project");
+});
+
+test("listImportableProviderSessions projects a Windows cwd in one spelling without touching the handle", async () => {
+  const windowsCwd = "c:\\work\\paseo-go";
+  const transcript = "c:\\Users\\K\\.omp\\agent\\2026-10-01_chat.jsonl";
+  const result = await listImportableProviderSessions({
+    request: makeRequest({ providers: ["omp"] }),
+    agentManager: {
+      listAgents: () => [],
+      listImportableSessions: async () =>
+        makeImportableSessionsResult([
+          makeImportableSession({
+            provider: "omp",
+            sessionId: "omp-session",
+            nativeHandle: transcript,
+            cwd: windowsCwd,
+            lastActivityAt: "2026-04-30T12:00:00.000Z",
+          }),
+        ]),
+    } satisfies Pick<AgentManager, "listAgents" | "listImportableSessions">,
+    agentStorage: { list: async () => [] } satisfies Pick<AgentStorage, "list">,
+    providerSnapshotManager: { getProviderLabel: () => "OMP" },
+  });
+
+  expect(result.entries[0]?.cwd).toBe("C:/work/paseo-go");
+  // handle=认领键/去重键的输入，一个字符都不能动。
+  expect(result.entries[0]?.providerHandleId).toBe(transcript);
+  expect(result.claimedTotal).toBe(0);
 });
 
 test("listImportableProviderSessions rejects invalid since values", async () => {

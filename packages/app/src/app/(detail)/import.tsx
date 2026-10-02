@@ -389,6 +389,30 @@ function ImportStatusBlock({
   );
 }
 
+// B8-COUNT (F24): 顶部说明行=口径消歧。徽标只可能落在窗内行上（列表按 limit 取
+// 最近 M 条 transcript），对话列表却是全部 agent——此前用户拿这两个数对账，
+// 得出「导入屏少标了一大截」的结论。这一行把两个口径并排说出来。
+// 旧 daemon 不报 claimedTotal（null）/ 零认领（0）/ 尚未拿到响应 → 整行不出现。
+export function ImportClaimSummary({
+  claimedTotal,
+  shown,
+}: {
+  claimedTotal: number | null;
+  shown: number;
+}) {
+  const { t } = useTranslation(SHELL_I18N_NAMESPACE);
+  if (claimedTotal === null || claimedTotal <= 0) {
+    return null;
+  }
+  return (
+    <View style={styles.claimSummary} testID="shell-import-claim-summary">
+      <Text style={styles.claimSummaryText} numberOfLines={1}>
+        {t("import.claimedSummary", { count: claimedTotal, shown })}
+      </Text>
+    </View>
+  );
+}
+
 export default function ShellImportScreen() {
   const { t } = useTranslation(SHELL_I18N_NAMESPACE);
   const insets = useSafeAreaInsets();
@@ -827,6 +851,7 @@ export default function ShellImportScreen() {
         )}
       </View>
 
+      <ImportClaimSummary claimedTotal={listState.claimedTotal} shown={rows.length} />
       <FlatList
         data={visibleItems}
         keyExtractor={keyExtractor}
@@ -1069,6 +1094,15 @@ const styles = StyleSheet.create((theme) => ({
   },
   check: {
     color: theme.colors.accentForeground,
+  },
+  claimSummary: {
+    paddingHorizontal: theme.spacing[4],
+    paddingTop: theme.spacing[2],
+    paddingBottom: theme.spacing[1],
+  },
+  claimSummaryText: {
+    color: theme.colors.foregroundMuted,
+    fontSize: theme.fontSize.sm,
   },
   providerErrors: {
     paddingHorizontal: theme.spacing[4],

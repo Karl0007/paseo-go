@@ -1,6 +1,7 @@
 import type { FetchRecentProviderSessionEntry } from "@getpaseo/client/internal/daemon-client";
 import type { AgentProvider } from "@getpaseo/protocol/agent-types";
 import { i18n } from "@/i18n/i18next";
+import { normalizeWorkspacePath } from "@/utils/workspace-identity";
 
 export const PER_PROVIDER_LIMIT = 15;
 export const ALL_FILTER_VALUE = "__all__";
@@ -160,16 +161,26 @@ function withoutTrailingSlash(path: string): string {
   return path.length > 1 ? path.replace(/\/+$/, "") : path;
 }
 
-/** The project's name when the app knows the directory, else the directory itself. */
+/**
+ * The project's name when the app knows the directory, else the directory itself.
+ *
+ * B8-COUNT (F24 追加口径): both sides go through the app's workspace-identity fold
+ * before this literal compare. On Windows a provider transcript header spells the
+ * directory `c:\work\paseo-go` while the daemon's project registry stores
+ * `C:\work\paseo-go`, and the compare is separator- and case-sensitive — an
+ * unfolded pair silently misses the owning project, so the row shows the raw path
+ * as its project segment and paints the identity tile off the wrong name (the
+ * 「C」vs「K」frame gap). Non-Windows paths fold to themselves.
+ */
 export function resolveDirectoryLabel(
   directory: string,
   projects: ReadonlyArray<DirectoryProject>,
 ): DirectoryLabel {
-  const normalized = withoutTrailingSlash(directory);
+  const normalized = normalizeWorkspacePath(directory) ?? "";
   let bestRoot: string | null = null;
   let bestName: string | null = null;
   for (const project of projects) {
-    const root = withoutTrailingSlash(project.rootPath);
+    const root = normalizeWorkspacePath(project.rootPath) ?? "";
     if (!root) continue;
     if (bestRoot !== null && root.length <= bestRoot.length) continue;
     if (normalized !== root && !normalized.startsWith(`${root}/`)) continue;
@@ -177,7 +188,10 @@ export function resolveDirectoryLabel(
     bestName = project.name;
   }
   if (bestRoot === null || bestName === null) {
-    return { name: normalized };
+    // Unowned directory: print the path as it arrived (the daemon already folds
+    // a Windows cwd to its display spelling). The identity fold lower-cases the
+    // drive, which is right for comparing and wrong for showing.
+    return { name: withoutTrailingSlash(directory) };
   }
   const relative = normalized.slice(bestRoot.length + 1);
   return relative ? { name: bestName, detail: relative } : { name: bestName };

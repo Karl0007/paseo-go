@@ -296,3 +296,56 @@ describe("useImportList host-switch clear (KI-13)", () => {
     expect(result.current.listState.entries).toEqual([ENTRY_B]);
   });
 });
+
+// B8-COUNT (F24): claimedTotal 是导入屏说明行的唯一数据源。旧 daemon 不报这个
+// 字段 → null（屏上整行沉默，不是「共 0 个」）；它和 entries 同源同生命周期，
+// 切主机必须一起复位，否则新主机的 loading 期挂着旧主机的 N。
+describe("useImportList claimedTotal (B8-COUNT)", () => {
+  it("commits the daemon's full claim count alongside the window", async () => {
+    const client = {
+      fetchRecentProviderSessions: vi.fn(async () => ({
+        entries: [ENTRY_A],
+        claimedTotal: 6597,
+      })),
+    } as unknown as ImportListClient;
+    const { result } = renderHook(() => useImportList(200, "A", client, ""));
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    expect(result.current.listState.entries).toEqual([ENTRY_A]);
+    expect(result.current.listState.claimedTotal).toBe(6597);
+  });
+
+  it("keeps null when the daemon does not report the field, and resets it on host switch", async () => {
+    const clientA = {
+      fetchRecentProviderSessions: vi.fn(async () => ({ entries: [ENTRY_A], claimedTotal: 42 })),
+    } as unknown as ImportListClient;
+    const clientB = {
+      fetchRecentProviderSessions: vi.fn(async () => ({ entries: [ENTRY_B] })),
+    } as unknown as ImportListClient;
+    const { result, rerender } = renderHook(
+      ({ serverId, client }) => useImportList(200, serverId, client, ""),
+      {
+        initialProps: {
+          serverId: "A" as string | null,
+          client: clientA as ImportListClient | null,
+        },
+      },
+    );
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    expect(result.current.listState.claimedTotal).toBe(42);
+
+    rerender({ serverId: "B", client: clientB });
+    expect(result.current.listState.claimedTotal).toBeNull();
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    expect(result.current.listState.entries).toEqual([ENTRY_B]);
+    expect(result.current.listState.claimedTotal).toBeNull();
+  });
+});

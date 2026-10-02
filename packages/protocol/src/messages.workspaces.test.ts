@@ -404,6 +404,51 @@ describe("workspace message schemas", () => {
     expect(response.payload.filteredAlreadyImportedCount).toBe(3);
   });
 
+  // B8-COUNT (F24): the claim total rides alongside the window, and its absence is
+  // the old-daemon signal the import screen uses to hide the summary line.
+  test("B8-COUNT: fetch_recent_provider_sessions response round-trips claimedTotal; absent stays absent", () => {
+    const withCount = SessionOutboundMessageSchema.parse(
+      JSON.parse(
+        JSON.stringify({
+          type: "fetch_recent_provider_sessions_response",
+          payload: {
+            requestId: "req-claimed-total",
+            entries: [],
+            claimedTotal: 6597,
+          },
+        }),
+      ),
+    );
+    if (withCount.type !== "fetch_recent_provider_sessions_response") {
+      throw new Error("expected fetch_recent_provider_sessions_response");
+    }
+    expect(withCount.payload.claimedTotal).toBe(6597);
+
+    // 旧 daemon（无此字段）照旧解析 = 缺省兼容。
+    const withoutCount = SessionOutboundMessageSchema.parse({
+      type: "fetch_recent_provider_sessions_response",
+      payload: { requestId: "req-legacy-daemon", entries: [] },
+    });
+    if (withoutCount.type !== "fetch_recent_provider_sessions_response") {
+      throw new Error("expected fetch_recent_provider_sessions_response");
+    }
+    expect(withoutCount.payload.claimedTotal).toBeUndefined();
+
+    // 计数口径=去重条数：负数/小数不是合法计数。
+    expect(() =>
+      SessionOutboundMessageSchema.parse({
+        type: "fetch_recent_provider_sessions_response",
+        payload: { requestId: "req-bad", entries: [], claimedTotal: -1 },
+      }),
+    ).toThrow();
+    expect(() =>
+      SessionOutboundMessageSchema.parse({
+        type: "fetch_recent_provider_sessions_response",
+        payload: { requestId: "req-bad", entries: [], claimedTotal: 1.5 },
+      }),
+    ).toThrow();
+  });
+
   test("B5-IMPORT2: includeExisting request + existing entry mark parse; absent stays absent", () => {
     const request = SessionInboundMessageSchema.parse({
       type: "fetch_recent_provider_sessions_request",

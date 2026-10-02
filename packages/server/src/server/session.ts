@@ -6229,6 +6229,9 @@ export class Session {
           ...(result.filteredAlreadyImportedCount > 0
             ? { filteredAlreadyImportedCount: result.filteredAlreadyImportedCount }
             : {}),
+          // B8-COUNT (F24): always sent by a B8 daemon — the shell tells "old daemon"
+          // from "no claims" by presence, and hides the summary line on either.
+          claimedTotal: result.claimedTotal,
           ...(result.providerErrors.length > 0 ? { providerErrors: result.providerErrors } : {}),
         },
       });

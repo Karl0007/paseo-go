@@ -1,3 +1,4 @@
+import nodePath from "node:path";
 import type { z } from "zod";
 import type { Logger } from "pino";
 import type { ProviderSnapshotManager } from "./provider-snapshot-manager.js";
@@ -27,7 +28,7 @@ import {
   IMPORTED_PROVIDER_SESSION_LABEL,
   PARENT_AGENT_ID_LABEL,
 } from "@getpaseo/protocol/agent-labels";
-import { createRealpathAwarePathMatcher } from "../../utils/path.js";
+import { createRealpathAwarePathMatcher, looksLikeDefiniteWindowsPath } from "../../utils/path.js";
 
 type ImportAgentRequestMessage = z.infer<typeof ImportAgentRequestMessageSchema>;
 
@@ -82,6 +83,11 @@ export interface ListImportableProviderSessionsInput {
 export interface ListImportableProviderSessionsResult {
   entries: RecentProviderSessionDescriptorPayload[];
   filteredAlreadyImportedCount: number;
+  /**
+   * B8-COUNT (F24): how many in-register agents claim a provider transcript at
+   * all — see `countClaimedAgents`. Window-independent by construction.
+   */
+  claimedTotal: number;
   providerErrors: Array<{ provider: string; message: string }>;
 }
 
@@ -211,6 +217,11 @@ export async function listImportableProviderSessions(
       const payload = toRecentProviderSessionDescriptorPayload(descriptor, {
         providerLabel: providerSnapshotManager.getProviderLabel(descriptor.provider),
       });
+      // B8-COUNT (F24 追加口径): the descriptor's cwd is the client's display/matching
+      // input (project segment, identity tile, local search haystack). Windows
+      // providers spell one directory several ways, so fold it here — the handle,
+      // the claim keys and the dedup key above are deliberately untouched.
+      payload.cwd = normalizeProviderSessionDisplayCwd(payload.cwd);
       if (includeExisting) {
         const facts = findExistingAgentFacts(
           importedIndex,
@@ -227,6 +238,7 @@ export async function listImportableProviderSessions(
   return {
     entries,
     filteredAlreadyImportedCount,
+    claimedTotal: countClaimedAgents(importedIndex),
     providerErrors: listing.providerErrors,
   };
 }
@@ -234,6 +246,65 @@ export async function listImportableProviderSessions(
 function normalizeImportSessionQuery(query: string | undefined): string | null {
   const normalized = query?.trim().toLowerCase();
   return normalized ? normalized : null;
+}
+
+/**
+ * B8-COUNT (F24): the「共 N 个会话已是你的 agent」number.
+ *
+ * The claim index maps *handle spellings* to agents, so one conversation sits on
+ * several keys: `persistence.sessionId`, `nativeHandle`, every omp resume-chain
+ * ancestor and each ancestor's case-folded spelling. The user-facing unit is the
+ * conversation, so the count dedupes to the owning agent — the same merge the
+ * badges already make (`addKey` lets an active claim overwrite the archived one
+ * for a shared handle, and a resume chain badges as one agent).
+ *
+ * It is read off the index, not the listing: the import window (limit/query/since/
+ * cwd) decides which ROWS exist, never how many of the user's agents already own
+ * a transcript. That is the whole F24 mismatch — 6597 transcripts, 200-row window,
+ * a badge count that silently meant "the intersection".
+ */
+function countClaimedAgents(index: Map<string, ExistingAgentFacts>): number {
+  const agents = new Set<string>();
+  for (const facts of index.values()) {
+    agents.add(facts.agentId);
+  }
+  return agents.size;
+}
+
+const WINDOWS_NAMESPACE_PREFIX = /^[/\\]{2}\?[/\\]/u;
+const WINDOWS_DRIVE_PREFIX = /^([a-z]):/u;
+
+/**
+ * B8-COUNT (F24 追加口径): host-aware normalization of a provider session's cwd for
+ * the display/matching half of the import descriptor.
+ *
+ * Windows providers spell the same directory differently per writer
+ * (`c:\work\paseo-go` out of a transcript header, `C:/work/paseo-go` out of a
+ * realpath). The import screen matches this string against the daemon's
+ * registered project directories, so an un-normalized row misses its project and
+ * falls back to the raw path's first character — the「C」vs「K」tile frame gap.
+ *
+ * Pure and syscall-free: `\\?\` device prefix dropped, separators folded to `/`,
+ * drive letter upper-cased, `.`/`..`/duplicate separators collapsed, trailing
+ * separator dropped. Anything that is not definitely a Windows path comes back
+ * untouched — POSIX case is significant, folding it would merge two directories.
+ */
+export function normalizeProviderSessionDisplayCwd(cwd: string): string {
+  const unprefixed = cwd.replace(WINDOWS_NAMESPACE_PREFIX, "");
+  if (!looksLikeDefiniteWindowsPath(unprefixed)) {
+    return cwd;
+  }
+  // `win32.normalize` folds `/`+`\`, duplicate separators and `.`/`..`, and keeps a
+  // trailing separator — which a project directory is displayed and compared
+  // without, unless the trailing separator IS the path (a drive/UNC root).
+  const normalized = nodePath.win32.normalize(unprefixed);
+  const root = nodePath.win32.parse(normalized).root;
+  const trimmed =
+    normalized !== root && /[\\/]$/u.test(normalized) ? normalized.slice(0, -1) : normalized;
+  const slashed = trimmed.replaceAll("\\", "/");
+  return slashed.replace(WINDOWS_DRIVE_PREFIX, (_match, drive: string) =>
+    `${drive}:`.toUpperCase(),
+  );
 }
 
 export async function importProviderSession(

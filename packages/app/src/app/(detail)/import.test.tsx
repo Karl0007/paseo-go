@@ -13,8 +13,12 @@ import { projectAvatarFor } from "@/shell/chats/project-avatar";
 import type { ImportRow, ImportRowBadge } from "@/shell/import/rows";
 
 vi.mock("react-i18next", () => ({
-  // Echo t：行里的措辞全是 key，按 key 钉与按字钉同样强。
-  useTranslation: () => ({ t: (key: string) => key }),
+  // Echo t：行里的措辞全是 key，按 key 钉与按字钉同样强。带插值参数的调用把参数
+  // 一并回显——B8-COUNT 说明行钉的就是那两个数本身。
+  useTranslation: () => ({
+    t: (key: string, options?: Record<string, unknown>) =>
+      options === undefined ? key : `${key} ${JSON.stringify(options)}`,
+  }),
   initReactI18next: { type: "3rdParty", init: () => {} },
 }));
 // 屏体（默认导出）在模块图上拉起的重依赖——本测试只挂行单元，不挂整屏。
@@ -28,7 +32,7 @@ vi.mock("expo-haptics", () => ({
   ImpactFeedbackStyle: { Light: "light", Medium: "medium", Heavy: "heavy" },
 }));
 
-import { ImportRowCell } from "./import";
+import { ImportClaimSummary, ImportRowCell } from "./import";
 
 const PROJECT = "paseo-go";
 const NOOP = () => {};
@@ -192,5 +196,23 @@ describe("ImportRowCell badge (F23 已归档 > 已导入)", () => {
     fireEvent.click(plain);
     expect(onTogglePlain).toHaveBeenCalledWith("omp:handle-1");
     expect(onOpenPlain).not.toHaveBeenCalled();
+  });
+});
+
+// B8-COUNT (F24): 说明行是「两个口径并排说一次」的唯一出口——有数才说，
+// 旧 daemon（字段缺失=null）与零认领都必须整行沉默，不能出现「共  个会话」。
+describe("ImportClaimSummary (B8-COUNT 顶部说明行)", () => {
+  it("states the full claim count next to the window it was cut from", () => {
+    render(<ImportClaimSummary claimedTotal={6597} shown={200} />);
+    expect(screen.getByTestId("shell-import-claim-summary").textContent).toBe(
+      'import.claimedSummary {"count":6597,"shown":200}',
+    );
+  });
+
+  it("stays silent for a pre-B8 daemon and for zero claims", () => {
+    render(<ImportClaimSummary claimedTotal={null} shown={200} />);
+    expect(screen.queryByTestId("shell-import-claim-summary")).toBeNull();
+    render(<ImportClaimSummary claimedTotal={0} shown={200} />);
+    expect(screen.queryByTestId("shell-import-claim-summary")).toBeNull();
   });
 });
