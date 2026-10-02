@@ -53,10 +53,14 @@ export const OwnershipBadge = memo(function OwnershipBadge({
   testID?: string;
 }) {
   const { t } = useTranslation(SHELL_I18N_NAMESPACE);
-  const presentation = ownershipPresentation({ ownership, externalLooksActive, origin });
+  const presentation = ownershipPresentation({
+    ownership,
+    externalLooksActive,
+    origin,
+  });
   return (
     <View style={[styles.pill, styles[PILL_TONE_STYLE[presentation.tone]]]} testID={testID}>
-      <Text style={[styles.text, styles[PILL_TONE_TEXT[presentation.tone]]]}>
+      <Text style={[styles.text, styles[PILL_TONE_TEXT[presentation.tone]]]} numberOfLines={1}>
         {t(presentation.labelKey)}
       </Text>
     </View>
@@ -64,11 +68,22 @@ export const OwnershipBadge = memo(function OwnershipBadge({
 });
 
 const styles = StyleSheet.create((theme) => ({
-  // Shrink-safe on the title line (the title flexes first, ruling 6's posture)
-  // and quiet enough to keep the title the row's protagonist. Geometry only —
-  // each tone owns its own fill, so no state can leak a stale background.
+  // REVIEW-B9-03 (Main 裁定 B/A 定妆): the pill is the title line's SECONDARY
+  // relief valve — 外部·运行中 is the row's longest unbounded string and a
+  // shrink-0 posture pushed the right-edge group over the line's box (the f6
+  // disease, second member of the same root). It therefore shrinks (factor 1) and
+  // truncates (numberOfLines=1 above) before a marker, the clock or the ⋯ may
+  // leave the row. The truncation is PROPORTIONAL — long-title rows show
+  // 「外部…」/「N…」 — and that cost is the adjudicated posture: the device frames
+  // proved a smaller factor (0.01) is dead on native (Yoga does not reproduce the
+  // CSS freeze-and-redistribute loop, so the pill never absorbs the residual and
+  // the badge is pushed out of the row again). The word-length problem is rooted
+  // out by the G3 card (spinner carries 运行中, the pill word shortens to the
+  // pure state), not here.
+  // KI(F21): the same extreme state can flex the title down to invisibility — the
+  // title's first-valve posture is F21's existing surface, not opened here.
   pill: {
-    flexShrink: 0,
+    flexShrink: 1,
     paddingHorizontal: theme.spacing[1.5],
     paddingVertical: 1,
     borderRadius: theme.borderRadius.full,

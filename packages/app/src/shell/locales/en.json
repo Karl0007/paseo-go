@@ -77,7 +77,7 @@
       "recent": "Recent"
     },
     "subagents": {
-      "badge": "subagents×{{n}}"
+      "badge": "{{n}} subagents"
     },
     "activity": {
       "running": "Running",

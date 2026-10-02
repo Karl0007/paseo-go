@@ -145,9 +145,18 @@ describe("OwnershipBadge tri-state tint (B8 F22)", () => {
     expectCssColor(word.style.color, "#52525b"); // statusNeutral
   });
 
-  it("stays shrink-safe on the title line (F21's pill posture)", () => {
-    const { pill } = renderPill("paseo", false);
-    expect(pill.style.flexShrink).toBe("0");
+  it("is the title line's secondary relief valve (REVIEW-B9-03 Main 裁定 B/A)", () => {
+    // The pill truncates (numberOfLines=1 + flexShrink:1) instead of ever pushing
+    // the right-edge group over the row's box. The proportional truncation of
+    // long-title rows is the ADJUDICATED secondary-relief posture — a smaller
+    // factor is dead on native (Yoga has no freeze-and-redistribute; the device
+    // frames proved the badge pushed out again at 0.01) — and the word-length
+    // root fix lives in the G3 card, not here.
+    const { pill, word } = renderPill("paseo", false);
+    expect(pill.style.flexShrink).toBe("1");
+    expect(word.className).toMatch(/r-whiteSpace-/);
+    expect(word.className).toMatch(/r-textOverflow-/);
+    expect(word.className).toMatch(/r-overflow-/);
   });
 });
 
@@ -174,8 +183,18 @@ describe("OwnershipBadge paints from theme tokens (REVIEW-B8-07 sentinel)", () =
     });
     const { OwnershipBadge: TokenPill } = await import("@/shell/components/ownership-badge");
     const cases = [
-      { ownership: "paseo", externalLooksActive: false, fill: "#0a1112", word: "#0b1314" },
-      { ownership: "external", externalLooksActive: true, fill: "#0c1516", word: "#0d1718" },
+      {
+        ownership: "paseo",
+        externalLooksActive: false,
+        fill: "#0a1112",
+        word: "#0b1314",
+      },
+      {
+        ownership: "external",
+        externalLooksActive: true,
+        fill: "#0c1516",
+        word: "#0d1718",
+      },
       {
         ownership: "none",
         externalLooksActive: false,

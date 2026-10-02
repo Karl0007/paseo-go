@@ -77,7 +77,7 @@
       "recent": "最近"
     },
     "subagents": {
-      "badge": "子任务×{{n}}"
+      "badge": "{{n}} 个子任务"
     },
     "activity": {
       "running": "运行中",

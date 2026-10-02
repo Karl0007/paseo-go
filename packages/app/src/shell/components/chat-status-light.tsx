@@ -35,8 +35,14 @@ export function ChatStatusLight({
     }
     opacity.value = withRepeat(
       withSequence(
-        withTiming(BREATH_FLOOR, { duration: BREATH_HALF_MS, easing: Easing.inOut(Easing.ease) }),
-        withTiming(1, { duration: BREATH_HALF_MS, easing: Easing.inOut(Easing.ease) }),
+        withTiming(BREATH_FLOOR, {
+          duration: BREATH_HALF_MS,
+          easing: Easing.inOut(Easing.ease),
+        }),
+        withTiming(1, {
+          duration: BREATH_HALF_MS,
+          easing: Easing.inOut(Easing.ease),
+        }),
       ),
       -1,
       false,
@@ -61,9 +67,14 @@ export function ChatStatusLight({
   );
 }
 
+// REVIEW-B9-03: the wrap's width is row chrome — the chat row's title-line width
+// budget (chat-list-row.tsx TITLE_LINE_BUDGET_DP) imports this constant instead
+// of re-typing 12, so a light edit moves the budget in the same commit.
+export const STATUS_LIGHT_WIDTH_DP = 12;
+
 const styles = StyleSheet.create(() => ({
   wrap: {
-    width: 12,
+    width: STATUS_LIGHT_WIDTH_DP,
     alignItems: "center",
     justifyContent: "center",
   },

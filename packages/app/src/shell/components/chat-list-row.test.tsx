@@ -61,7 +61,15 @@ vi.mock("@/shell/components/use-shell-row-drag-menu", () => ({
   }),
 }));
 
-import { ChatListRow, type ShellChatAgent } from "@/shell/components/chat-list-row";
+import {
+  ChatListRow,
+  SLOT_CHIP_DP,
+  TITLE_LINE_BUDGET_DP,
+  TITLE_LINE_CHROME_DP,
+  titleLineFloorWidthDp,
+  titleLineWidthDp,
+  type ShellChatAgent,
+} from "@/shell/components/chat-list-row";
 import { usePaseoGoPinsStore } from "@/shell/stores/pins";
 import type { ChatRow } from "@/shell/chats/derive";
 import type { ShellAgentActions } from "@/shell/shellAgentActions";
@@ -104,7 +112,11 @@ function agentFixture(overrides: Record<string, unknown> = {}): ShellChatAgent {
 // the render call. `renderRow` repoints the shared row at the fixture under test.
 const ON_OPEN = vi.fn();
 const ACTIONS = {} as ShellAgentActions;
-const ROW: ChatRow<ShellChatAgent> = { agent: agentFixture(), unread: false, dimmed: false };
+const ROW: ChatRow<ShellChatAgent> = {
+  agent: agentFixture(),
+  unread: false,
+  dimmed: false,
+};
 
 function renderRow(agent: ShellChatAgent, overrides: { unread?: boolean } = {}): void {
   ROW.agent = agent;
@@ -172,7 +184,13 @@ describe("ChatListRow title line (D21: alias > 项目(worktree))", () => {
 // pinned here against the fixture the pixels render.
 describe("ChatListRow ownership pill (D22 birth axis)", () => {
   it("reads 原生 for an idle launched session and says it out loud", () => {
-    renderRow(agentFixture({ ownership: "none", externalLooksActive: false, origin: "launch" }));
+    renderRow(
+      agentFixture({
+        ownership: "none",
+        externalLooksActive: false,
+        origin: "launch",
+      }),
+    );
     expect(screen.getByTestId(`shell-chat-ownership-${KEY}`).textContent).toBe(
       "chats.ownership.state.native",
     );
@@ -182,7 +200,13 @@ describe("ChatListRow ownership pill (D22 birth axis)", () => {
   });
 
   it("reads 外部 for an idle imported session", () => {
-    renderRow(agentFixture({ ownership: "none", externalLooksActive: false, origin: "import" }));
+    renderRow(
+      agentFixture({
+        ownership: "none",
+        externalLooksActive: false,
+        origin: "import",
+      }),
+    );
     expect(screen.getByTestId(`shell-chat-ownership-${KEY}`).textContent).toBe(
       "chats.ownership.badge",
     );
@@ -196,7 +220,13 @@ describe("ChatListRow ownership pill (D22 birth axis)", () => {
   });
 
   it("lets live evidence win over birth", () => {
-    renderRow(agentFixture({ ownership: "paseo", externalLooksActive: false, origin: "import" }));
+    renderRow(
+      agentFixture({
+        ownership: "paseo",
+        externalLooksActive: false,
+        origin: "import",
+      }),
+    );
     expect(screen.getByTestId(`shell-chat-ownership-${KEY}`).textContent).toBe(
       "chats.ownership.state.native",
     );
@@ -221,13 +251,17 @@ describe("ChatListRow title line layout (F21 right-edge clock)", () => {
     expect(pill.previousElementSibling).toBe(title);
     expect(trailing.previousElementSibling).toBe(pill);
     expect(trailing.lastElementChild).toBe(time);
-    // The group eats the leftover width and right-aligns its content; only the
-    // title may shrink — pill and clock are shrink-0, never squeezed out.
+    // The group eats the leftover width and right-aligns its content; the clock
+    // and markers are shrink-0, never squeezed out. REVIEW-B9-03 (Main 裁定 B/A):
+    // the shrinkable members are the title (primary, ruling 6) and the ownership
+    // pill (secondary relief valve — proportional truncation is the adjudicated
+    // posture; a smaller factor is dead on native, and the word-length root fix
+    // is the G3 card).
     expect(trailing.style.flexGrow).toBe("1");
     expect(trailing.style.justifyContent).toBe("flex-end");
     expect(trailing.style.flexShrink).toBe("0");
     expect(title.style.flexShrink).toBe("1");
-    expect(pill.style.flexShrink).toBe("0");
+    expect(pill.style.flexShrink).toBe("1");
     expect(time.style.flexShrink).toBe("0");
     // F21's 右上小灰字: the theme's muted grey token (fixture #666666).
     expect(time.style.color).toBe("rgb(102, 102, 102)");
@@ -244,16 +278,17 @@ describe("ChatListRow title line layout (F21 right-edge clock)", () => {
   });
 });
 
-// B9-BADGE (F32, 用户截图钉死): the unread indicator is ONE marker in ONE slot, and
-// that slot is the title line's LAST pixel — right of the clock. Order inside the
-// right-edge group: spinner → clock → marker. `count > 0` hands the slot to the count
+// B9-BADGE (F32, 用户截图钉死): the unread indicator is ONE marker in ONE slot —
+// right of the clock, inside the right-edge group. REVIEW-B9-08 口径: the GROUP is
+// the title line's last pixel, not any single member. Order inside the group:
+// spinner → clock → marker → 子任务 chip. `count > 0` hands the slot to the count
 // pill; otherwise an idle unread row wears the dot; active rows wear neither.
 describe("ChatListRow right-edge unread slot (F32)", () => {
   /** Both marker testIDs at once — a row that renders two fails the length check. */
   const markers = (): HTMLElement[] =>
     screen.queryAllByTestId(new RegExp(`^shell-chat-(unread|count)-${KEY}$`));
 
-  it("puts the unread dot right of the clock, as the line's last pixel", () => {
+  it("puts the unread dot right of the clock — the group's tail when no chip rides", () => {
     renderRow({ ...agentFixture(), bucket: "attention" }, { unread: true });
     const time = screen.getByTestId(`shell-chat-time-${KEY}`);
     const dot = screen.getByTestId(`shell-chat-unread-${KEY}`);
@@ -275,7 +310,10 @@ describe("ChatListRow right-edge unread slot (F32)", () => {
   });
 
   it("keeps the group order spinner → clock → marker on a running row", () => {
-    renderRow({ ...agentFixture({ pendingPermissionCount: 1 }), bucket: "running" });
+    renderRow({
+      ...agentFixture({ pendingPermissionCount: 1 }),
+      bucket: "running",
+    });
     const time = screen.getByTestId(`shell-chat-time-${KEY}`);
     const spinner = screen.getByTestId(`shell-chat-running-${KEY}`);
     const pill = screen.getByTestId(`shell-chat-count-${KEY}`);
@@ -307,11 +345,12 @@ describe("ChatListRow right-edge unread slot (F32)", () => {
   });
 });
 
-// B9-SUBACT (F31 ruling B+, 用户拍板): 「子任务×N」 joins the right-edge slot
-// family AFTER the unread marker — the card's same-screen order is
-// spinner → time → unread → 子任务, and `0`/absent never renders a badge.
-describe("ChatListRow 子任务×N badge (B9-SUBACT)", () => {
-  it("renders the count right of the unread dot — the line's last pixel", () => {
+// B9-SUBACT (F31 ruling B+, 用户拍板) + REVIEW-B9-03 (D6): the 子任务 chip joins
+// the right-edge slot family AFTER the unread marker — the same-screen order is
+// spinner → time → unread → 子任务, `0`/absent never renders, and the pixels are
+// icon+digit (the 「子任务×N」 word string overflowed the line; f6 frame).
+describe("ChatListRow 子任务 chip (B9-SUBACT + REVIEW-B9-03)", () => {
+  it("renders the count right of the unread dot — last in the right-edge group", () => {
     renderRow({ ...agentFixture({ activeSubagents: 2 }), bucket: "attention" }, { unread: true });
     const time = screen.getByTestId(`shell-chat-time-${KEY}`);
     const dot = screen.getByTestId(`shell-chat-unread-${KEY}`);
@@ -322,7 +361,10 @@ describe("ChatListRow 子任务×N badge (B9-SUBACT)", () => {
     expect(kids.indexOf(dot)).toBe(1);
     expect(kids.indexOf(badge)).toBe(2);
     expect(trailing.lastElementChild).toBe(badge);
-    expect(badge.textContent).toBe("chats.subagents.badge:2");
+    // REVIEW-B9-03 (D6): pixels are the digit alone (the Users glyph rides beside
+    // it, stubbed to null in jsdom); the 「子任务」 word is spoken in the row's
+    // a11y label, not shown. The word string here was the f6 overflow.
+    expect(badge.textContent).toBe("2");
   });
 
   it("keeps the full group order spinner → time → count pill → 子任务 badge", () => {
@@ -350,22 +392,155 @@ describe("ChatListRow 子任务×N badge (B9-SUBACT)", () => {
     expect(screen.queryByTestId(`shell-chat-subagents-${KEY}`)).toBeNull();
   });
 
-  it("speaks the badge in the row label (accessibilityLabel replaces child text)", () => {
+  it("speaks the chip in the row label — the FULL read order pinned (REVIEW-B9-13)", () => {
     renderRow(agentFixture({ activeSubagents: 4 }));
-    expect(screen.getByTestId(`shell-chat-row-${KEY}`).getAttribute("aria-label")).toContain(
-      "chats.subagents.badge:4",
+    // B8-08 全串先例: toContain let a reordered or duplicated label pass. The
+    // whole spoken string is the contract — title · subtitle · ownership · 子任务
+    // (the badge word's slot is LAST before the offline tail; move it → this red).
+    expect(screen.getByTestId(`shell-chat-row-${KEY}`).getAttribute("aria-label")).toBe(
+      "paseo-go(fix-login) · chats.row.noMessages · chats.ownership.state.unknown · chats.subagents.badge:4",
     );
   });
+});
 
-  it("shrinks the long title, never the badge — and the badge stays the last pixel", () => {
-    usePaseoGoPinsStore.setState({ aliases: { [KEY]: "长".repeat(80) } });
-    renderRow(agentFixture({ activeSubagents: 2 }));
-    const badge = screen.getByTestId(`shell-chat-subagents-${KEY}`);
+// REVIEW-B9-07 (裁定=共享基座): the count pill and the 子任务 chip are ONE base +
+// a color pair each. The pre-fix build hand-copied the seven geometry properties
+// (REVIEW-B8-05 同型 drift surface); the exported base + these consumption pins
+// make "change one height, the sibling does not follow" structurally impossible.
+describe("ChatListRow slot-chip shared base (REVIEW-B9-07)", () => {
+  it("count pill and 子任务 chip wear the same seven geometry properties, from the base", () => {
+    renderRow({
+      ...agentFixture({ pendingPermissionCount: 1, activeSubagents: 2 }),
+      bucket: "running",
+    });
+    const pill = screen.getByTestId(`shell-chat-count-${KEY}`);
+    const chip = screen.getByTestId(`shell-chat-subagents-${KEY}`);
+    for (const prop of [
+      "minWidth",
+      "height",
+      "flexDirection",
+      "borderRadius",
+      "paddingLeft",
+      "alignItems",
+      "justifyContent",
+      "flexShrink",
+    ] as const) {
+      expect(chip.style[prop]).toBe(pill.style[prop]);
+    }
+    // And the shared values ARE the exported base — a base edit moves both chips
+    // and this pin together; neither chip may hand-copy geometry anymore.
+    expect(pill.style.minWidth).toBe(`${SLOT_CHIP_DP.minWidth}px`);
+    expect(pill.style.height).toBe(`${SLOT_CHIP_DP.height}px`);
+    expect(pill.style.alignItems).toBe(SLOT_CHIP_DP.alignItems);
+    expect(pill.style.justifyContent).toBe(SLOT_CHIP_DP.justifyContent);
+    expect(pill.style.flexShrink).toBe(`${SLOT_CHIP_DP.flexShrink}`);
+  });
+
+  it("keeps the unread dot the 8dp point tier — outside the chip base by design", () => {
+    renderRow({ ...agentFixture(), bucket: "attention" }, { unread: true });
+    const dot = screen.getByTestId(`shell-chat-unread-${KEY}`);
+    expect(dot.style.width).toBe("8px");
+    expect(dot.style.height).toBe("8px");
+    expect(dot.style.minWidth).toBe("");
+  });
+});
+
+// REVIEW-B9-03 (D6): the f6 regression — an unbounded localized word string rode
+// the shrink-0 right-edge group and pushed the title line past its box (light + ⋯
+// covered, title at 0 width). jsdom has no layout engine, so the fix is pinned as
+// a SUM: every fixed width ships in TITLE_LINE_BUDGET_DP, the scenario's text is
+// measured off the rendered DOM, and the total must fit the title line's box at
+// the narrowest compact list width on record. Pre-fix (word badge) the sum is
+// ~306dp against a 232dp box — this suite was RED before the chip became
+// icon+digit. Main 裁定 B (执行中扩权) adds the extreme stack's floor model: with
+// the title at 0 and the ownership pill truncated to its ellipsis floor, the
+// right-edge group alone must still fit the column's box — the group NEVER
+// truncates, and the pill is the line's only secondary shrinkable member.
+describe("ChatListRow title-line width budget (REVIEW-B9-03)", () => {
+  const availableDp = TITLE_LINE_BUDGET_DP.narrowestCompactWidthDp - TITLE_LINE_CHROME_DP;
+
+  it("fits running + count pill + 子任务 chip + short title at the narrowest compact width", () => {
+    usePaseoGoPinsStore.setState({ aliases: { [KEY]: "登录修复" } });
+    renderRow({
+      ...agentFixture({ pendingPermissionCount: 1, activeSubagents: 2 }),
+      bucket: "running",
+    });
+    const used = titleLineWidthDp({
+      titleText: screen.getByTestId(`shell-chat-title-${KEY}`).textContent ?? "",
+      spinner: screen.queryByTestId(`shell-chat-running-${KEY}`) !== null,
+      clockText: screen.getByTestId(`shell-chat-time-${KEY}`).textContent ?? "",
+      countText: screen.getByTestId(`shell-chat-count-${KEY}`).textContent,
+      subagentCountText: screen.getByTestId(`shell-chat-subagents-${KEY}`).textContent,
+    });
+    expect(used).toBeLessThanOrEqual(availableDp);
+    // The box itself is the registered arithmetic, not a magic number: 380 − 148.
+    expect(availableDp).toBe(232);
+  });
+
+  it("keeps the budget table honest: the row chrome's DOM geometry matches the table", () => {
+    renderRow(agentFixture());
+    const trigger = screen.getByTestId(`shell-chat-row-${KEY}`);
+    const avatar = screen.getByTestId(`shell-chat-avatar-${KEY}`);
+    const more = screen.getByTestId(`shell-chat-more-${KEY}`);
     const trailing = screen.getByTestId(`shell-chat-time-${KEY}`).parentElement as HTMLElement;
-    expect(badge.style.flexShrink).toBe("0");
-    expect(trailing.style.flexShrink).toBe("0");
-    expect(trailing.lastElementChild).toBe(badge);
-    expect(screen.getByTestId(`shell-chat-title-${KEY}`).style.flexShrink).toBe("1");
+    expect(avatar.style.width).toBe(`${TITLE_LINE_BUDGET_DP.avatarDp}px`);
+    expect(trigger.style.paddingLeft).toBe(`${TITLE_LINE_BUDGET_DP.rowPaddingHorizontalDp}px`);
+    expect(trigger.style.gap).toBe(`${TITLE_LINE_BUDGET_DP.rowGapDp}px`);
+    expect(more.style.paddingLeft).toBe(`${TITLE_LINE_BUDGET_DP.morePaddingHorizontalDp}px`);
+    expect(trailing.style.gap).toBe(`${TITLE_LINE_BUDGET_DP.slotGapDp}px`);
+  });
+
+  it("holds the f6 extreme stack inside the lg column box once the truncatables floor", () => {
+    // The f6 scene: 外部·运行中 pill + clock + 子任务 chip, no spinner, no count
+    // pill. Pre-裁定-B the pill was shrink-0 — its full word ate the box and the
+    // chip spilled over the light (device bounds: 725px > the 708px line edge).
+    // Post-fix the truncatables floor (title 0, pill → ellipsis floor) and the
+    // group's FULL intrinsic width still fits the 300dp lg list column.
+    usePaseoGoPinsStore.setState({ aliases: { [KEY]: "tmp" } });
+    renderRow({
+      ...agentFixture({
+        ownership: "external",
+        externalLooksActive: true,
+        activeSubagents: 2,
+      }),
+      bucket: "attention",
+    });
+    const floorDp = titleLineFloorWidthDp({
+      spinner: screen.queryByTestId(`shell-chat-running-${KEY}`) !== null,
+      clockText: screen.getByTestId(`shell-chat-time-${KEY}`).textContent ?? "",
+      countText: null,
+      subagentCountText: screen.getByTestId(`shell-chat-subagents-${KEY}`).textContent,
+      ownershipPill: true,
+    });
+    const lgColumnBoxDp = 300 - TITLE_LINE_CHROME_DP;
+    expect(floorDp).toBeLessThanOrEqual(lgColumnBoxDp);
+  });
+
+  it("keeps the pill the ONLY secondary shrinkable member — the group never truncates", () => {
+    renderRow({
+      ...agentFixture({ pendingPermissionCount: 1, activeSubagents: 2 }),
+      bucket: "running",
+    });
+    const title = screen.getByTestId(`shell-chat-title-${KEY}`);
+    const pill = screen.getByTestId(`shell-chat-ownership-${KEY}`);
+    const time = screen.getByTestId(`shell-chat-time-${KEY}`);
+    const count = screen.getByTestId(`shell-chat-count-${KEY}`);
+    const chip = screen.getByTestId(`shell-chat-subagents-${KEY}`);
+    expect(title.style.flexShrink).toBe("1"); // primary (ruling 6)
+    expect(pill.style.flexShrink).toBe("1"); // secondary (Main 裁定 B/A)
+    // The pill's word is truncate-bounded, not wrap-bounded — react-native-web
+    // renders `numberOfLines` as atomic nowrap+ellipsis+hidden classes (the
+    // inline style stays empty; `r-<property>-` is RNW's stable encoding).
+    const word = pill.firstElementChild as HTMLElement;
+    expect(word.className).toMatch(/r-whiteSpace-/);
+    expect(word.className).toMatch(/r-textOverflow-/);
+    expect(word.className).toMatch(/r-overflow-/);
+    // Everything in the right-edge group stays shrink-0 — the relief valves are
+    // exactly the two words, never a marker, the clock or the group container.
+    expect(time.style.flexShrink).toBe("0");
+    expect(count.style.flexShrink).toBe("0");
+    expect(chip.style.flexShrink).toBe("0");
+    expect((time.parentElement as HTMLElement).style.flexShrink).toBe("0");
   });
 });
 
@@ -394,7 +569,10 @@ describe("ChatListRow project tile fill (REVIEW-B8-05 两屏同色)", () => {
 // 同串（对例钉在 import.test.tsx，修复前行走「1d」相对制必红）。
 describe("ChatListRow clock tier (REVIEW-B8-13 两屏同串)", () => {
   beforeEach(() => {
-    vi.useFakeTimers({ now: new Date(2026, 9, 2, 15, 0, 0).getTime(), toFake: ["Date"] });
+    vi.useFakeTimers({
+      now: new Date(2026, 9, 2, 15, 0, 0).getTime(),
+      toFake: ["Date"],
+    });
   });
   afterEach(() => {
     vi.useRealTimers();

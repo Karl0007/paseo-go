@@ -15,3 +15,9 @@ chat-list-row.tsx:756-765 无界本地化词串塞进全 shrink-0 右缘组（:7
 ## 验收
 
 宽度预算测修复前必红；真机 bounds 帧（徽标右缘≤行右缘、灯/⋯ bounds 不被覆盖）zh+en 各一；f6 场景重拍。
+
+## 复核（G2aRow 执行中，Main 裁定 B→A 定妆）
+
+执行中发现 pill 无界词串为同根第二成员，扩权已获 Main 裁定 B（OwnershipBadge numberOfLines=1+flexShrink:1 二级泄压阀；预算测同步加「可截成员截断后 ≤ 行盒」+ pill 唯一二级可缩断言）。
+
+0.01 实验（真机 AHPEBB1826005071 实测钉死，本仓首次验证该语义差异）：pill flexShrink:0.01 想让截断顺序化（title 冻结后才轮到 pill），**原生 Yoga 不复现 CSS 规范的冻结-再分配**——比例阶段 title 份额封顶后剩余溢出不转给 pill，f6 行 pill 保持全宽 287px、徽标再次被推出行缘（uiautomator dump 徽标节点缺位）；普通行 pill 全词则恢复。据此 Main 拍板 A=回 flexShrink:1（唯一满足「徽标右缘≤行右缘、灯/⋯ 净空」硬不变量的已验证态），普通行 pill 比例截断为已裁定代价，词面根治另立 G3 卡（spinner 承载运行中+pill 词面缩短为纯状态词）。
