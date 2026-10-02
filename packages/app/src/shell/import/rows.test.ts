@@ -1,10 +1,10 @@
 // C10 验收 2：导入项映射/选择态纯逻辑单测。覆盖：key 形态、去重+倒序、标题/预览
 // 回退、勾选幂等与取消、导入结果分类（daemon 的「already imported」幂等语义）。
-// KI-4 验收 2：标题回退矩阵（last→first→官方）、nameLabel、buildImportTree
-// （父子嵌套/孤儿子组/自父防御/两层展平/顺序保持）。
+// KI-4 验收 2 → B8-IMPORT F23：标题回退矩阵（first→last→官方，副标题才是末条
+// 摘要）、nameLabel、buildImportTree（父子嵌套/孤儿子组/自父防御/两层展平/顺序保持）。
 // B4-IMPORT（裁定 11/12）：rootKey/childCount、默认折叠/搜索自动展开、
-// handle↔persistence 徽标匹配（sessionId/nativeHandle 双字段、provider 域、
-// 活跃优先）与父行聚合。
+// handle↔persistence 徽标匹配（sessionId/nativeHandle 双字段、provider 域）与父行
+// 聚合；F23 起两源合并口径=已归档 > 已导入（mergeImportBadgeFacts + 索引归档优先）。
 import { describe, expect, it } from "vitest";
 import type { FetchRecentProviderSessionEntry } from "@getpaseo/client/internal/daemon-client";
 import {
@@ -24,6 +24,7 @@ import {
   importRowTimeLabel,
   importTreeAutoExpandKeys,
   mapEntriesToImportRows,
+  mergeImportBadgeFacts,
   summarizeImportAttempts,
   toggleRowSelection,
   type ImportAgentHandleSource,
@@ -56,11 +57,13 @@ describe("mapEntriesToImportRows", () => {
       providerLabel: "Codex",
       providerHandleId: "handle-1",
       cwd: "C:/work/repo",
-      // KI-4 裁定 2：标题=末次用户输入，官方 title 降级为 nameLabel。
-      title: "done",
+      // F23：标题=首次用户输入（副标题才是末条摘要），官方 title 降级为 nameLabel。
+      title: "fix the flaky suite",
       nameLabel: "Fix flaky test",
       parentHandleId: null,
-      preview: "done", // 字段保留在模型里（KI-5 契约），cell 不再渲染。
+      preview: "done", // 末条摘要（F23 起进副标题；KI-5 契约：取值规则不碰）。
+      folder: null,
+      projectName: null,
       lastActivityAt: Date.parse("2026-09-25T08:00:00.000Z"),
     });
   });
@@ -83,18 +86,19 @@ describe("mapEntriesToImportRows", () => {
     expect(rows.map((row) => row.key)).toEqual(["codex:handle-1", "claude:handle-1"]);
   });
 
-  it("falls back through the KI-4 title chain and maps the folder label", () => {
+  it("falls back through the F23 title chain and maps folder + project name", () => {
     const [row] = mapEntriesToImportRows(
       [entry({ title: "   ", firstPromptPreview: "head only", lastPromptPreview: "tail only" })],
-      (cwd) => (cwd === "C:/work/repo" ? "repo" : null),
+      (cwd) => (cwd === "C:/work/repo" ? { label: "repo · sub", projectName: "repo" } : null),
     );
-    // KI-4 回退链=lastPromptPreview → firstPromptPreview → 官方 getSessionTitle；
+    // F23 回退链=firstPromptPreview → lastPromptPreview → 官方 getSessionTitle；
     // 官方 title 只有空白 → nameLabel=null。钉具体值——`length > 0` 对任何
     // 非空垃圾都成立（R2-23 假绿修复纪律）。
-    expect(row.title).toBe("tail only");
+    expect(row.title).toBe("head only");
     expect(row.nameLabel).toBeNull();
     expect(row.preview).toBe("tail only");
-    expect(row.folder).toBe("repo");
+    expect(row.folder).toBe("repo · sub");
+    expect(row.projectName).toBe("repo");
   });
 });
 
@@ -409,17 +413,20 @@ describe("R2-14 — non-compliant host dates", () => {
   });
 });
 
-// KI-4 验收 2：标题回退矩阵（last→first→官方）+ nameLabel + buildImportTree
-// （父子嵌套、孤儿子组聚合、自父防御、两层展平、顺序保持）。
-describe("KI-4 title chain + nameLabel", () => {
-  it("prefers lastPromptPreview, then firstPromptPreview, then the official title", () => {
-    const [lastWins] = mapEntriesToImportRows(
+// KI-4 验收 2 → B8-IMPORT F23：标题回退矩阵（first→last→官方）+ nameLabel +
+// buildImportTree（父子嵌套、孤儿子组聚合、自父防御、两层展平、顺序保持）。
+describe("F23 title chain + nameLabel", () => {
+  it("prefers firstPromptPreview, then lastPromptPreview, then the official title", () => {
+    const [firstWins] = mapEntriesToImportRows(
       [entry({ title: "Official", firstPromptPreview: "F", lastPromptPreview: "L" })],
       () => null,
     );
-    expect(lastWins.title).toBe("L");
+    // F23（用户拍板）：标题=第一条用户输入；末条摘要走 preview（副标题段），
+    // 于是同一行不再把同一段字写两遍。
+    expect(firstWins.title).toBe("F");
+    expect(firstWins.preview).toBe("L");
     // 官方 title 与新 title 不同 → 降级 nameLabel（子代理名 ReworkR45 不丢）。
-    expect(lastWins.nameLabel).toBe("Official");
+    expect(firstWins.nameLabel).toBe("Official");
 
     const [firstNext] = mapEntriesToImportRows(
       [entry({ title: "Official", firstPromptPreview: " F ", lastPromptPreview: "   " })],
@@ -733,18 +740,74 @@ describe("import agent handle index (裁定 12, 字段实证)", () => {
     ).toBeNull();
   });
 
-  it("skips persistence-less agents; active wins over archived for one handle", () => {
+  it("skips persistence-less agents; archived wins over active for one handle (F23)", () => {
+    // 同一 handle 被归档存量 + 重新导入的活跃体引用：徽标读这一格，F23 口径
+    // 已归档 > 已导入——活跃优先会把「导入过且已归档」的行标成「已导入」，
+    // 点按也就跳不到归档段（跳转/高亮的 agentId 必须落在归档体上）。
     const index = buildImportAgentHandleIndex([
       agent({ id: "mock", persistence: null }),
       agent({ id: "old", archived: true }),
       agent({ id: "new" }),
     ]);
-    expect(classifyImportRowBadge(row, index)).toEqual({ agentId: "new", archived: false });
+    expect(classifyImportRowBadge(row, index)).toEqual({ agentId: "old", archived: true });
+    // 反过来（活跃体先入索引）结论不变：优先级与入表顺序无关。
+    const flipped = buildImportAgentHandleIndex([
+      agent({ id: "new" }),
+      agent({ id: "old", archived: true }),
+    ]);
+    expect(classifyImportRowBadge(row, flipped)).toEqual({ agentId: "old", archived: true });
   });
 
   it("archived-only hit reports archived facts (已归档 徽标位)", () => {
     const index = buildImportAgentHandleIndex([agent({ archived: true })]);
     expect(classifyImportRowBadge(row, index)).toEqual({ agentId: "agent-1", archived: true });
+  });
+});
+
+// B8-IMPORT F23（用户拍板）：徽标优先级 已归档 > 已导入。病灶=旧口径
+// `existing ?? index`：服务端只认 archivedAt，看不见壳归档 store 的本地归档，
+// 于是「在对话 tab 归档过」的行仍标「已导入」，点按也跳不进归档段。
+describe("badge priority: 已归档 > 已导入 (F23)", () => {
+  it("merges the two fact sources with archived winning", () => {
+    const active = { agentId: "srv", archived: false };
+    const archived = { agentId: "local", archived: true };
+    expect(mergeImportBadgeFacts(active, archived)).toEqual(archived);
+    expect(mergeImportBadgeFacts(archived, active)).toEqual(archived);
+    // 单源在场=原样；两源都活跃=服务端 agentId（它认得 omp resume 链祖先）。
+    expect(mergeImportBadgeFacts(active, null)).toEqual(active);
+    expect(mergeImportBadgeFacts(null, archived)).toEqual(archived);
+    expect(mergeImportBadgeFacts(active, { agentId: "local", archived: false })).toEqual(active);
+    expect(mergeImportBadgeFacts(null, null)).toBeNull();
+  });
+
+  it("archived + imported at once → only 已归档, and it jumps to the archived agent", () => {
+    const rows = mapEntriesToImportRows(
+      [omp("p", "2026-09-25T08:00:00.000Z", { existing: { agentId: "srv", archived: false } })],
+      () => null,
+    );
+    // 壳侧目录：同一个 handle 命中一个被归档的 agent（壳归档 store 或服务端
+    // archivedAt），服务端却报活跃体——合并后必须是「已归档」。
+    const index = buildImportAgentHandleIndex([
+      { id: "archived-agent", provider: "omp", archived: true, persistence: { sessionId: "p" } },
+    ]);
+    const badges = buildImportRowBadgeMap(buildImportTree(rows), index);
+    expect(badges.get("omp:p")).toEqual({ state: "archived", agentId: "archived-agent" });
+  });
+
+  it("an archived child still breaks the parent's all-imported aggregation (裁定 12)", () => {
+    const rows = mapEntriesToImportRows(
+      [
+        omp("p", "2026-09-20T00:00:00.000Z"),
+        omp("c1", "2026-09-22T00:00:00.000Z", { parentHandleId: "p" }),
+      ],
+      () => null,
+    );
+    const index = buildImportAgentHandleIndex([
+      { id: "a1", provider: "omp", archived: true, persistence: { sessionId: "c1" } },
+    ]);
+    const badges = buildImportRowBadgeMap(buildImportTree(rows), index);
+    expect(badges.get("omp:c1")).toEqual({ state: "archived", agentId: "a1" });
+    expect(badges.has("omp:p")).toBe(false);
   });
 });
 

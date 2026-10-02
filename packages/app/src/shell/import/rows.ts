@@ -19,8 +19,10 @@ export interface ImportRow {
   providerHandleId: string;
   cwd: string;
   /**
-   * KI-4 裁定：标题=「最后一次用户输入」——lastPromptPreview → firstPromptPreview
-   * → 官方 getSessionTitle 的回退链（末次输入优先；全空才退回官方标题规则）。
+   * KI-4 裁定 → B8-IMPORT（F23，用户拍板）：标题=「第一条用户输入」——
+   * firstPromptPreview → lastPromptPreview → 官方 getSessionTitle 的回退链。
+   * 会话行版式里副标题承担「末条摘要」，标题再取末次输入会把同一段字在同一行
+   * 里写两遍，所以取值端从末次改回首次（截断由屏的 numberOfLines 负责）。
    */
   title: string;
   /**
@@ -33,11 +35,20 @@ export interface ImportRow {
    * `child.parentHandleId === parent.providerHandleId`（同 provider 精确串匹配）。
    */
   parentHandleId: string | null;
-  /** 官方 getPromptPreview 结果；KI-4 后 cell 不再渲染（title 即末次输入，同文
-   *  重复），字段保留在模型里（KI-5 契约：不碰它）。 */
+  /**
+   * 官方 getPromptPreview 结果（末次输入优先）=副标题的「末条摘要」段
+   * （B8-IMPORT F23 起重新渲染；与标题同文时屏不重复展示，见 import.tsx）。
+   */
   preview: string;
-  /** 项目目录的短标签（官方 resolveDirectoryLabel 结果）；未知目录为 null。 */
+  /** 项目目录的短标签（官方 resolveDirectoryLabel + formatDirectoryLabel 结果，
+   *  含 worktree detail）；未知目录为 null。 */
   folder: string | null;
+  /**
+   * B8-IMPORT F23: icon 色块的取字/配色输入=项目名。与会话行同源：命中在册项目
+   * =项目名（=projectPlacement.projectName 同串），未命中=会话行同款 cwd 兜底名，
+   * 于是同一个项目在对话 tab 与导入屏落在同一格色块上。null=屏未给归属信息。
+   */
+  projectName: string | null;
   /** R2-14: epoch ms of the host-reported activity; null = the host sent a
    *  non-date string (the wire field is a bare z.string()). Rows with null
    *  sort last and render the placeholder time segment, never "Invalid Date". */
@@ -56,8 +67,10 @@ export interface ImportRow {
   /**
    * B5-IMPORT2: 服务端 `existing` 真值（请求带 includeExisting=true 时新 daemon
    * 才下发；已导入={agentId,archived:false}，已归档=archived:true）。
-   * null=未标记（无匹配 / 旧 daemon）。有值优先于壳侧目录索引——服务端判定
-   * 还认识 omp resume 链祖先（F17-4），壳侧索引看不见那一层。
+   * null=未标记（无匹配 / 旧 daemon）。它是「有没有导入过」的第一真值源（判定
+   * 还认识 omp resume 链祖先，F17-4），但**不是「归档了没有」的真值源**——服务端
+   * 只认 archivedAt，看不见壳归档 store 的本地归档，所以徽标态由
+   * mergeImportBadgeFacts 合并两源（F23：已归档 > 已导入）。
    */
   existing: ImportAgentHandleFacts | null;
 }
@@ -105,13 +118,68 @@ export function importRowKey(
   return `${entry.providerId}:${entry.providerHandleId}`;
 }
 
+/** B8-IMPORT F23: 屏注入的目录解析结果——副标题的项目段 + icon 色块的项目名。 */
+export interface ImportRowFolder {
+  /** 副标题的项目段（官方 formatDirectoryLabel 结果，含 worktree detail）。 */
+  label: string;
+  /** icon 色块的取字/配色输入（与会话行同源的项目名/兜底名）。 */
+  projectName: string;
+}
+
+/**
+ * F23 标题对（单独成函数=标题口径只有一个地方说一次）：标题=第一条用户输入，
+ * 退末次、退官方 getSessionTitle；官方 title 只在与新标题不同名时降级成 nameLabel
+ * （子代理名 ReworkR45 那类不丢，同名则不在副标题里重复展示）。
+ */
+function importRowTitle(entry: FetchRecentProviderSessionEntry): {
+  title: string;
+  nameLabel: string | null;
+} {
+  const officialTitle = entry.title?.trim() || null;
+  const title =
+    entry.firstPromptPreview?.trim() || entry.lastPromptPreview?.trim() || getSessionTitle(entry);
+  return { title, nameLabel: officialTitle && officialTitle !== title ? officialTitle : null };
+}
+
+/**
+ * 一条条目 → 一行的渲染事实（`mapEntriesToImportRows` 的逐条半边，拆出来只为
+ * 让「去重+排序」与「取值规则」各自可读；无副作用，屏看不见它）。
+ */
+function importRowFromEntry(
+  entry: FetchRecentProviderSessionEntry,
+  key: string,
+  folderFor: (cwd: string) => ImportRowFolder | null,
+): ImportRow {
+  const parent = deriveImportParentLabel(entry);
+  const folder = folderFor(entry.cwd);
+  const { title, nameLabel } = importRowTitle(entry);
+  return {
+    key,
+    providerId: entry.providerId,
+    providerLabel: entry.providerLabel,
+    providerHandleId: entry.providerHandleId,
+    cwd: entry.cwd,
+    title,
+    nameLabel,
+    parentHandleId: entry.parentHandleId?.trim() || null,
+    preview: getPromptPreview(entry),
+    folder: folder?.label ?? null,
+    projectName: folder?.projectName ?? null,
+    lastActivityAt: parseDateOrNull(entry.lastActivityAt)?.getTime() ?? null,
+    parentLabel: parent?.text ?? null,
+    parentIsRawId: parent?.raw ?? false,
+    looksActive: entry.looksActive === true,
+    existing: entry.existing ?? null,
+  };
+}
+
 /**
  * 条目 → 行：按 key 去重（同一 handle 被两个 provider 报出时先到先得），再按最后
  * 动态倒序 — 与官方 aggregateSessionEntries 的语义一致，只是这里直接吃单响应。
  */
 export function mapEntriesToImportRows(
   entries: ReadonlyArray<FetchRecentProviderSessionEntry>,
-  folderFor: (cwd: string) => string | null,
+  folderFor: (cwd: string) => ImportRowFolder | null,
 ): ImportRow[] {
   const seen = new Set<string>();
   const rows: ImportRow[] = [];
@@ -119,29 +187,7 @@ export function mapEntriesToImportRows(
     const key = importRowKey(entry);
     if (seen.has(key)) continue;
     seen.add(key);
-    const parent = deriveImportParentLabel(entry);
-    // KI-4 裁定 2：标题=末次用户输入；全空才退回官方标题规则。nameLabel 只在
-    // 官方 title 存在且与新 title 不同才有值（同名不重复展示）。
-    const officialTitle = entry.title?.trim() || null;
-    const title =
-      entry.lastPromptPreview?.trim() || entry.firstPromptPreview?.trim() || getSessionTitle(entry);
-    rows.push({
-      key,
-      providerId: entry.providerId,
-      providerLabel: entry.providerLabel,
-      providerHandleId: entry.providerHandleId,
-      cwd: entry.cwd,
-      title,
-      nameLabel: officialTitle && officialTitle !== title ? officialTitle : null,
-      parentHandleId: entry.parentHandleId?.trim() || null,
-      preview: getPromptPreview(entry),
-      folder: folderFor(entry.cwd),
-      lastActivityAt: parseDateOrNull(entry.lastActivityAt)?.getTime() ?? null,
-      parentLabel: parent?.text ?? null,
-      parentIsRawId: parent?.raw ?? false,
-      looksActive: entry.looksActive === true,
-      existing: entry.existing ?? null,
-    });
+    rows.push(importRowFromEntry(entry, key, folderFor));
   }
   // R2-14: unknown dates (null) sink below every trustworthy one (0=epoch 序).
   rows.sort((a, b) => (b.lastActivityAt ?? 0) - (a.lastActivityAt ?? 0));
@@ -521,8 +567,9 @@ export interface ImportAgentHandleFacts {
 /**
  * agent 目录 → handle 索引：sessionId 与 nativeHandle 都进（服务端
  * listByProviderSession 同款双字段），键=agent.provider + handle。同一 handle
- * 被多个 agent 引用（归档存量 + 重新导入的活跃体）时活跃优先——活跃=「已导入」
- * 语义，与 daemon 拒绝重复导入的判定（先查 activeRecord）同向。
+ * 被多个 agent 引用（归档存量 + 重新导入的活跃体）时**归档优先**（B8-IMPORT F23
+ * 用户拍板：已归档 > 已导入）——徽标读的是这一格，活跃优先会把「导入过且已归档」
+ * 的行标成「已导入」，点按也就跳不到归档段；跳转/高亮用的 agentId 随之落在归档体。
  */
 export function buildImportAgentHandleIndex(
   agents: Iterable<ImportAgentHandleSource>,
@@ -532,7 +579,7 @@ export function buildImportAgentHandleIndex(
     if (!handle) return;
     const key = importAgentHandleKey(agent.provider, handle);
     const prev = index.get(key);
-    if (!prev || (prev.archived && !agent.archived)) {
+    if (!prev || (!prev.archived && agent.archived)) {
       index.set(key, { agentId: agent.id, archived: agent.archived });
     }
   };
@@ -552,6 +599,22 @@ export function classifyImportRowBadge(
   return index.get(importAgentHandleKey(row.providerId, row.providerHandleId)) ?? null;
 }
 
+/**
+ * 徽标事实两源合并（B8-IMPORT F23，用户拍板：已归档 > 已导入）。
+ * 服务端 `existing` 回答「这个 handle 有没有对应的 agent」（还认识 omp resume 链
+ * 祖先），壳侧目录索引回答「那个 agent 在壳里是不是被归档了」——两问不同，所以
+ * 谁在场不能压住另一个：只要任一源说归档就是归档，两源都活跃才取服务端 agentId
+ * （它认得的祖先体索引看不见）。null=两源都没命中=行维持现状可勾选。
+ */
+export function mergeImportBadgeFacts(
+  server: ImportAgentHandleFacts | null | undefined,
+  local: ImportAgentHandleFacts | null,
+): ImportAgentHandleFacts | null {
+  if (!server) return local;
+  if (!local) return server;
+  return local.archived && !server.archived ? local : server;
+}
+
 export interface ImportRowBadge {
   state: "imported" | "archived";
   /**
@@ -567,8 +630,10 @@ export interface ImportRowBadge {
  * - 父行聚合：自身无匹配且 childCount>0 且**全部后代都命中「已导入」**才标
  *   imported；部分命中或含归档子=不标（子各自标）；
  * - 自身命中优先于聚合（父自己是归档体就标「已归档」，不被子的 imported 盖掉）。
- * B5-IMPORT2：行自身事实优先取服务端 `existing`（新 daemon 判定含 omp resume
- * 链祖先，F17-4），缺席才回退壳侧目录索引（旧 daemon / 竞态窗口双保险）。
+ * B5-IMPORT2：行自身事实来自服务端 `existing` + 壳侧目录索引两源。
+ * B8-IMPORT F23：两源用 mergeImportBadgeFacts 合并（已归档 > 已导入）——旧口径
+ * `existing ?? index` 在服务端报了活跃体时整个丢掉壳侧索引，而壳归档 store 的本地
+ * 归档只存在于壳侧，于是「在对话 tab 归档过」的行仍标「已导入」（F23 的病灶）。
  */
 export function buildImportRowBadgeMap(
   treeItems: ReadonlyArray<ImportTreeItem>,
@@ -583,7 +648,7 @@ export function buildImportRowBadgeMap(
   const importedChildren = new Map<string, number>();
   for (const item of treeItems) {
     if (item.kind !== "session") continue;
-    const facts = item.row.existing ?? classifyImportRowBadge(item.row, index);
+    const facts = mergeImportBadgeFacts(item.row.existing, classifyImportRowBadge(item.row, index));
     if (!facts) continue;
     own.set(item.row.key, facts);
     if (item.depth === 1 && !facts.archived) {

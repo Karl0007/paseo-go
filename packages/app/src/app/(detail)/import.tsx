@@ -32,7 +32,12 @@ import {
 import * as Haptics from "expo-haptics";
 import { Button } from "@/components/ui/button";
 import { LoadingSpinner } from "@/components/ui/loading-spinner";
-import { getProviderIcon } from "@/components/provider-icons";
+import {
+  IDENTITY_COLOR_NAMES,
+  IDENTITY_GLYPH_COLOR,
+  identityColor,
+  type IdentityColorName,
+} from "@/styles/identity-colors";
 import {
   buildProviderLabelMap,
   formatDirectoryLabel,
@@ -70,6 +75,7 @@ import {
   type ImportParentLabel,
   type ImportRow,
   type ImportRowBadge,
+  type ImportRowFolder,
   type ImportTreeItem,
 } from "@/shell/import/rows";
 import { useImportList } from "@/shell/import/use-import-list";
@@ -78,6 +84,8 @@ import { useImportAgentHandleIndex } from "@/shell/import/use-import-agent-index
 import { shellNavigateToAgent } from "@/shell/chats/shell-navigate-to-agent";
 import { createChatOpener } from "@/shell/chats/open-agent";
 import { chatLastEventAtFromAgent } from "@/shell/chats/derive";
+import { projectAvatarFor } from "@/shell/chats/project-avatar";
+import { deriveProjectKey, deriveProjectName } from "@/utils/agent-grouping";
 import { OWNERSHIP_OPEN_DIALOG_KEYS, OWNERSHIP_SEND_BODY_KEY } from "@/shell/chats/ownership";
 import { requestChatsFilter } from "@/shell/chats/filter-request";
 import { confirmDialog } from "@/utils/confirm-dialog";
@@ -109,8 +117,43 @@ function childRowPressStyle({ pressed }: { pressed: boolean }) {
   return [styles.row, styles.rowChild, pressed && styles.rowPressed];
 }
 
+// B8-IMPORT F23: 与会话行同一张色块表——identity 调色板的十个静音填充是
+// scheme-independent 的，模块级建一次，每次渲染交给 Unistyles 同一个对象
+// （chat-list-row 同款纪律：无内联样式、无逐帧 identity 抖动）。
+const AVATAR_FILL = Object.fromEntries(
+  IDENTITY_COLOR_NAMES.map((name) => [name, { backgroundColor: identityColor(name) }]),
+) as Record<IdentityColorName, { backgroundColor: string }>;
+
 /**
- * B4-IMPORT（裁定 11/12）行渲染事实：
+ * 项目 icon 色块（F23）：复用会话行同款取字/配色算法（`projectAvatarFor`=项目名
+ * 首字 + 哈希槽位），同一个项目在导入屏与对话 tab 落在同一格颜色上。没有归属信息
+ * 的行仍出色块（「?」）——空槽会把行压矮，两屏就不同高了。
+ */
+function ImportProjectAvatar({
+  projectName,
+  index,
+}: {
+  projectName: string | null;
+  index: number;
+}) {
+  const avatar = useMemo(() => projectAvatarFor(projectName ?? ""), [projectName]);
+  return (
+    <View
+      style={[styles.rowAvatar, AVATAR_FILL[avatar.colorName]]}
+      testID={`shell-import-avatar-${index}`}
+    >
+      <Text style={styles.rowAvatarGlyph} numberOfLines={1}>
+        {avatar.initial}
+      </Text>
+    </View>
+  );
+}
+
+/**
+ * B4-IMPORT（裁定 11/12）行渲染事实 + B8-IMPORT（F23）版式对齐壳会话行终态
+ * （B8-ROWPILL 落地后的 chat-list-row，对齐观感非照抄实现）：项目 icon 色块 |
+ * 标题行=标题（截断）+「可能活跃」/状态徽标紧随+时间贴右缘 | 副标题=项目 · 末条
+ * 摘要。checkbox 列与 chevron/子计数列原样保留（多选语义不动）。
  * - childCount>0 → 左侧 chevron+计数徽标「N」独立命中区（点 chevron=展开/收起，
  *   行主体=勾选，现语义不动）；无子行占同宽空槽保持标题对齐。
  * - badge=已导入/已归档 → 标题行灰徽标（归档带箱形 icon=壳内归档语义形，Q2③
@@ -118,11 +161,10 @@ function childRowPressStyle({ pressed }: { pressed: boolean }) {
  *   归档体→对话 tab 已归档筛选；聚合徽标（agentId=null，父全子已导入）无单一
  *   跳转目标，点主体退化为展开/收起。
  */
-function ImportRowCell({
+export function ImportRowCell({
   row,
   depth,
   index,
-  serverId,
   selected,
   disabled,
   badge,
@@ -136,7 +178,6 @@ function ImportRowCell({
   row: ImportRow;
   depth: 0 | 1;
   index: number;
-  serverId: string | null;
   selected: boolean;
   disabled: boolean;
   badge: ImportRowBadge | null;
@@ -148,14 +189,15 @@ function ImportRowCell({
   onOpenBadge: (badge: ImportRowBadge) => void;
 }) {
   const { t } = useTranslation(SHELL_I18N_NAMESPACE);
-  const ProviderIcon = getProviderIcon(row.providerId, serverId);
   // R2-14: a non-compliant host's date string maps to lastActivityAt=null on
   // the row; the meta shows the bilingual placeholder instead of the
   // "Invalid Date NaN" the formatter would produce for NaN.
   const timeLabel = importRowTimeLabel(row.lastActivityAt) ?? t("import.metaTimeUnknown");
-  // KI-4: meta = folder · nameLabel? · time（子代理名降级到此，不丢）；
-  // preview 行不再渲染（title=末次输入，同文重复）。
-  const meta = [row.folder, row.nameLabel, timeLabel].filter(Boolean).join(" · ");
+  // F23: 副标题=项目 · 末条摘要（会话行同款两段落）。nameLabel=官方 title
+  // （子代理名那类）仍降级在这里，名字不丢（KI-4 不变量）；单条输入的会话
+  // preview 与标题同文，不重复展示。时间不在此行——它贴标题行的右缘。
+  const summary = row.preview === row.title ? null : row.preview;
+  const subtitle = [row.folder, row.nameLabel, summary].filter(Boolean).join(" · ");
   const handleExpand = useCallback(() => onToggleExpand(rootKey), [onToggleExpand, rootKey]);
   const handlePress = useCallback(() => {
     if (badge?.agentId) {
@@ -170,11 +212,14 @@ function ImportRowCell({
   const badgeLabel = badge
     ? t(badge.state === "archived" ? "import.badgeArchived" : "import.badgeImported")
     : null;
+  // 会话行同款纪律（R4-13）：accessibilityLabel 替换掉全部子文本，所以标题、
+  // 副标题、时间、徽标都要在这条串里说完（此前只有徽标行有 label，且只说标题）。
+  const rowLabel = [row.title, subtitle, timeLabel, badgeLabel].filter(Boolean).join(" · ");
   return (
     <Pressable
       onPress={handlePress}
       accessibilityRole={badge ? "button" : "checkbox"}
-      accessibilityLabel={badgeLabel ? `${row.title} · ${badgeLabel}` : undefined}
+      accessibilityLabel={rowLabel}
       accessibilityState={selected ? ACCESSIBILITY_CHECKED : ACCESSIBILITY_UNCHECKED}
       disabled={disabled}
       testID={`shell-import-row-${index}`}
@@ -201,22 +246,28 @@ function ImportRowCell({
       ) : (
         <View style={styles.rowChevronSpacer} />
       )}
-      <ProviderIcon size={16} color={styles.rowIcon.color} />
+      <ImportProjectAvatar projectName={row.projectName} index={index} />
       <View style={styles.rowBody}>
         <View style={styles.rowTitleRow}>
           {/* KI-4: 树形连接符=字形，不占 i18n。 */}
-          <Text style={styles.rowTitle} numberOfLines={1}>
+          <Text
+            style={styles.rowTitle}
+            numberOfLines={1}
+            testID={`shell-import-row-${index}-title`}
+          >
             {depth === 1 ? "└ " : ""}
             {row.title}
           </Text>
           {/* C25: 「可能活跃」= mtime 新鲜度启发式，非存活证明；token 色小徽标
-              （刻意不用状态灯，避免与会话 tab 四态灯混淆）。 */}
+              （刻意不用状态灯，避免与会话 tab 四态灯混淆）。F23 不动它的逻辑。 */}
           {row.looksActive ? (
             <Text style={styles.rowActiveBadge} testID={`shell-import-row-${index}-active`}>
               {t("import.activeBadge")}
             </Text>
           ) : null}
-          {/* B4-IMPORT 裁定 12: 已导入（灰）/已归档（灰+箱形归档语义 icon）。 */}
+          {/* B4-IMPORT 裁定 12: 已导入（灰）/已归档（灰+箱形归档语义 icon）。
+              F23: 已归档 > 已导入（rows.mergeImportBadgeFacts）——两个事实同时
+              成立时这里只有一枚「已归档」，点按跳归档段。 */}
           {badge ? (
             <View
               style={styles.rowStateBadge}
@@ -228,9 +279,24 @@ function ImportRowCell({
               <Text style={styles.rowStateBadgeText}>{badgeLabel}</Text>
             </View>
           ) : null}
+          {/* F23（会话行 titleTrailing 同款）: 右缘组吃掉标题行的剩余宽度并把时间
+              钉在右端——标题再长也只截标题，时间不会被挤出行。 */}
+          <View style={styles.rowTitleTrailing}>
+            <Text
+              style={styles.rowTime}
+              numberOfLines={1}
+              testID={`shell-import-row-${index}-time`}
+            >
+              {timeLabel}
+            </Text>
+          </View>
         </View>
-        <Text style={styles.rowMeta} numberOfLines={1}>
-          {meta}
+        <Text
+          style={styles.rowMeta}
+          numberOfLines={1}
+          testID={`shell-import-row-${index}-subtitle`}
+        >
+          {subtitle}
         </Text>
       </View>
       <View
@@ -400,18 +466,30 @@ export default function ShellImportScreen() {
   );
 
   const hostProjects = useHostProjects(serverId ? [serverId] : []);
-  const folderFor = useCallback(
-    (cwd: string) =>
-      formatDirectoryLabel(
-        resolveDirectoryLabel(
-          cwd,
-          hostProjects.map((project) => ({
-            rootPath: project.iconWorkingDir,
-            name: project.projectName,
-          })),
-        ),
-      ),
+  // 目录解析的输入面（一次映射，folderFor 逐行只读）。
+  const projectDirs = useMemo(
+    () =>
+      hostProjects.map((project) => ({
+        rootPath: project.iconWorkingDir,
+        name: project.projectName,
+      })),
     [hostProjects],
+  );
+  // F23: 一次目录解析出两段事实——副标题的项目段（官方 formatDirectoryLabel 结果，
+  // 含 worktree detail）+ icon 色块的项目名。项目名与会话行同源：命中在册项目=
+  // 项目名（=projectPlacement.projectName 同串→同色）；未命中时 resolveDirectoryLabel
+  // 回吐整条路径，这时取 cwd 尾段=会话行的兜底名 deriveProjectName(deriveProjectKey(cwd))，
+  // 于是同一个目录在导入屏与对话 tab 落在同一格颜色上。
+  const folderFor = useCallback(
+    (cwd: string): ImportRowFolder => {
+      const label = resolveDirectoryLabel(cwd, projectDirs);
+      const owned = projectDirs.some((project) => project.name === label.name);
+      return {
+        label: formatDirectoryLabel(label),
+        projectName: owned ? label.name : deriveProjectName(deriveProjectKey(cwd)),
+      };
+    },
+    [projectDirs],
   );
 
   const rows = useMemo(() => {
@@ -426,10 +504,11 @@ export default function ShellImportScreen() {
   // 被过滤掉的父自然让子成为孤儿组。
   const treeItems = useMemo(() => buildImportTree(rows), [rows]);
 
-  // B4-IMPORT 裁定 12 → B5-IMPORT2: 徽标真值优先取服务端 entry.existing（新
-  // daemon，含 omp resume 链祖先判定）；行无标记时回退壳侧 handle 索引
-  // （agent 目录 persistence 双字段口径）——旧 daemon / 竞态窗口双保险。
-  // 父行全子「已导入」才聚合标。两源皆空=全行维持现状。
+  // B4-IMPORT 裁定 12 → B5-IMPORT2 → B8-IMPORT F23: 徽标事实两源并列——服务端
+  // entry.existing（新 daemon，含 omp resume 链祖先）回答「导入过没有」，壳侧 handle
+  // 索引（agent 目录 persistence 双字段 + 壳归档 store）回答「归档了没有」；
+  // rows.mergeImportBadgeFacts 合并，已归档 > 已导入。父行全子「已导入」才聚合标。
+  // 两源皆空=全行维持现状。
   const agentIndex = useImportAgentHandleIndex(serverId);
   const badgeMap = useMemo(
     () => buildImportRowBadgeMap(treeItems, agentIndex),
@@ -633,7 +712,6 @@ export default function ShellImportScreen() {
           row={item.row}
           depth={item.depth}
           index={index}
-          serverId={serverId}
           selected={selectedSet.has(item.row.key)}
           disabled={progress !== null}
           badge={badgeMap.get(item.row.key) ?? null}
@@ -662,7 +740,6 @@ export default function ShellImportScreen() {
       handleToggleExpand,
       progress,
       selectedSet,
-      serverId,
     ],
   );
   const keyExtractor = useCallback(
@@ -859,8 +936,20 @@ const styles = StyleSheet.create((theme) => ({
   rowPressed: {
     opacity: 0.7,
   },
-  rowIcon: {
-    color: theme.colors.foregroundMuted,
+  // B8-IMPORT F23: 项目 icon 色块=会话行同款 40dp 圆角方块（填充色来自模块级
+  // AVATAR_FILL，字色=IDENTITY_GLYPH_COLOR——调色板按「一个浅色字」校准，
+  // 不跟主题 token，暗色下 accentForeground 会把对比拉到 4.5:1 以下）。
+  rowAvatar: {
+    width: 40,
+    height: 40,
+    borderRadius: theme.borderRadius.lg,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  rowAvatarGlyph: {
+    fontSize: theme.fontSize.xl,
+    fontWeight: theme.fontWeight.semibold,
+    color: IDENTITY_GLYPH_COLOR,
   },
   rowBody: {
     flex: 1,
@@ -872,10 +961,26 @@ const styles = StyleSheet.create((theme) => ({
     gap: theme.spacing[2],
   },
   rowTitle: {
+    // F23: 与会话行同字号（base）；只有标题可收缩截断，徽标与时间都是 shrink-0。
     flexShrink: 1,
     color: theme.colors.foreground,
-    fontSize: theme.fontSize.sm,
+    fontSize: theme.fontSize.base,
     fontWeight: theme.fontWeight.medium,
+  },
+  // F23（会话行 titleTrailing 同款）: 标题行右缘组——flexGrow 吃掉剩余宽度、
+  // flex-end 把内容钉到右端、flexShrink 0 让长标题挤的是标题不是时间。
+  rowTitleTrailing: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: theme.spacing[2],
+    flexGrow: 1,
+    flexShrink: 0,
+    justifyContent: "flex-end",
+  },
+  rowTime: {
+    color: theme.colors.foregroundMuted,
+    fontSize: theme.fontSize.sm,
+    flexShrink: 0,
   },
   // KI-4: depth1 子行左缩进（连接符 `└` 在标题里，样式只加左边距）。
   rowChild: {
@@ -901,6 +1006,7 @@ const styles = StyleSheet.create((theme) => ({
     color: theme.colors.statusWarning,
     fontSize: theme.fontSize.sm,
     fontWeight: theme.fontWeight.medium,
+    flexShrink: 0,
   },
   // B4-IMPORT 裁定 12: 状态徽标=灰 chip（已导入纯文字；已归档加箱形 icon，
   // Q2③ 归档图标语系）。刻意小一号弱于「可能活跃」——它是事实不是启发式，
@@ -914,6 +1020,7 @@ const styles = StyleSheet.create((theme) => ({
     borderRadius: 4,
     paddingHorizontal: 5,
     paddingVertical: 1,
+    flexShrink: 0,
   },
   rowStateBadgeText: {
     color: theme.colors.foregroundMuted,
@@ -938,6 +1045,7 @@ const styles = StyleSheet.create((theme) => ({
     color: theme.colors.foregroundMuted,
     fontSize: theme.fontSize.sm,
   },
+  // F23: 副标题=项目 · 末条摘要（会话行 subtitle 同款字号/色）。
   rowMeta: {
     color: theme.colors.foregroundMuted,
     fontSize: theme.fontSize.sm,

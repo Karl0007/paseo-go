@@ -90,6 +90,13 @@ export default defineConfig({
     __DEV__: "false",
     global: "globalThis",
   },
+  // Route files live in parenthesised directories (`src/app/(detail)/…`), and the
+  // tsconfig lookup behind vite's per-file esbuild transform does not resolve them,
+  // so those files fall back to the classic JSX runtime and mounting any component
+  // defined in a route file dies with `React is not defined` (B8-IMPORT F23 hit it
+  // rendering the import row). Pin the runtime the app's own babel preset uses —
+  // identical output for every file that does resolve its tsconfig.
+  esbuild: { jsx: "automatic" },
   resolve: {
     extensions: [
       ".web.mjs",
