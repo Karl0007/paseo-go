@@ -318,3 +318,11 @@
 ## P4. 结论
 
 **批次六验收通过**。F18/F19 兑现（用户可见后果=老会话标题回归默认格式、「全列表恒未知」消灭、外部续写会话正确翻「外部」）；review P2 红转绿；发布=v0.10.2-go.9（APK sha256=`5644091f…e6d5`，22 资产）+生产 go.9（切换实停机 163.6s；首跑因自检单发撞 provider warmup 窗误回滚，重试环修复后 #2 命中）（**持久化切换**，go.8 停机教训落地：hub start persistent/脚本自带 sha 守卫+自动回滚）。开放项延续：真人手指复验三处；生产端 go.9 复帧（自愈效果在用户设备上的直接观察）由用户日常使用即证。
+
+---
+
+# 批次七增补（v0.10.2-go.10，2026-10-02；只增不改上文）
+
+- ✅ **F20 更新横幅压状态栏**（`bb4f595af`）：banner paddingTop=insets.top+SPACING[2]（壳正册 safe-area），流内下推不变；组件测 5 例+真机 uiautomator 硬证（文案 top y=88>状态栏带 72）。单文件布局修+测+帧=编排者自审替代 review 轮。
+- 发布=**v0.10.2-go.10 纯客户端线**（APK sha256=`75f7ba67…`，22 资产，装机 stamp 帧实拍）；**server/协议零变化，生产 daemon 保持 go.9**（兼容无碍）。
+- 小坑入账：assemble 首 dispatch 红=漏建 release（补建即绿，RELEASE.md 在案）；adb server 僵死一次（kill-server 复）。
