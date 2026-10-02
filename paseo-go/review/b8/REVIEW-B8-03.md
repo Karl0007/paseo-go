@@ -15,3 +15,7 @@ land 前复核出发条件：JS 侧读 `getShellFrontmostSection()`，非本 hoo
 ## 验收
 
 提交后 land 前注入 frontmost 变更，断言 router.navigate 未调 + tx 复位（修复前必红）。
+
+## 复核（RevB8）
+
+**CONFIRMED（维持 P2）** — 竞态真实可触发。逐跳核：`use-shell-ring-swipe.ts:233` withTiming 完成回调无条件 `runOnJS(land)`；`land`（:153-161）不读任何闸即 `armRingTransition`+`switchSlotRef.current(target)`（chats 跨 tab = `router.navigate`，chats-screen-body.tsx:591）。turningSv 覆盖面读全 hook：仅 `onTouchesMove` 的 `decideShellSwipe({blocked})` 读它挡新手势，不挡导航动词。出场窗内取消路径穷举：唯一能掐掉动画（finished=false→不发 land）的是 `tx.value=0` 写入，仅出现在 onBeat 的 `focused===section` 分支（:140）——而用户点 rail（frontmost→他 tab）或点会话行（frontmost→null）走的都是 `focused!==section` 提前 return（:122），不触碰 tx；rail/tab bar 在滑动面外、行 Pressable 无 turning 门（turningSv 为 hook 私有无外部消费）。故 140ms 内点按→JS 先落地→land 后发 navigate 覆盖，劫持成立。跨 tab 劫持确为 F26 新增（B4 段内只 setFilter）。修复方向（land 前读 getShellFrontmostSection 复核）与总线语义吻合。

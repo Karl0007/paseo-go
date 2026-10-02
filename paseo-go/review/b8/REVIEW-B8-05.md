@@ -15,3 +15,7 @@ AVATAR_FILL 上收 `shell/chats/project-avatar.ts` 导出，两消费方 import�
 ## 验收
 
 跨文件一致性断言（同 colorName 两路径 backgroundColor 相等）；变异：任一份换常量→必红。
+
+## 复核（RevB8）
+
+**DOWNGRADE→P3** — 代码事实成立（两处 `Object.fromEntries(IDENTITY_COLOR_NAMES.map(name=>({backgroundColor:identityColor(name)})))` 表达式重复，import.tsx:124-126 / chat-list-row.tsx:149-151），但声称的因果不成立：两份都是**从同一真相源 `@/styles/identity-colors` 现推导**，非手抄 hex——调色改版改 IDENTITY_COLORS，两屏自动同动，「静默漂移」无触发路径；且 import.test.tsx:107 已把行底色钉到 `identityColor(colorName)` 函数本身，F23 机器保证仍在。残余价值=DRY 上收 project-avatar.ts（顺带消掉「改一处推导、另一处忘跟」的人为窗口），属 P3 清理项。
