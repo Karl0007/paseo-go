@@ -8,6 +8,7 @@ import {
   listOmpImportableSessions,
   readOmpImportSessionConfig,
   resolveOmpResumeAncestorPaths,
+  resolveOmpResumeLeafChain,
 } from "./session-descriptor.js";
 
 async function writeSession(root: string, relativePath: string, lines: unknown[]): Promise<string> {
@@ -434,6 +435,185 @@ describe("resolveOmpResumeAncestorPaths", () => {
     await expect(
       resolveOmpResumeAncestorPaths(grand, 8, { warn: quiet } as unknown as Logger),
     ).resolves.toEqual([great]);
+    expect(quiet).not.toHaveBeenCalled();
+  });
+});
+
+// B8-WATCH（F28）：观察方向要顺同一条 parentSession 链**正向**走到叶子，否则
+// watcher 挂在 paseo 留下的旧文件上，用户正在写的续写文件永远不可见。
+describe("resolveOmpResumeLeafChain", () => {
+  test("walks parentSession forward to the newest leaf", async () => {
+    const root = await mkdtemp(path.join(tmpdir(), "paseo-omp-leaf-chain-"));
+    const parent = await writeSession(root, "project/parent.jsonl", [
+      { type: "session", id: "parent", timestamp: "2026-06-01T00:00:00.000Z", cwd: root },
+    ]);
+    const child = await writeSession(root, "project/child.jsonl", [
+      {
+        type: "session",
+        id: "child",
+        timestamp: "2026-06-02T00:00:00.000Z",
+        cwd: root,
+        parentSession: parent,
+      },
+    ]);
+    const grand = await writeSession(root, "project/grand.jsonl", [
+      {
+        type: "session",
+        id: "grand",
+        timestamp: "2026-06-03T00:00:00.000Z",
+        cwd: root,
+        parentSession: child,
+      },
+    ]);
+
+    await expect(resolveOmpResumeLeafChain(parent)).resolves.toEqual([parent, child, grand]);
+    await expect(resolveOmpResumeLeafChain(child)).resolves.toEqual([child, grand]);
+    await expect(resolveOmpResumeLeafChain(grand)).resolves.toEqual([grand]);
+  });
+
+  test("stays on the start file when nothing resumes from it", async () => {
+    const root = await mkdtemp(path.join(tmpdir(), "paseo-omp-leaf-alone-"));
+    const start = await writeSession(root, "project/start.jsonl", [
+      { type: "session", id: "start", timestamp: "2026-06-01T00:00:00.000Z", cwd: root },
+    ]);
+    // 同目录兄弟会话 + 指向别的文件的续写：都不是 start 的孩子。
+    await writeSession(root, "project/sibling.jsonl", [
+      { type: "session", id: "sibling", timestamp: "2026-06-02T00:00:00.000Z", cwd: root },
+    ]);
+    await writeSession(root, "project/other-child.jsonl", [
+      {
+        type: "session",
+        id: "other-child",
+        timestamp: "2026-06-03T00:00:00.000Z",
+        cwd: root,
+        parentSession: path.join(root, "sessions", "project", "sibling.jsonl"),
+      },
+    ]);
+
+    await expect(resolveOmpResumeLeafChain(start)).resolves.toEqual([start]);
+  });
+
+  test("follows the most recently written resume when two share a parent", async () => {
+    // 同一个父文件被 resume 两次：正在写的是最新那个，观察必须跟它。
+    const root = await mkdtemp(path.join(tmpdir(), "paseo-omp-leaf-branch-"));
+    const parent = await writeSession(root, "project/parent.jsonl", [
+      { type: "session", id: "parent", timestamp: "2026-06-01T00:00:00.000Z", cwd: root },
+    ]);
+    const older = await writeSession(root, "project/older.jsonl", [
+      {
+        type: "session",
+        id: "older",
+        timestamp: "2026-06-02T00:00:00.000Z",
+        cwd: root,
+        parentSession: parent,
+      },
+    ]);
+    const newer = await writeSession(root, "project/newer.jsonl", [
+      {
+        type: "session",
+        id: "newer",
+        timestamp: "2026-06-03T00:00:00.000Z",
+        cwd: root,
+        parentSession: parent,
+      },
+    ]);
+    await utimes(older, new Date("2026-06-02"), new Date("2026-06-02"));
+    await utimes(newer, new Date("2026-06-03"), new Date("2026-06-03"));
+
+    await expect(resolveOmpResumeLeafChain(parent)).resolves.toEqual([parent, newer]);
+  });
+
+  test("a forward cycle ends the walk instead of looping", async () => {
+    const root = await mkdtemp(path.join(tmpdir(), "paseo-omp-leaf-cycle-"));
+    const a = await writeSession(root, "project/a.jsonl", [
+      {
+        type: "session",
+        id: "a",
+        timestamp: "2026-06-01T00:00:00.000Z",
+        cwd: root,
+        parentSession: path.join(root, "sessions", "project", "b.jsonl"),
+      },
+    ]);
+    const b = await writeSession(root, "project/b.jsonl", [
+      {
+        type: "session",
+        id: "b",
+        timestamp: "2026-06-02T00:00:00.000Z",
+        cwd: root,
+        parentSession: a,
+      },
+    ]);
+
+    await expect(resolveOmpResumeLeafChain(a)).resolves.toEqual([a, b]);
+  });
+
+  test("skips transcripts older than the parent in a busy directory", async () => {
+    // 大目录只 stat 不读头：比父文件更早的不可能是它的孩子。父文件之后新写的
+    // 孩子必须仍然找到。
+    const root = await mkdtemp(path.join(tmpdir(), "paseo-omp-leaf-busy-"));
+    const parent = await writeSession(root, "project/parent.jsonl", [
+      { type: "session", id: "parent", timestamp: "2026-06-05T00:00:00.000Z", cwd: root },
+    ]);
+    await Promise.all(
+      Array.from({ length: 70 }, async (_, index) => {
+        const stale = await writeSession(root, `project/stale-${index}.jsonl`, [
+          {
+            type: "session",
+            id: `stale-${index}`,
+            timestamp: "2026-06-01T00:00:00.000Z",
+            cwd: root,
+          },
+        ]);
+        await utimes(stale, new Date("2026-06-01"), new Date("2026-06-01"));
+      }),
+    );
+    await utimes(parent, new Date("2026-06-05"), new Date("2026-06-05"));
+    const child = await writeSession(root, "project/child.jsonl", [
+      {
+        type: "session",
+        id: "child",
+        timestamp: "2026-06-06T00:00:00.000Z",
+        cwd: root,
+        parentSession: parent,
+      },
+    ]);
+    await utimes(child, new Date("2026-06-06"), new Date("2026-06-06"));
+
+    await expect(resolveOmpResumeLeafChain(parent)).resolves.toEqual([parent, child]);
+  });
+
+  test("honors the leaf-walk depth cap and says so", async () => {
+    const root = await mkdtemp(path.join(tmpdir(), "paseo-omp-leaf-cap-"));
+    let previous = await writeSession(root, "project/f0.jsonl", [
+      { type: "session", id: "f0", timestamp: "2026-06-01T00:00:00.000Z", cwd: root },
+    ]);
+    const chain = [previous];
+    for (let index = 1; index <= 4; index += 1) {
+      previous = await writeSession(root, `project/f${index}.jsonl`, [
+        {
+          type: "session",
+          id: `f${index}`,
+          timestamp: `2026-06-0${index + 1}T00:00:00.000Z`,
+          cwd: root,
+          parentSession: previous,
+        },
+      ]);
+      chain.push(previous);
+    }
+
+    const warn = vi.fn();
+    await expect(
+      resolveOmpResumeLeafChain(chain[0], { maxDepth: 2, logger: { warn } as unknown as Logger }),
+    ).resolves.toEqual([chain[0], chain[1], chain[2]]);
+    expect(warn).toHaveBeenCalledTimes(1);
+
+    const quiet = vi.fn();
+    await expect(
+      resolveOmpResumeLeafChain(chain[0], {
+        maxDepth: 8,
+        logger: { warn: quiet } as unknown as Logger,
+      }),
+    ).resolves.toEqual(chain);
     expect(quiet).not.toHaveBeenCalled();
   });
 });

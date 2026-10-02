@@ -9,11 +9,13 @@ import type {
   AgentTimelineItem,
 } from "./agent-sdk-types.js";
 import {
+  LOOKS_ACTIVE_MTIME_WINDOW_MS,
   mapProviderTranscriptLines,
   resolveProviderTranscriptPath,
   statTranscriptBytes,
 } from "./provider-transcript.js";
 import { probeExternalTranscriptActivity } from "./transcript-activity-probe.js";
+import { resolveOmpResumeLeafChain } from "./providers/omp/session-descriptor.js";
 
 /**
  * Paseo Go B4-OWNERSHIP (batch-4 F8, R3 + R2-lite): the transcript watcher.
@@ -38,6 +40,12 @@ import { probeExternalTranscriptActivity } from "./transcript-activity-probe.js"
  * volatile meta rows), and reports one {@link TranscriptChange}. The service keeps
  * no agent state of its own beyond the byte cursor: the caller owns the timeline,
  * the preview chain, and the ownership state machine.
+ *
+ * B8-WATCH (F28): an omp session does not live in one file forever — `omp resume`
+ * forks the conversation into a NEWER transcript whose header names the old one. The
+ * watcher therefore observes a CHAIN (the handle's file plus every descendant it has
+ * followed), tails its leaf, and counts bytes cumulatively across it, so crossing
+ * into the new file neither loses the writes there nor resets the ownership baseline.
  */
 
 /** Debounce window collapsing a burst of watcher events into one tail read. */
@@ -56,6 +64,16 @@ const WATCH_RETENTION_MS = 30 * 24 * 60 * 60 * 1000;
  */
 const MAX_TAIL_READ_BYTES = 4 * 1024 * 1024;
 
+/**
+ * B8-WATCH (F28): the two cadences on which ONE entry may re-walk its omp resume
+ * chain. A walk is a directory scan plus a bounded number of header reads (see
+ * `providers/omp/session-descriptor.ts`), so it is deliberately NOT part of every
+ * tick. A fork is written within seconds of the parent going quiet, so an entry that
+ * is still receiving foreign bytes is chased at the fast cadence; a long-idle entry
+ * (including one resumed while no daemon was running) is re-checked at the slow one.
+ */
+const DEFAULT_CHAIN_FOLLOW_INTERVAL_MS = 5 * 60_000;
+const CHAIN_FOLLOW_CHASE_INTERVAL_MS = 30_000;
 /**
  * B6-OWN-HEAL (batch-6 F19/D22): how many not-yet-observed transcripts ONE discovery
  * pass may attach. The startup sweep is the first real caller of discovery, and a
@@ -81,7 +99,11 @@ export interface TranscriptWatchCandidate {
   provider: AgentProvider;
   persistence: AgentPersistenceHandle | null;
   cwd: string;
-  /** Persisted transcript cursor; null = first observation for this agent. */
+  /**
+   * Persisted transcript cursor; null = first observation for this agent.
+   * B8-WATCH (F28): cumulative across the observed resume chain, not an offset
+   * inside one file — see {@link WatchEntry.cursor}.
+   */
   baselineBytes: number | null;
   /** Record `updatedAt` in ms; drives {@link WATCH_RETENTION_MS}. */
   updatedAtMs: number;
@@ -89,10 +111,11 @@ export interface TranscriptWatchCandidate {
 
 export interface TranscriptChange {
   agentId: string;
+  /** The transcript actually tailed: a resume child of the handle's file after F28. */
   transcriptPath: string;
   /** Rows the external writer appended since the cursor (empty = bytes changed, no visible message). */
   items: AgentTimelineItem[];
-  /** New cursor to persist with the agent record. */
+  /** New cursor to persist with the agent record (chain-cumulative). */
   baselineBytes: number;
   /** R4 signal: does the external writer still look alive? */
   externalLooksActive: boolean;
@@ -100,11 +123,17 @@ export interface TranscriptChange {
 
 /** What `attach` learned: the transcript it now tails and the cursor it starts from. */
 export interface TranscriptAttachment {
+  /**
+   * The file now tailed. Usually the handle's own transcript; after B8-WATCH (F28)
+   * it is the leaf of the omp resume chain when the conversation was forked into a
+   * newer file.
+   */
   transcriptPath: string;
   /**
-   * Byte size the cursor is now at: the persisted one when the caller supplied it
-   * (so growth during a daemon restart is still visible) or the freshly
-   * established baseline when there was no prior observation.
+   * Byte count the cursor is now at, cumulative over the observed chain: the
+   * persisted one when the caller supplied it (so growth during a daemon restart is
+   * still visible) or the freshly established baseline when there was no prior
+   * observation.
    */
   baselineBytes: number | null;
 }
@@ -130,11 +159,35 @@ export interface TranscriptWatchServiceOptions {
   maxNewAttachmentsPerSweep?: number;
   /** B6-OWN-HEAL: discovery throttle; 0 = no gap (tests). */
   attachThrottleMs?: number;
+  /**
+   * B8-WATCH (F28): gap between resume-chain walks of one silent entry; 0 = walk on
+   * every silent check (tests). See {@link DEFAULT_CHAIN_FOLLOW_INTERVAL_MS}.
+   */
+  chainFollowIntervalMs?: number;
 }
 
 interface WatchEntry {
   candidate: TranscriptWatchCandidate;
+  /**
+   * The transcript currently tailed: the observed provider file, or the newest
+   * resume child of it (B8-WATCH, F28).
+   */
   transcriptPath: string;
+  /**
+   * B8-WATCH (F28): the observed resume chain, oldest first. `[transcriptPath]` for
+   * a provider that keeps one file per session; `[handleFile, …, transcriptPath]`
+   * once an `omp resume` has been followed.
+   */
+  chain: string[];
+  /** Σ bytes of every `chain` file before `transcriptPath`. */
+  chainBaseBytes: number;
+  /**
+   * Digested bytes CUMULATIVE over `chain`, never an offset inside one file. That is
+   * what makes the ownership baseline continuous when the observation migrates to a
+   * resume child: the prefix moves past the old leaf, the cursor does not move, so
+   * the new leaf is read from byte 0 and a writer that kept going across the
+   * migration still reads as continuing external activity instead of a reset.
+   */
   cursor: number | null;
   watcher: FSWatcher | null;
   debounce: ReturnType<typeof setTimeout> | null;
@@ -143,6 +196,10 @@ interface WatchEntry {
   attachSeq: number;
   /** Last time this entry's file was examined or moved (drives R4-22 LRU). */
   lastActiveMs: number;
+  /** Last resume-chain walk of this entry (drives the F28 cost gate). */
+  lastChainFollowMs: number;
+  /** Last byte of foreign work observed (decides the chase vs periodic cadence). */
+  lastGrowthMs: number;
 }
 
 export class TranscriptWatchService {
@@ -152,6 +209,9 @@ export class TranscriptWatchService {
   private readonly maxWatchers: number;
   private readonly maxNewAttachmentsPerSweep: number;
   private readonly attachThrottleMs: number;
+  /** B8-WATCH (F28): see {@link DEFAULT_CHAIN_FOLLOW_INTERVAL_MS}. */
+  private readonly chainFollowIntervalMs: number;
+  private readonly chainFollowChaseIntervalMs: number;
   private readonly env: NodeJS.ProcessEnv;
   private readonly listCandidates: () => Promise<TranscriptWatchCandidate[]>;
   private readonly onChange: (change: TranscriptChange) => Promise<void>;
@@ -181,6 +241,13 @@ export class TranscriptWatchService {
     this.maxNewAttachmentsPerSweep =
       options.maxNewAttachmentsPerSweep ?? DEFAULT_MAX_NEW_ATTACHMENTS_PER_SWEEP;
     this.attachThrottleMs = options.attachThrottleMs ?? DEFAULT_ATTACH_THROTTLE_MS;
+    this.chainFollowIntervalMs = options.chainFollowIntervalMs ?? DEFAULT_CHAIN_FOLLOW_INTERVAL_MS;
+    // A caller that turns the periodic walk off (tests) must not be left with a
+    // chase cadence stricter than the interval it overrode.
+    this.chainFollowChaseIntervalMs = Math.min(
+      CHAIN_FOLLOW_CHASE_INTERVAL_MS,
+      this.chainFollowIntervalMs,
+    );
     this.env = options.env ?? process.env;
     this.listCandidates = options.listCandidates;
     this.onChange = options.onChange;
@@ -237,6 +304,11 @@ export class TranscriptWatchService {
    * Begin observing a transcript paseo is not writing (agent closed / released).
    * Resolves the provider transcript path first: providers without transcript
    * knowledge never get an entry, which is what keeps them out of `external`.
+   *
+   * B8-WATCH (F28): the resolved path is only the START of the observation. The
+   * handle names the file paseo left behind; an `omp resume` in the user's terminal
+   * has possibly already forked the conversation into a newer file, and the watcher
+   * tails the leaf of that chain, not the handle.
    */
   async attach(candidate: TranscriptWatchCandidate): Promise<TranscriptAttachment | null> {
     if (this.stopped) {
@@ -257,15 +329,22 @@ export class TranscriptWatchService {
       this.unresolvable.add(candidate.agentId);
       return null;
     }
+    const chain = await this.resolveResumeChain(candidate.provider, transcriptPath);
+    const leaf = chain[chain.length - 1];
     const entry: WatchEntry = {
       candidate,
-      transcriptPath,
+      chain,
+      transcriptPath: leaf,
+      chainBaseBytes: await statBytesSum(chain.slice(0, -1)),
       cursor: candidate.baselineBytes,
       watcher: null,
       debounce: null,
       checking: false,
       attachSeq: (this.entrySeq += 1),
       lastActiveMs: Date.now(),
+      // The walk above is this entry's first one.
+      lastChainFollowMs: Date.now(),
+      lastGrowthMs: 0,
     };
     this.entries.set(candidate.agentId, entry);
     this.acquireWatcherSlot(entry);
@@ -273,7 +352,7 @@ export class TranscriptWatchService {
     // observation with no persisted cursor just establishes the baseline, which is
     // returned so the caller can persist it as "the transcript as paseo left it".
     await this.check(candidate.agentId);
-    return { transcriptPath, baselineBytes: entry.cursor };
+    return { transcriptPath: leaf, baselineBytes: entry.cursor };
   }
 
   /** Stop observing: paseo took the session back, or the agent left the directory. */
@@ -552,19 +631,38 @@ export class TranscriptWatchService {
     entry.checking = true;
     entry.lastActiveMs = Date.now();
     try {
-      const size = await statTranscriptBytes(entry.transcriptPath);
+      let size = await statTranscriptBytes(entry.transcriptPath);
       if (size === null) {
         return;
       }
       if (entry.cursor === null) {
-        entry.cursor = size;
+        entry.cursor = entry.chainBaseBytes + size;
         return;
       }
-      if (size === entry.cursor) {
-        return;
+      if (entry.chainBaseBytes + size === entry.cursor) {
+        // B8-WATCH (F28): the leaf went silent. Either the external writer finished,
+        // or it resumed the conversation into a NEWER transcript and everything after
+        // this point is being written where the cursor cannot see it.
+        const moved = await this.followResumeChain(entry, size);
+        if (this.entries.get(agentId) !== entry) {
+          // The walk is this pass's longest await. A detach while it ran (paseo took
+          // the session back, or shutdown) ends the observation here rather than
+          // reporting bytes for an agent this service no longer watches.
+          return;
+        }
+        if (moved) {
+          size = await statTranscriptBytes(entry.transcriptPath);
+          if (size === null) {
+            return;
+          }
+        }
+        if (entry.chainBaseBytes + size === entry.cursor) {
+          return;
+        }
       }
       const appended = await this.readAppended(entry, size);
-      entry.cursor = appended.cursor;
+      entry.cursor = entry.chainBaseBytes + appended.cursor;
+      entry.lastGrowthMs = Date.now();
       const externalLooksActive = await probeExternalTranscriptActivity({
         provider: entry.candidate.provider,
         transcriptPath: entry.transcriptPath,
@@ -575,7 +673,7 @@ export class TranscriptWatchService {
         agentId,
         transcriptPath: entry.transcriptPath,
         items: appended.items,
-        baselineBytes: appended.cursor,
+        baselineBytes: entry.cursor,
         externalLooksActive,
       });
     } catch (error) {
@@ -589,6 +687,82 @@ export class TranscriptWatchService {
   }
 
   /**
+   * B8-WATCH (F28): move this entry onto a newer leaf of its omp resume chain, in
+   * place. Returns whether the observation actually moved.
+   *
+   * Two cadences, both floored so a chatty writer cannot turn the sweep into a
+   * directory-scan loop. An entry that saw foreign bytes inside
+   * {@link LOOKS_ACTIVE_MTIME_WINDOW_MS} is the one that can fork next — `omp resume`
+   * happens right after the user stops writing — so it is re-walked every
+   * `chainFollowChaseIntervalMs`. A long-quiet entry is re-checked every
+   * `chainFollowIntervalMs`, which still picks up a session resumed while no daemon
+   * was watching.
+   *
+   * The cursor is chain-cumulative, which is what keeps the ownership baseline
+   * continuous: the prefix moves past the old leaf (and past any intermediate file
+   * the same walk crossed), the cursor stays where it is, so the new leaf is read
+   * from byte 0. A resumed transcript is entirely foreign work by construction —
+   * paseo wrote nothing to it — so reporting all of it is correct, and the caller's
+   * tail-alignment belt absorbs the rows the parent file already showed.
+   */
+  private async followResumeChain(entry: WatchEntry, leafSize: number): Promise<boolean> {
+    const now = Date.now();
+    const sinceWalk = now - entry.lastChainFollowMs;
+    const cadenceMs =
+      now - entry.lastGrowthMs < LOOKS_ACTIVE_MTIME_WINDOW_MS
+        ? this.chainFollowChaseIntervalMs
+        : this.chainFollowIntervalMs;
+    if (sinceWalk < cadenceMs) {
+      return false;
+    }
+    entry.lastChainFollowMs = now;
+    const tail = await this.resolveResumeChain(entry.candidate.provider, entry.transcriptPath);
+    const leaf = tail[tail.length - 1];
+    if (tail.length < 2 || leaf === entry.transcriptPath) {
+      return false;
+    }
+    const previousLeaf = entry.transcriptPath;
+    entry.chainBaseBytes += leafSize + (await statBytesSum(tail.slice(1, -1)));
+    entry.chain = [...entry.chain.slice(0, -1), ...tail];
+    entry.transcriptPath = leaf;
+    entry.lastActiveMs = now;
+    if (entry.watcher) {
+      // The fast path this entry already holds moves with it; no slot is taken
+      // from or returned to another entry (R4-22 fairness is unaffected).
+      entry.watcher.close();
+      entry.watcher = null;
+      this.openWatcher(entry);
+    }
+    this.logger.info(
+      { agentId: entry.candidate.agentId, previousLeaf, leaf },
+      "Transcript watch followed the omp resume chain to a newer transcript",
+    );
+    return true;
+  }
+
+  /**
+   * B8-WATCH (F28): the chain to observe for a freshly resolved transcript.
+   * `[filePath]` for every provider that keeps one file per session; the full
+   * resume chain for omp. A failed walk degrades to the file itself — losing an
+   * existing observation to a directory scan that threw would be worse than
+   * tailing the older transcript until the next sweep.
+   */
+  private async resolveResumeChain(provider: AgentProvider, filePath: string): Promise<string[]> {
+    if (provider !== "omp") {
+      return [filePath];
+    }
+    try {
+      return await resolveOmpResumeLeafChain(filePath, { logger: this.logger });
+    } catch (error) {
+      this.logger.debug(
+        { err: error, filePath },
+        "Resume chain walk failed; tailing the resolved transcript",
+      );
+      return [filePath];
+    }
+  }
+
+  /**
    * Read `[cursor, size)` and stop at the last newline so a half-written row is
    * left for the next check instead of being parsed (and lost) as if complete.
    */
@@ -596,7 +770,8 @@ export class TranscriptWatchService {
     entry: WatchEntry,
     size: number,
   ): Promise<{ items: AgentTimelineItem[]; cursor: number }> {
-    const cursor = entry.cursor ?? 0;
+    // The cursor is cumulative; the file is read from where the chain prefix ends.
+    const cursor = Math.max(0, (entry.cursor ?? 0) - entry.chainBaseBytes);
     // A SHRINK means the writer rewrote the journal (omp/pi truncate torn lines and
     // re-append on resume). Everything the file now holds is foreign work, so the
     // whole thing is re-read instead of the empty tail it would otherwise yield.
@@ -640,6 +815,16 @@ async function readTranscriptRange(
   } finally {
     await handle.close().catch(() => undefined);
   }
+}
+
+/**
+ * Σ byte sizes of chain files. A file that cannot be stat'd contributes 0: an
+ * ancestor deleted mid-walk has to be treated as "no bytes of history there",
+ * which reads the surviving leaf from the start — foreign work, the safe answer.
+ */
+async function statBytesSum(filePaths: readonly string[]): Promise<number> {
+  const sizes = await Promise.all(filePaths.map((filePath) => statTranscriptBytes(filePath)));
+  return sizes.reduce<number>((total, size) => total + (size ?? 0), 0);
 }
 
 /** B6-OWN-HEAL: the discovery batch's inter-attach gap (unref'd: a pending gap must

@@ -375,8 +375,11 @@ export async function resolveOmpResumeAncestorPaths(
   return ancestors;
 }
 
-async function readOmpParentSessionPath(filePath: string): Promise<string | null> {
-  const chunk = await readHeadChunk(filePath).catch(() => null);
+async function readOmpParentSessionPath(
+  filePath: string,
+  headBytes: number = HEAD_BYTES,
+): Promise<string | null> {
+  const chunk = await readHeadChunk(filePath, headBytes).catch(() => null);
   if (!chunk) return null;
   for (const line of chunk.split(/\r?\n/u)) {
     const entry = parseJsonRecord(line.trim());
@@ -388,6 +391,128 @@ async function readOmpParentSessionPath(filePath: string): Promise<string | null
     return parent && parent.toLowerCase().endsWith(".jsonl") ? parent : null;
   }
   return null;
+}
+
+/**
+ * B8-WATCH (F28) cost bounds for the forward walk. Unlike the ancestor walk this
+ * has to look at *other* files to find the next link, and its caller is a
+ * recurring watcher rather than a one-shot import listing — so one step reads at
+ * most `MAX_RESUME_CHILD_HEAD_READS` headers of `RESUME_CHILD_HEAD_BYTES` each,
+ * and in a directory big enough for that to matter it only looks at transcripts
+ * touched at or after the parent's own last write: a file resumed FROM the parent
+ * cannot predate the parent's last write.
+ */
+const RESUME_CHILD_HEAD_BYTES = 16 * 1024;
+const MAX_RESUME_CHILD_HEAD_READS = 24;
+/** Directories at or under this many transcripts are scanned without the filter. */
+const RESUME_CHILD_MTIME_FILTER_MIN = 64;
+/** Timestamp slop: a coarse mtime must not hide a same-second resume. */
+const RESUME_CHILD_MTIME_SLOP_MS = 5_000;
+/** Longest resume chain followed by the watcher (deeper = pathological). */
+const RESUME_LEAF_CHAIN_MAX_DEPTH = 8;
+
+export interface OmpResumeLeafChainOptions {
+  maxDepth?: number;
+  logger?: Logger;
+}
+
+/**
+ * B8-WATCH (F28): the forward direction of the chain
+ * {@link resolveOmpResumeAncestorPaths} walks backwards. `omp resume` never
+ * appends to the transcript it resumes from — it forks the conversation into a
+ * NEWER file in the same directory whose header carries `parentSession`. A
+ * watcher that keeps tailing the file the persistence handle names therefore
+ * watches a corpse: the session the user is actively writing goes silent.
+ *
+ * Returns the chain from `sessionFile` to its newest descendant — `[sessionFile]`
+ * when nothing resumes from it, which is the common case and costs one directory
+ * read. Several transcripts resuming from one parent resolve to the most recently
+ * written one (that is where the writing is). A missing directory, an unreadable
+ * header or a cycle ends the walk with the deepest link found: this walk is an
+ * optimisation, never a failure.
+ */
+export async function resolveOmpResumeLeafChain(
+  sessionFile: string,
+  options: OmpResumeLeafChainOptions = {},
+): Promise<string[]> {
+  const maxDepth = options.maxDepth ?? RESUME_LEAF_CHAIN_MAX_DEPTH;
+  const chain = [sessionFile];
+  const visited = new Set<string>([sessionPathKey(sessionFile)]);
+  let current = sessionFile;
+  for (let depth = 0; depth < maxDepth; depth += 1) {
+    const child = await findOmpResumeChild(current, visited);
+    if (!child) {
+      return chain;
+    }
+    visited.add(sessionPathKey(child));
+    chain.push(child);
+    current = child;
+  }
+  options.logger?.warn(
+    { sessionFile, maxDepth },
+    "OMP resume chain hit the leaf-walk depth cap; tailing the deepest file found",
+  );
+  return chain;
+}
+
+/** Direct child of `parentFile` inside its own directory, or null. */
+async function findOmpResumeChild(
+  parentFile: string,
+  visited: Set<string>,
+): Promise<string | null> {
+  const directory = path.dirname(parentFile);
+  let entries: Dirent[];
+  try {
+    entries = await readdir(directory, { withFileTypes: true });
+  } catch {
+    return null;
+  }
+  const parentKey = sessionPathKey(parentFile);
+  const siblings: string[] = [];
+  for (const entry of entries) {
+    if (!entry.isFile() || !entry.name.toLowerCase().endsWith(".jsonl")) continue;
+    const file = path.join(directory, entry.name);
+    const key = sessionPathKey(file);
+    if (key === parentKey || visited.has(key)) continue;
+    siblings.push(file);
+  }
+  if (siblings.length === 0) {
+    return null;
+  }
+  const ranked = await rankSiblingFilesByMtime(siblings);
+  let pool = ranked;
+  if (ranked.length > RESUME_CHILD_MTIME_FILTER_MIN) {
+    const parentMtime = await readFileMtime(parentFile);
+    if (parentMtime) {
+      const floor = parentMtime.getTime() - RESUME_CHILD_MTIME_SLOP_MS;
+      pool = ranked.filter((entry) => entry.mtimeMs >= floor);
+    }
+  }
+  for (const entry of pool.slice(0, MAX_RESUME_CHILD_HEAD_READS)) {
+    const parent = await readOmpParentSessionPath(entry.file, RESUME_CHILD_HEAD_BYTES);
+    if (parent && sessionPathKey(parent) === parentKey) {
+      return entry.file;
+    }
+  }
+  return null;
+}
+
+/** Newest first; transcripts that cannot be stat'd (deleted mid-scan) drop out. */
+interface RankedResumeSibling {
+  file: string;
+  mtimeMs: number;
+}
+
+async function rankSiblingFilesByMtime(files: string[]): Promise<RankedResumeSibling[]> {
+  const ranked = await Promise.all(
+    files.map(async (file) => {
+      const mtime = await readFileMtime(file);
+      return mtime ? { file, mtimeMs: mtime.getTime() } : null;
+    }),
+  );
+  return ranked
+    .filter((entry): entry is RankedResumeSibling => entry !== null)
+    .sort((left, right) => right.mtimeMs - left.mtimeMs);
 }
 
 async function readOmpSessionDescriptor(filePath: string): Promise<OmpSessionDescriptor | null> {
@@ -430,11 +555,12 @@ function toOmpImportSessionConfig(descriptor: OmpSessionDescriptor): OmpImportSe
   };
 }
 
-async function readHeadChunk(filePath: string): Promise<string | null> {
+/** First `headBytes` of a transcript, or null when it cannot be opened/read. */
+async function readHeadChunk(filePath: string, headBytes = HEAD_BYTES): Promise<string | null> {
   const handle = await open(filePath, "r").catch(() => null);
   if (!handle) return null;
   try {
-    const buffer = Buffer.alloc(HEAD_BYTES);
+    const buffer = Buffer.alloc(headBytes);
     const { bytesRead } = await handle.read(buffer, 0, buffer.length, 0);
     if (bytesRead <= 0) return null;
     return buffer.subarray(0, bytesRead).toString("utf8");

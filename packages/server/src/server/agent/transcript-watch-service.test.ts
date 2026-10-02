@@ -1,4 +1,4 @@
-import { appendFileSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { appendFileSync, mkdirSync, mkdtempSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -62,6 +62,17 @@ function ompLine(role: "user" | "assistant", text: string, id: string): string {
   })}\n`;
 }
 
+/** omp's session header row; `parentSession` is what `omp resume` writes. */
+function ompHeader(id: string, cwd: string, parentSession?: string): string {
+  return `${JSON.stringify({
+    type: "session",
+    id,
+    cwd,
+    timestamp: "2026-09-30T00:00:00.000Z",
+    ...(parentSession ? { parentSession } : {}),
+  })}\n`;
+}
+
 /** Resolves once `count` changes have arrived; never guesses a duration. */
 class ChangeRecorder {
   readonly changes: TranscriptChange[] = [];
@@ -101,6 +112,8 @@ afterEach(() => {
 
 interface Harness {
   file: string;
+  /** The transcript's own directory: resume children are written next to it. */
+  dir: string;
   recorder: ChangeRecorder;
   service: TranscriptWatchService;
   candidate: TranscriptWatchCandidate;
@@ -116,6 +129,12 @@ function createHarness(
     onAttached?: (agentId: string, attachment: TranscriptAttachment) => Promise<void>;
     /** B6-OWN-HEAL: discovery batch size; the tests pin the cap explicitly. */
     maxNewAttachmentsPerSweep?: number;
+    /**
+     * B8-WATCH (F28): resume-chain walk interval. Tests that exercise the migration
+     * want it ungated (0); the one test pinning the COST of the walk overrides it
+     * with the production default.
+     */
+    chainFollowIntervalMs?: number;
   } = {},
 ): Harness {
   const file = join(work, "sessions", "--proj--", "2026-09-30_uuid.jsonl");
@@ -146,12 +165,13 @@ function createHarness(
     maxNewAttachmentsPerSweep: input.maxNewAttachmentsPerSweep,
     // No inter-attach gap: these tests assert the batch, not the wall clock.
     attachThrottleMs: 0,
+    chainFollowIntervalMs: input.chainFollowIntervalMs ?? 0,
     listCandidates: input.candidates ?? (async () => [candidate]),
     onChange: recorder.push,
     onAttached: input.onAttached,
   });
   services.push(service);
-  return { file, recorder, service, candidate };
+  return { file, dir: dirname(file), recorder, service, candidate };
 }
 
 describe("TranscriptWatchService.attach", () => {
@@ -603,4 +623,230 @@ describe("tail read bound (R4-23)", () => {
       count,
     );
   }, 20_000);
+});
+
+// ---------------------------------------------------------------------------
+// B8-WATCH (batch-8 F28): the watcher follows the resume chain FORWARD.
+// `omp resume` never appends to the transcript it resumes from — it forks the
+// conversation into a newer file in the same directory whose header names the old
+// one. Tailing the file the persistence handle points at is what left a session the
+// user was actively continuing looking dead: no 「外部」, no preview movement.
+// ---------------------------------------------------------------------------
+
+describe("resume chain migration (B8-WATCH, F28)", () => {
+  /** A resume child, written where omp writes it: next to its parent. */
+  function resumeChild(harness: Harness, name: string, parent: string, rows: string): string {
+    const file = join(harness.dir, name);
+    writeFileSync(file, `${ompHeader(name, work, parent)}${rows}`);
+    return file;
+  }
+
+  const PARENT = `${ompHeader("2026-09-30_uuid.jsonl", work)}${ompLine("user", "from paseo", "p1")}`;
+
+  it("follows an external resume into the child transcript and reports its rows", async () => {
+    const harness = createHarness({ maxWatchers: 0, transcript: PARENT });
+    await harness.service.attach(harness.candidate);
+    expect(harness.recorder.changes).toEqual([]);
+
+    const rows = `${ompLine("user", "continued", "u2")}${ompLine("assistant", "still going", "a2")}`;
+    const child = resumeChild(harness, "2026-10-01_child.jsonl", harness.file, rows);
+
+    await harness.service.sweep();
+
+    const [change] = await harness.recorder.waitFor(1);
+    expect(change.transcriptPath).toBe(child);
+    expect(change.items).toEqual([
+      { type: "user_message", text: "continued", messageId: "u2" },
+      { type: "assistant_message", text: "still going", messageId: "a2" },
+    ]);
+    // The resumed file is foreign work end to end: paseo wrote nothing to it, so
+    // the cursor is the parent's size plus the child's, not a fresh baseline.
+    expect(change.baselineBytes).toBe(Buffer.byteLength(PARENT) + statSync(child).size);
+  });
+
+  it("keeps one cumulative baseline across the migration instead of re-baselining", async () => {
+    const harness = createHarness({ maxWatchers: 0, transcript: PARENT });
+    await harness.service.attach(harness.candidate);
+    const child = resumeChild(
+      harness,
+      "2026-10-01_child.jsonl",
+      harness.file,
+      ompLine("user", "continued", "u2"),
+    );
+    await harness.service.sweep();
+    const [migrated] = await harness.recorder.waitFor(1);
+
+    // The terminal keeps writing after the migration.
+    const next = ompLine("assistant", "and again", "a3");
+    appendFileSync(child, next);
+    await harness.service.sweep();
+
+    const [change] = harness.recorder.changes.slice(1);
+    // Continuity, both directions: the parent's bytes are not replayed, and the
+    // child's already-reported rows are not swallowed by a reset baseline — the
+    // cursor moved by exactly the new row.
+    expect(change.items).toEqual([
+      { type: "assistant_message", text: "and again", messageId: "a3" },
+    ]);
+    expect(change.baselineBytes - migrated.baselineBytes).toBe(Buffer.byteLength(next));
+  });
+
+  it("moves the OS watcher onto the child so later rows arrive without a sweep", async () => {
+    const harness = createHarness({ transcript: PARENT });
+    await harness.service.attach(harness.candidate);
+    const child = resumeChild(
+      harness,
+      "2026-10-01_child.jsonl",
+      harness.file,
+      ompLine("user", "continued", "u2"),
+    );
+    await harness.service.sweep();
+    await harness.recorder.waitFor(1);
+
+    appendFileSync(child, ompLine("assistant", "fast path", "a8"));
+
+    const changes = await harness.recorder.waitFor(2);
+    expect(changes.at(-1)?.transcriptPath).toBe(child);
+    expect(changes.at(-1)?.items).toEqual([
+      { type: "assistant_message", text: "fast path", messageId: "a8" },
+    ]);
+  }, 10_000);
+
+  it("tails the chain leaf after a daemon restart without replaying it", async () => {
+    const harness = createHarness({ maxWatchers: 0, transcript: PARENT });
+    const child = resumeChild(
+      harness,
+      "2026-10-01_child.jsonl",
+      harness.file,
+      ompLine("user", "continued", "u2"),
+    );
+
+    // What the previous daemon life persisted is a CUMULATIVE chain count, and the
+    // handle still names the parent: the restart must land on the leaf and treat
+    // everything up to it as already digested.
+    const attached = await harness.service.attach({
+      ...harness.candidate,
+      baselineBytes: Buffer.byteLength(PARENT) + statSync(child).size,
+    });
+    expect(attached?.transcriptPath).toBe(child);
+    expect(attached?.baselineBytes).toBe(Buffer.byteLength(PARENT) + statSync(child).size);
+    expect(harness.recorder.changes).toEqual([]);
+
+    appendFileSync(child, ompLine("assistant", "after restart", "a4"));
+    await harness.service.sweep();
+    const [change] = await harness.recorder.waitFor(1);
+    expect(change.items).toEqual([
+      { type: "assistant_message", text: "after restart", messageId: "a4" },
+    ]);
+  });
+
+  it("does not swallow a resume that landed while no daemon was watching", async () => {
+    const harness = createHarness({
+      maxWatchers: 0,
+      transcript: PARENT,
+      // The cursor the pre-restart life left behind, for the PARENT file.
+      baselineBytes: Buffer.byteLength(PARENT),
+    });
+    const child = resumeChild(
+      harness,
+      "2026-10-01_child.jsonl",
+      harness.file,
+      ompLine("user", "wrote while down", "u5"),
+    );
+
+    const attached = await harness.service.attach(harness.candidate);
+    expect(attached?.transcriptPath).toBe(child);
+    const [change] = await harness.recorder.waitFor(1);
+    expect(change.items).toEqual([
+      { type: "user_message", text: "wrote while down", messageId: "u5" },
+    ]);
+  });
+
+  it("leaves the observation alone when nothing resumes from it", async () => {
+    const harness = createHarness({ maxWatchers: 0, transcript: PARENT });
+    await harness.service.attach(harness.candidate);
+    // Same directory, no `parentSession`: a different conversation, not a fork.
+    writeFileSync(
+      join(harness.dir, "2026-10-01_sibling.jsonl"),
+      `${ompHeader("2026-10-01_sibling.jsonl", work)}${ompLine("user", "different session", "d1")}`,
+    );
+
+    await harness.service.sweep();
+    expect(harness.recorder.changes).toEqual([]);
+
+    appendFileSync(harness.file, ompLine("assistant", "still mine", "a6"));
+    await harness.service.sweep();
+    const [change] = await harness.recorder.waitFor(1);
+    expect(change.transcriptPath).toBe(harness.file);
+    expect(change.items).toEqual([
+      { type: "assistant_message", text: "still mine", messageId: "a6" },
+    ]);
+  });
+
+  it("gates the chain walk instead of scanning the directory every check", async () => {
+    // The walk costs a readdir plus bounded header reads, so it is earned, not
+    // paid per tick: even for an entry whose writer just went quiet, the chase
+    // cadence keeps two walks apart, and nothing about the observation breaks.
+    const harness = createHarness({
+      maxWatchers: 0,
+      transcript: PARENT,
+      chainFollowIntervalMs: 5 * 60_000,
+    });
+    await harness.service.attach(harness.candidate);
+    appendFileSync(harness.file, ompLine("user", "external turn", "u7"));
+    await harness.service.sweep();
+    await harness.recorder.waitFor(1);
+
+    resumeChild(
+      harness,
+      "2026-10-01_child.jsonl",
+      harness.file,
+      ompLine("assistant", "elsewhere", "a7"),
+    );
+    await harness.service.sweep();
+    await harness.service.sweep();
+
+    expect(harness.recorder.changes).toHaveLength(1);
+    expect(harness.recorder.changes[0].transcriptPath).toBe(harness.file);
+  });
+
+  it("keeps chasing a fork after an empty walk instead of waiting out the interval", async () => {
+    // The cadence bug this pins: a walk that finds no child must not spend the
+    // whole re-check interval. `omp resume` lands seconds-to-minutes after the
+    // parent goes quiet, so an entry that was written inside the freshness window
+    // keeps re-walking at the chase cadence — otherwise the F28 case is followed up
+    // to five minutes late, which is indistinguishable from not followed at all.
+    vi.useFakeTimers();
+    try {
+      const harness = createHarness({
+        maxWatchers: 0,
+        transcript: PARENT,
+        chainFollowIntervalMs: 5 * 60_000,
+      });
+      await harness.service.attach(harness.candidate);
+      appendFileSync(harness.file, ompLine("user", "external turn", "u8"));
+      await harness.service.sweep();
+      expect(harness.recorder.changes).toHaveLength(1);
+
+      vi.advanceTimersByTime(31_000);
+      await harness.service.sweep();
+      expect(harness.recorder.changes).toHaveLength(1);
+
+      resumeChild(
+        harness,
+        "2026-10-01_child.jsonl",
+        harness.file,
+        ompLine("assistant", "late fork", "a9"),
+      );
+      vi.advanceTimersByTime(31_000);
+      await harness.service.sweep();
+
+      expect(harness.recorder.changes).toHaveLength(2);
+      expect(harness.recorder.changes[1].items).toEqual([
+        { type: "assistant_message", text: "late fork", messageId: "a9" },
+      ]);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
 });
