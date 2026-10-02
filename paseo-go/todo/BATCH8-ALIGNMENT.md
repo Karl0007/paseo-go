@@ -108,3 +108,11 @@
 - 现场核实：会话行标题=`项目(worktree)`/壳重命名（row-title.ts 模型），副标题=状态标+「我: 」预览/占位；导入行标题=firstUserMsg 链、副标题=项目·摘要——**信息同集但两槽互换**。
 - 拍板：导入行改走会话行同款推导（卡=B9-TITLE；已导入行别名优先；子行=nameLabel；firstUserMsg 降级为副标题兜底）。
 - 发布策略：客户端改动，**go.12 暂缓**——等用户反馈流收敛一并切，避免连发。
+
+## F31 子 agent 运行不可见（2026-10-02 20:2x，只读定位完成）
+
+**症状**：PC 上主会话派子 agent 跑批时，手机上「外面看不到」——主会话行不显运行态（编排者在等子任务，**主 transcript 静默**，watcher 看不到写入→pill 不翻运行中）；子会话自身只在导入屏 └ 树里可见，对话列表无行。
+
+**现场事实**：子 transcript 带 `parentHandleId` 链（omp/session-descriptor.ts，导入树已按它分组）；watcher（F28）只跟 resume 链（parentSession），**不跟子链**；导入屏子行有逐行 looksActive（mtime 窗）但对话列表无任何子任务信号。
+
+**修复面（服务端 watcher 扩展）**：观察单位从「链」扩为「树」——attach/chase 时同目录匹配 parentHandleId∈本树的兄弟 transcript，子文件写入=该 agent 的外来活动 → pill 翻外部·运行中；游标/基线语义沿用 F28。成本：子发现并入既有 chase 目录扫（同窗同闸），静默档不扩。
