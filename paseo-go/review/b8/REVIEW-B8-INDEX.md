@@ -15,7 +15,7 @@
 | 11  | P3       | CONFIRMED           | done      | F3       | serializeAgentAxes 注释矛盾           | 0a01c0a59 + 读码复核                         |
 | 12  | P3       | CONFIRMED           | done      | F1       | i18n JSON 键序断言                    | 1bc1fa1c8 + parse 序无关例                   |
 | 13  | P2       | 用户拍板 U7=B       | done      | F1       | 导入行时间改微信式                    | 1bc1fa1c8 + 两屏同串 5 档例 + f1 帧          |
-| 14  | P2       | 复审庭新产          | confirmed | F4       | C21 左缘带兜底机制注释矛盾+覆盖面存疑 |                                              |
+| 14  | P2       | 复审庭新产          | done      | F4       | C21 左缘带兜底机制注释矛盾+覆盖面存疑 | e7d2a8270 重写祖先拓扑 + 中段三组 pop 帧    |
 
 状态机：open → confirmed → fixing → done（P0/P1 须复审三查）/ rejected / wontfix
 拍板落定（用户 2026-10-02）：U6=A 保持沉默（结案）｜U7=**B 导入屏改微信式绝对时间**（→卡 13）｜T3=A 维持现状（结案，B4 先例）。修复批次 F1 导入屏域 / F2 手势域 / F3 杂域，帧道序 F2>F1>F3。
