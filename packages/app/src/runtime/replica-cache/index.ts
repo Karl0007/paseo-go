@@ -603,8 +603,12 @@ function serializeProjectPlacement(agent: Agent): StoredAgent["projectPlacement"
   return agent.projectPlacement ?? null;
 }
 
-// Present-only keys, so "the host never reported it" stays absent on the row instead
-// of storing a null a newer reader cannot tell apart from an explicit unknown.
+// The spread is present-only, but every Agent reaching here went through
+// normalizeAgentSnapshot (directory sync) or deserializeAgent (normalizes too), which
+// fold a missing axis into an explicit null — so on today's write path these keys are
+// ALWAYS on the row. A key absent on a stored row means exactly one thing: the row was
+// written before the axes existed (COMPAT(agentOwnership)). Readers MUST NOT read a
+// key-missing check as a live "the host never reported it" signal.
 function serializeAgentAxes(
   agent: Agent,
 ): Pick<StoredAgent["snapshot"], "ownership" | "externalLooksActive" | "origin"> {

@@ -1,4 +1,8 @@
-const testTheme = {
+// REVIEW-B8-07: the ownership-badge sentinel case mutates the color tokens here, then
+// vi.resetModules() + re-imports the component to prove the style block READS theme
+// tokens (rendered colors follow) instead of baking literals. The fixture must stay
+// exported and mutable — no `as const`.
+export const testTheme = {
   colorScheme: "light",
   colors: {
     foreground: "#111111",
@@ -11,6 +15,9 @@ const testTheme = {
     statusSuccessTint: "#15803d1f",
     statusDangerTint: "#b91c1c1f",
     statusWarningTint: "#d977061f",
+    // REVIEW-B8-10: the 未知 pill's neutral pair — same rule as the real light band.
+    statusNeutral: "#52525b",
+    statusNeutralTint: "#52525b1f",
     // The light band's values, so a test can name the colour it expects.
     statusDotSuccess: "#299f51",
     statusDotDanger: "#f12e2f",

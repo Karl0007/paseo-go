@@ -19,6 +19,7 @@ import {
   type SessionsQueryResult,
   sumFilteredAlreadyImportedCount,
 } from "@/components/import-session-sheet-view-model";
+import { normalizeWorkspacePath } from "@/utils/workspace-identity";
 
 function entry(
   overrides: Partial<FetchRecentProviderSessionEntry> = {},
@@ -360,6 +361,43 @@ describe("resolveImportTarget", () => {
       resolveImportTarget({
         entryCwd: "/repo/other",
         workspaceCwd: "/repo/paseo",
+        workspaceId: "ws-1",
+        isScopedListing: false,
+      }),
+    ).toEqual({ crossWorkspace: true });
+  });
+
+  // REVIEW-B8-04 (P2): B8-COUNT folds every listed entry's cwd to the daemon's display
+  // spelling (`C:/work/paseo-go`, import-sessions.ts:224) while the store folds the
+  // scoped workspace's directory to the lowercase-drive identity spelling
+  // (`c:/work/paseo-go`, session-store.ts:167). A literal compare matches neither
+  // spelling pair, so a Show-all import of the sheet's OWN workspace always took the
+  // cross-workspace branch with the workspaceId dropped. Both sides must go through the
+  // same normalizeWorkspacePath fold resolveDirectoryLabel already uses.
+  it("folds Windows spelling pairs on both sides for a Show-all row (REVIEW-B8-04)", () => {
+    // Display spelling vs the registry's backslash spelling (the card's literal pair).
+    expect(
+      resolveImportTarget({
+        entryCwd: "C:/work/paseo-go",
+        workspaceCwd: "C:\\work\\paseo-go",
+        workspaceId: "ws-1",
+        isScopedListing: false,
+      }),
+    ).toEqual({ workspaceId: "ws-1", crossWorkspace: false });
+    // Display spelling vs the identity spelling the store actually holds today.
+    expect(
+      resolveImportTarget({
+        entryCwd: "C:/work/paseo-go",
+        workspaceCwd: normalizeWorkspacePath("C:\\work\\paseo-go") ?? "",
+        workspaceId: "ws-1",
+        isScopedListing: false,
+      }),
+    ).toEqual({ workspaceId: "ws-1", crossWorkspace: false });
+    // The fold must still separate different directories, drive case aside.
+    expect(
+      resolveImportTarget({
+        entryCwd: "C:/work/other",
+        workspaceCwd: "c:\\work\\paseo-go",
         workspaceId: "ws-1",
         isScopedListing: false,
       }),

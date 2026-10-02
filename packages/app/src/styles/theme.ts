@@ -142,13 +142,19 @@ const darkDiffColors = {
 // Regenerate with the same rule rather than nudging one value.
 //
 // Hues are fixed per family across both themes: success 150, danger 27, warning 70.5,
-// merged 300.
+// merged 300 — plus one achromatic member, `statusNeutral`: the state with no hue to
+// wear (the ownership pill's 未知, REVIEW-B8-10 裁定 D6).
 const lightStatusColors = {
   // L=0.50, chroma 60% of gamut max
   statusSuccess: "#3e704a",
   statusDanger: "#9d433b",
   statusWarning: "#7b5d39",
   statusMerged: "#7347af",
+  // A gray at the family's L=0.50 reaches only ~3.9:1 on its own tint — under AA, and
+  // a word one must read is not a dot one may skip. The neutral text takes the band's
+  // zinc-600 step (6.4:1 on its tint); the tint itself keeps the family's alpha, so
+  // the fill reads at the siblings' strength (1.20 vs their 1.18/1.19 on the row).
+  statusNeutral: "#52525b",
 };
 
 const darkStatusColors = {
@@ -157,6 +163,9 @@ const darkStatusColors = {
   statusDanger: "#d8847b",
   statusWarning: "#c09664",
   statusMerged: "#a890d5",
+  // The achromatic sibling: zinc-400, at the band's lightness (5.1:1 on its tint,
+  // fill 1.32 vs the siblings' 1.30/1.31 on the default dark row).
+  statusNeutral: "#a1a1aa",
 };
 
 // Status tints — the fill of a status badge. The status color itself at low opacity, so a
@@ -167,6 +176,7 @@ function statusTints(colors: typeof lightStatusColors, alphaHex: string) {
     statusSuccessTint: `${colors.statusSuccess}${alphaHex}`,
     statusDangerTint: `${colors.statusDanger}${alphaHex}`,
     statusWarningTint: `${colors.statusWarning}${alphaHex}`,
+    statusNeutralTint: `${colors.statusNeutral}${alphaHex}`,
   };
 }
 

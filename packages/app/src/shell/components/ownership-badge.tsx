@@ -9,9 +9,11 @@
 // 未知 (a host that reported neither an ownership pair nor a birth — we honestly
 // cannot tell). All three now wear a low-saturation tint fill with the SAME
 // family's deep word on top: 原生 = the success pair, 外部 = the warning pair,
-// 未知 = the theme's neutral pair (surface2 + foregroundMuted). Every color is a
-// theme token so light/dark follow automatically — no hardcoded hex. The tint
-// tokens ARE the status color at 12-16% alpha (theme.ts `statusTints`), which is
+// 未知 = the neutral status pair (statusNeutralTint fill + statusNeutral word,
+// REVIEW-B8-10 裁定 D6 — the old surface2+foregroundMuted pair sat at 1.10:1 fill-on-row
+// and 4.40:1 word-on-fill in the light band: near-invisible fill, word under AA).
+// Every color is a theme token so light/dark follow automatically — no hardcoded hex.
+// The tint tokens ARE the status color at 12-16% alpha (theme.ts `statusTints`), which is
 // what keeps the grade a 浅染 instead of a shout.
 import { memo } from "react";
 import { Text, View } from "react-native";
@@ -92,9 +94,9 @@ const styles = StyleSheet.create((theme) => ({
     color: theme.colors.statusSuccess,
   },
   pillQuiet: {
-    backgroundColor: theme.colors.surface2,
+    backgroundColor: theme.colors.statusNeutralTint,
   },
   textQuiet: {
-    color: theme.colors.foregroundMuted,
+    color: theme.colors.statusNeutral,
   },
 }));

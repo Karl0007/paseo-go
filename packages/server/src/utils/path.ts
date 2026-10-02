@@ -185,7 +185,12 @@ function normalizePathPreservingCase(value: string, compareAsWindows: boolean): 
   );
 }
 
-function stripWindowsNamespacePrefix(value: string): string {
+// The one `\\?\` device-namespace strip: a drive form loses its prefix, a UNC device
+// form is REBUILT as `\\server\share\...`. Consumers that fold a Windows path for
+// display (server/agent/import-sessions.ts `normalizeProviderSessionDisplayCwd`) must
+// use this too — a self-written prefix regex leaves `UNC\server\share\...` behind,
+// which matches none of the Windows shapes (REVIEW-B8-06).
+export function stripWindowsNamespacePrefix(value: string): string {
   const driveMatch = value.match(/^[/\\]{2}\?[/\\]([a-zA-Z]:)[/\\](.*)$/u);
   const drivePrefix = driveMatch?.[1];
   if (drivePrefix) {

@@ -228,10 +228,18 @@ export function resolveImportTarget(input: {
   }
   // A scoped listing only holds rows the daemon already matched to this
   // workspace's directory with realpaths resolved, which the client cannot do.
-  // "Show all" drops that guarantee, so each row is compared by path instead.
+  // "Show all" drops that guarantee, so each row is compared by path instead —
+  // through the same workspace-identity fold resolveDirectoryLabel above uses
+  // (REVIEW-B8-04). B8-COUNT folds the entry side to the daemon's display spelling
+  // (`C:/work/paseo-go`) and the store folds the workspace side to the lowercase-drive
+  // identity spelling (`c:/work/paseo-go`, session-store.ts:167); a literal compare
+  // matches neither pair, so a Show-all import of the sheet's own workspace always
+  // navigated cross-workspace with the workspaceId dropped. Non-Windows paths fold to
+  // themselves — the fold touches only case-insensitive locator segments.
+  const entryIdentity = normalizeWorkspacePath(input.entryCwd);
+  const workspaceIdentity = normalizeWorkspacePath(input.workspaceCwd);
   const belongsToWorkspace =
-    input.isScopedListing ||
-    withoutTrailingSlash(input.entryCwd) === withoutTrailingSlash(input.workspaceCwd);
+    input.isScopedListing || (entryIdentity !== null && entryIdentity === workspaceIdentity);
   return belongsToWorkspace
     ? { workspaceId: input.workspaceId, crossWorkspace: false }
     : { crossWorkspace: true };

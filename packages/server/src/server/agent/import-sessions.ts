@@ -28,7 +28,11 @@ import {
   IMPORTED_PROVIDER_SESSION_LABEL,
   PARENT_AGENT_ID_LABEL,
 } from "@getpaseo/protocol/agent-labels";
-import { createRealpathAwarePathMatcher, looksLikeDefiniteWindowsPath } from "../../utils/path.js";
+import {
+  createRealpathAwarePathMatcher,
+  looksLikeDefiniteWindowsPath,
+  stripWindowsNamespacePrefix,
+} from "../../utils/path.js";
 
 type ImportAgentRequestMessage = z.infer<typeof ImportAgentRequestMessageSchema>;
 
@@ -271,7 +275,6 @@ function countClaimedAgents(index: Map<string, ExistingAgentFacts>): number {
   return agents.size;
 }
 
-const WINDOWS_NAMESPACE_PREFIX = /^[/\\]{2}\?[/\\]/u;
 const WINDOWS_DRIVE_PREFIX = /^([a-z]):/u;
 
 /**
@@ -284,13 +287,23 @@ const WINDOWS_DRIVE_PREFIX = /^([a-z]):/u;
  * registered project directories, so an un-normalized row misses its project and
  * falls back to the raw path's first character — the「C」vs「K」tile frame gap.
  *
- * Pure and syscall-free: `\\?\` device prefix dropped, separators folded to `/`,
- * drive letter upper-cased, `.`/`..`/duplicate separators collapsed, trailing
- * separator dropped. Anything that is not definitely a Windows path comes back
- * untouched — POSIX case is significant, folding it would merge two directories.
+ * Pure and syscall-free: the `\\?\` device prefix goes through the truth-source
+ * stripWindowsNamespacePrefix (REVIEW-B8-06: a self-written regex left the
+ * `\\?\UNC\…` rebuild behind), separators fold to `/`, `.`/`..`/duplicate separators
+ * collapse, trailing separator drops unless it IS the path (a drive/UNC root).
+ * Anything that is not definitely a Windows path comes back untouched — POSIX case is
+ * significant, folding it would merge two directories.
+ *
+ * Drive-case caliber: this is the DISPLAY twin — the locator upper-cases (`C:/…`).
+ * The app's comparison twin `normalizeWorkspacePath`
+ * (packages/app/src/utils/workspace-identity.ts) folds the same shapes but
+ * lower-cases the locator (`c:/…`), because identity wants one spelling for
+ * matching while a row wants the canonical Windows display. The two agree on
+ * shape/separator handling and differ ONLY in locator case; consumers that compare
+ * fold both sides again (resolveImportTarget).
  */
 export function normalizeProviderSessionDisplayCwd(cwd: string): string {
-  const unprefixed = cwd.replace(WINDOWS_NAMESPACE_PREFIX, "");
+  const unprefixed = stripWindowsNamespacePrefix(cwd);
   if (!looksLikeDefiniteWindowsPath(unprefixed)) {
     return cwd;
   }

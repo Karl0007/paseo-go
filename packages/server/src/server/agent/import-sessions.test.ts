@@ -1147,6 +1147,30 @@ test("normalizeProviderSessionDisplayCwd folds Windows spellings and leaves POSI
   expect(normalizeProviderSessionDisplayCwd("/home/User/Project")).toBe("/home/User/Project");
 });
 
+// REVIEW-B8-06 (P3): the function's own `\\?\` contract had a divergent sibling shape.
+// The self-written prefix regex only dropped `\\?\`, leaving `UNC\server\share\repo` —
+// which hits none of the three Windows shapes and came back verbatim, device prefix and
+// all. The truth source utils/path.ts stripWindowsNamespacePrefix rebuilds the UNC device
+// form to `\\server\share\repo` first, so the device spelling must display exactly like
+// the plain UNC form the line above pins (`//server/share/repo` after the display fold).
+test("normalizeProviderSessionDisplayCwd rebuilds the \\\\?\\UNC\\ device form (REVIEW-B8-06)", () => {
+  expect(normalizeProviderSessionDisplayCwd("\\\\?\\UNC\\server\\share\\repo")).toBe(
+    "//server/share/repo",
+  );
+  expect(normalizeProviderSessionDisplayCwd("\\\\?\\UNC\\server\\share\\repo")).toBe(
+    normalizeProviderSessionDisplayCwd("\\\\server\\share\\repo"),
+  );
+  // The share root itself: the trailing separator IS the path (the function's root rule),
+  // and the device form must land on exactly what the plain form already produced.
+  expect(normalizeProviderSessionDisplayCwd("\\\\?\\UNC\\server\\share")).toBe(
+    normalizeProviderSessionDisplayCwd("\\\\server\\share"),
+  );
+  expect(normalizeProviderSessionDisplayCwd("\\\\?\\UNC\\server\\share")).toBe("//server/share/");
+  // The non-Windows passthrough is the guard's job, not a win32 round-trip: a POSIX
+  // path with `..` segments comes back verbatim, never folded (REVIEW-B8-06 keeps it).
+  expect(normalizeProviderSessionDisplayCwd("/home/user/../Project")).toBe("/home/user/../Project");
+});
+
 test("listImportableProviderSessions projects a Windows cwd in one spelling without touching the handle", async () => {
   const windowsCwd = "c:\\work\\paseo-go";
   const transcript = "c:\\Users\\K\\.omp\\agent\\2026-10-01_chat.jsonl";
