@@ -136,12 +136,14 @@ function rowFixture(overrides: Partial<ImportRow> = {}): ImportRow {
     providerLabel: "OMP",
     providerHandleId: "handle-1",
     cwd: "C:/work/paseo-go",
-    // F23：标题=首次用户输入，preview=末条摘要（副标题段）。
-    title: "帮我修一下登录",
+    // B9-TITLE F30：标题=会话行同款项目串；原标题链降级 fallbackTitle；
+    // preview=末条裸摘要、firstUserMsg=首条输入（副标题兜底段）。
+    projectTitle: PROJECT,
+    fallbackTitle: "帮我修一下登录",
     nameLabel: "ReworkR45",
     parentHandleId: null,
     preview: "已经修好了，测试全绿",
-    folder: "paseo-go",
+    firstUserMsg: "帮我修一下登录",
     projectName: PROJECT,
     // 卡 13：固定「昨天正午」——微信档的「昨天」串，绝对、跨设备稳定。
     lastActivityAt: YESTERDAY_NOON,
@@ -157,6 +159,7 @@ function renderCell(
   overrides: {
     row?: Partial<ImportRow>;
     badge?: ImportRowBadge | null;
+    alias?: string | null;
     index?: number;
     depth?: 0 | 1;
     childCount?: number;
@@ -173,6 +176,7 @@ function renderCell(
       selected={overrides.selected ?? false}
       disabled={false}
       badge={overrides.badge ?? null}
+      alias={overrides.alias ?? null}
       childCount={overrides.childCount ?? 0}
       rootKey="omp:handle-1"
       expanded={false}
@@ -268,7 +272,7 @@ describe("ImportRowCell project tile (F23 与会话行同款取字/配色)", () 
 
 describe("ImportRowCell title line (F23 时间贴右缘)", () => {
   it("keeps the clock in the right-edge group under an 80-char title", () => {
-    renderCell({ row: { title: "长".repeat(80), looksActive: true } });
+    renderCell({ row: { projectTitle: "长".repeat(80), looksActive: true } });
     const title = screen.getByTestId("shell-import-row-0-title");
     const active = screen.getByTestId("shell-import-row-0-active");
     const time = screen.getByTestId("shell-import-row-0-time");
@@ -323,17 +327,59 @@ describe("ImportRowCell clock = 对话行同款微信时间 (REVIEW-B8-13)", () 
   });
 });
 
-describe("ImportRowCell subtitle (F23 项目 · 末条摘要)", () => {
-  it("reads 项目 · 名字 · 末条摘要", () => {
+// B9-TITLE（F30）：标题/小字改走会话行同款推导（决议规则钉在 rows.test.ts，
+// 这里钉的是屏——cell 把别名/深度/占位措辞接进了正确的函数）。
+describe("ImportRowCell title = 会话行同款（B9-TITLE F30）", () => {
+  it("depth0 默认标题=项目串，不再是首条输入", () => {
+    renderCell();
+    expect(screen.getByTestId("shell-import-row-0-title").textContent).toBe("paseo-go");
+  });
+
+  it("已导入+重命名 → 别名标题（与对话 tab 同一串）", () => {
+    renderCell({
+      badge: { state: "imported", agentId: "agent-1" },
+      alias: "登录修复",
+      row: { existing: { agentId: "agent-1", archived: false } },
+    });
+    expect(screen.getByTestId("shell-import-row-0-title").textContent).toBe("登录修复");
+  });
+
+  it("子行（└）标题=子代理名，无名退 fallbackTitle", () => {
+    renderCell({ depth: 1 });
+    expect(screen.getByTestId("shell-import-row-0-title").textContent).toBe("└ ReworkR45");
+    renderCell({ depth: 1, index: 1, row: { nameLabel: null } });
+    expect(screen.getByTestId("shell-import-row-1-title").textContent).toBe("└ 帮我修一下登录");
+  });
+});
+
+describe("ImportRowCell subtitle = 名字 · 预览/占位（B9-TITLE F30）", () => {
+  it("项目段退役：只剩 名字 · 末条摘要", () => {
     renderCell();
     expect(screen.getByTestId("shell-import-row-0-subtitle").textContent).toBe(
-      "paseo-go · ReworkR45 · 已经修好了，测试全绿",
+      "ReworkR45 · 已经修好了，测试全绿",
     );
   });
 
-  it("never prints the same excerpt twice when the session has one prompt", () => {
-    renderCell({ row: { preview: "帮我修一下登录", nameLabel: null } });
-    expect(screen.getByTestId("shell-import-row-0-subtitle").textContent).toBe("paseo-go");
+  it("预览为空 → firstUserMsg 兜底（搜索命中可读）", () => {
+    renderCell({ row: { preview: "" } });
+    expect(screen.getByTestId("shell-import-row-0-subtitle").textContent).toBe(
+      "ReworkR45 · 帮我修一下登录",
+    );
+  });
+
+  it("空链 → 会话行同款占位小字（chats.row.noMessages，行高不塌）", () => {
+    renderCell({ row: { preview: "", firstUserMsg: "", nameLabel: null } });
+    expect(screen.getByTestId("shell-import-row-0-subtitle").textContent).toBe(
+      "chats.row.noMessages",
+    );
+  });
+
+  it("子行名字被提进标题后，副标题不再重复（同文不写两遍）", () => {
+    renderCell({ depth: 1, row: { preview: "ReworkR45", firstUserMsg: "ReworkR45" } });
+    expect(screen.getByTestId("shell-import-row-0-title").textContent).toBe("└ ReworkR45");
+    expect(screen.getByTestId("shell-import-row-0-subtitle").textContent).toBe(
+      "chats.row.noMessages",
+    );
   });
 });
 
@@ -356,7 +402,7 @@ describe("ImportRowCell badge (F23 已归档 > 已导入)", () => {
     renderCell({ badge: { state: "archived", agentId: "agent-1" }, selected: true });
     const row = screen.getByTestId("shell-import-row-0");
     expect(row.getAttribute("aria-label")).toBe(
-      "帮我修一下登录 · paseo-go · ReworkR45 · 已经修好了，测试全绿 · chats.time.yesterday · import.badgeArchived",
+      "paseo-go · ReworkR45 · 已经修好了，测试全绿 · chats.time.yesterday · import.badgeArchived",
     );
     expect(row.getAttribute("role")).toBe("button");
   });
@@ -367,7 +413,7 @@ describe("ImportRowCell badge (F23 已归档 > 已导入)", () => {
   it("speaks the 可能活跃 chip in visual order (REVIEW-B8-08)", () => {
     renderCell({ row: { looksActive: true }, badge: { state: "imported", agentId: "a-1" } });
     expect(screen.getByTestId("shell-import-row-0").getAttribute("aria-label")).toBe(
-      "帮我修一下登录 · import.activeBadge · paseo-go · ReworkR45 · 已经修好了，测试全绿 · chats.time.yesterday · import.badgeImported",
+      "paseo-go · import.activeBadge · ReworkR45 · 已经修好了，测试全绿 · chats.time.yesterday · import.badgeImported",
     );
   });
 

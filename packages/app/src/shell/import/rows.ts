@@ -1,11 +1,15 @@
 // C10 导入屏纯逻辑 (DESIGN §8, card C10): 会话条目 → 行视图模型的映射、多选勾选态、
 // 导入结果分类/汇总。无 React、无 RN —— 屏喂真实数据，vitest 喂 fixture。
-// 标题/预览的取值规则复用官方 import-session-sheet-view-model（getSessionTitle /
-// getPromptPreview），壳不重抄一份降级规则。
+// B9-TITLE（批次九 F30，用户口径「导入的标题和小字跟会话一样」）：标题/小字改走
+// 会话行同款推导——标题=buildChatRowTitle 的项目串（同一函数=同一串，别名由调用方
+// 注入，见 resolveImportRowTitle）；官方 getSessionTitle 只剩「子行无名的标题兜底链」
+// 一份降级规则。preview 取裸值：官方 getPromptPreview 的英文占位让「空链」不可观测，
+// 占位小字改由屏注入会话行同款 chats.row.noMessages（buildImportRowSubtitle）。
 
 import type { FetchRecentProviderSessionEntry } from "@getpaseo/client/internal/daemon-client";
 import { parseDateOrNull } from "@getpaseo/protocol/messages";
-import { getPromptPreview, getSessionTitle } from "@/components/import-session-sheet-view-model";
+import { getSessionTitle } from "@/components/import-session-sheet-view-model";
+import { buildChatRowTitle } from "@/shell/chats/row-title";
 import type { ChatOpenTarget } from "@/shell/chats/open-agent";
 import { chatLastEventAtFromAgent } from "@/shell/chats/derive";
 import { isImportedProviderSession } from "@getpaseo/protocol/agent-labels";
@@ -18,15 +22,23 @@ export interface ImportRow {
   providerHandleId: string;
   cwd: string;
   /**
-   * KI-4 裁定 → B8-IMPORT（F23，用户拍板）：标题=「第一条用户输入」——
-   * firstPromptPreview → lastPromptPreview → 官方 getSessionTitle 的回退链。
-   * 会话行版式里副标题承担「末条摘要」，标题再取末次输入会把同一段字在同一行
-   * 里写两遍，所以取值端从末次改回首次（截断由屏的 numberOfLines 负责）。
+   * B9-TITLE（F30 裁定 1）：标题=会话行同款项目串 `项目名(worktree)`——直接过
+   * chat-list-row 按着的同一个 buildChatRowTitle（项目名命中在册=项目名，未命中
+   * =屏注入的会话行同款 cwd 兜底名；worktree 段与项目同名时自动省略）。
+   * 壳重命名别名不在这里——它是调用方事实，按 existing 徽标的 agentId 查 rename
+   * store 后经 resolveImportRowTitle 注入（同一会话两屏同一串）。
+   * 空串=屏未给归属信息，resolveImportRowTitle 退 fallbackTitle。
    */
-  title: string;
+  projectTitle: string;
   /**
-   * KI-4: 官方 title（子代理名 ReworkR45 这类）；与新 title 相同或缺席时为
-   * null——有值才降级渲染进 meta 行，名字不丢。
+   * KI-4 裁定 → B8-IMPORT（F23）→ B9-TITLE 降级：原标题链
+   * （firstPromptPreview → lastPromptPreview → 官方 getSessionTitle）不再直接
+   * 当标题，只做两处兜底：子行（└）无子代理名时的标题、项目串缺席时的 depth0 标题。
+   */
+  fallbackTitle: string;
+  /**
+   * KI-4: 官方 title（子代理名 ReworkR45 这类）；与 fallbackTitle 相同或缺席时为
+   * null——有值才降级渲染进副标题，名字不丢。
    */
   nameLabel: string | null;
   /**
@@ -35,16 +47,20 @@ export interface ImportRow {
    */
   parentHandleId: string | null;
   /**
-   * 官方 getPromptPreview 结果（末次输入优先）=副标题的「末条摘要」段
-   * （B8-IMPORT F23 起重新渲染；与标题同文时屏不重复展示，见 import.tsx）。
+   * B9-TITLE（F30 裁定 3）：末次用户输入的裸摘要（lastPromptPreview trim；
+   * 空串=无摘要）=副标题的会话行同款预览段。不走 getPromptPreview：它的
+   * 「No prompt preview」兜底串让空链不可判定，占位必须走壳的 noMessages。
    */
   preview: string;
-  /** 项目目录的短标签（官方 resolveDirectoryLabel + formatDirectoryLabel 结果，
-   *  含 worktree detail）；未知目录为 null。 */
-  folder: string | null;
+  /**
+   * B9-TITLE（F30 裁定 4）：首条用户输入裸值（firstPromptPreview trim；空串=无）。
+   * preview 为空时副标题尾段以它兜底——服务端搜索 haystack 含这个字段，
+   * 搜索命中必须可读。
+   */
+  firstUserMsg: string;
   /**
    * B8-IMPORT F23: icon 色块的取字/配色输入=项目名。与会话行同源：命中在册项目
-   * =项目名（=projectPlacement.projectName 同串），未命中=会话行同款 cwd 兜底名，
+   * =项目名（=projectPlacement.projectName 同串→同色），未命中=会话行同款 cwd 兜底名，
    * 于是同一个项目在对话 tab 与导入屏落在同一格色块上。null=屏未给归属信息。
    */
   projectName: string | null;
@@ -117,27 +133,86 @@ export function importRowKey(
   return `${entry.providerId}:${entry.providerHandleId}`;
 }
 
-/** B8-IMPORT F23: 屏注入的目录解析结果——副标题的项目段 + icon 色块的项目名。 */
-export interface ImportRowFolder {
-  /** 副标题的项目段（官方 formatDirectoryLabel 结果，含 worktree detail）。 */
-  label: string;
-  /** icon 色块的取字/配色输入（与会话行同源的项目名/兜底名）。 */
-  projectName: string;
+/**
+ * B9-TITLE（F30）行文本取值（单独成函数=取值口径只有一个地方说一次）：
+ * 项目串走会话行同款 buildChatRowTitle；fallbackTitle=原标题链
+ * （first → last → 官方 getSessionTitle）；官方 title 只在与 fallbackTitle
+ * 不同名时降级成 nameLabel（子代理名 ReworkR45 那类不丢，同名则不重复展示）；
+ * preview/firstUserMsg 取裸值，空链占位由 buildImportRowSubtitle 判定。
+ */
+function importRowTexts(
+  entry: FetchRecentProviderSessionEntry,
+  projectName: string | null,
+): {
+  projectTitle: string;
+  fallbackTitle: string;
+  nameLabel: string | null;
+  preview: string;
+  firstUserMsg: string;
+} {
+  const officialTitle = entry.title?.trim() || null;
+  const firstUserMsg = entry.firstPromptPreview?.trim() ?? "";
+  const fallbackTitle = firstUserMsg || entry.lastPromptPreview?.trim() || getSessionTitle(entry);
+  return {
+    projectTitle:
+      projectName === null ? "" : buildChatRowTitle({ projectName, cwd: entry.cwd, note: null }),
+    fallbackTitle,
+    nameLabel: officialTitle && officialTitle !== fallbackTitle ? officialTitle : null,
+    preview: entry.lastPromptPreview?.trim() ?? "",
+    firstUserMsg,
+  };
 }
 
 /**
- * F23 标题对（单独成函数=标题口径只有一个地方说一次）：标题=第一条用户输入，
- * 退末次、退官方 getSessionTitle；官方 title 只在与新标题不同名时降级成 nameLabel
- * （子代理名 ReworkR45 那类不丢，同名则不在副标题里重复展示）。
+ * B9-TITLE（F30 裁定 1/2）行标题决议（纯函数；屏只注入别名）：
+ * - alias=壳重命名（按 existing 徽标携带的 agentId 查 rename store）——已导入的
+ *   行在对话 tab 改过名，导入屏必须说同一串（D21 口径，depth0/1 都优先）；
+ * - depth1 子行=子代理名 nameLabel，无名退 fallbackTitle（项目串与父全同会失去
+ *   辨识度，裁定 2）；
+ * - depth0=项目串；屏未给归属信息（空串）也退 fallbackTitle。
  */
-function importRowTitle(entry: FetchRecentProviderSessionEntry): {
-  title: string;
-  nameLabel: string | null;
-} {
-  const officialTitle = entry.title?.trim() || null;
-  const title =
-    entry.firstPromptPreview?.trim() || entry.lastPromptPreview?.trim() || getSessionTitle(entry);
-  return { title, nameLabel: officialTitle && officialTitle !== title ? officialTitle : null };
+export function resolveImportRowTitle(
+  row: Pick<ImportRow, "projectTitle" | "nameLabel" | "fallbackTitle">,
+  depth: 0 | 1,
+  alias: string | null | undefined,
+): string {
+  const note = alias?.trim() ?? "";
+  if (note.length > 0) return note;
+  if (depth === 1) {
+    const name = row.nameLabel?.trim() ?? "";
+    return name.length > 0 ? name : row.fallbackTitle;
+  }
+  const project = row.projectTitle.trim();
+  return project.length > 0 ? project : row.fallbackTitle;
+}
+
+/**
+ * B9-TITLE（F30 裁定 3/4）副标题=会话行同款尾段，去项目段（项目已进标题）：
+ * `[nameLabel ·] 预览/占位`。规则：
+ * - nameLabel 只在没被提进标题时留在副标题（depth0 常态；子行被别名接管标题后
+ *   名字与标题不同串时同样保留——KI-4 名字不丢的不变量不因别名让路）；
+ * - 预览段=preview（末条输入），空时退 firstUserMsg（裁定 4，搜索命中可读）；
+ *   与标题同串不重复展示（F23「同文不写两遍」不变量）；
+ * - 空链（无预览、无首输入，或唯一串就是标题）→ 占位小字（屏传
+ *   chats.row.noMessages，与会话行同串）——小字恒在，行高不塌。
+ * previewRole：导入条目协议上没有消息角色字段（schema 只有 prompt 预览对），
+ * 按卡口径「取不到角色就裸预览」不加「我: 」前缀。
+ */
+export function buildImportRowSubtitle(
+  row: Pick<ImportRow, "preview" | "firstUserMsg" | "nameLabel">,
+  opts: { title: string; emptyLabel: string },
+): string {
+  const title = opts.title.trim();
+  const parts: string[] = [];
+  const name = row.nameLabel?.trim() ?? "";
+  if (name.length > 0 && name !== title) parts.push(name);
+  const tail = row.preview.trim() || row.firstUserMsg.trim();
+  if (tail.length > 0 && tail !== title) parts.push(tail);
+  if (parts.length === 0) {
+    const empty = opts.emptyLabel.trim();
+    if (empty.length > 0) parts.push(empty);
+  }
+  return parts.join(" · ");
 }
 
 /**
@@ -147,23 +222,24 @@ function importRowTitle(entry: FetchRecentProviderSessionEntry): {
 function importRowFromEntry(
   entry: FetchRecentProviderSessionEntry,
   key: string,
-  folderFor: (cwd: string) => ImportRowFolder | null,
+  projectFor: (cwd: string) => string | null,
 ): ImportRow {
   const parent = deriveImportParentLabel(entry);
-  const folder = folderFor(entry.cwd);
-  const { title, nameLabel } = importRowTitle(entry);
+  const projectName = projectFor(entry.cwd);
+  const texts = importRowTexts(entry, projectName);
   return {
     key,
     providerId: entry.providerId,
     providerLabel: entry.providerLabel,
     providerHandleId: entry.providerHandleId,
     cwd: entry.cwd,
-    title,
-    nameLabel,
+    projectTitle: texts.projectTitle,
+    fallbackTitle: texts.fallbackTitle,
+    nameLabel: texts.nameLabel,
     parentHandleId: entry.parentHandleId?.trim() || null,
-    preview: getPromptPreview(entry),
-    folder: folder?.label ?? null,
-    projectName: folder?.projectName ?? null,
+    preview: texts.preview,
+    firstUserMsg: texts.firstUserMsg,
+    projectName,
     lastActivityAt: parseDateOrNull(entry.lastActivityAt)?.getTime() ?? null,
     parentLabel: parent?.text ?? null,
     parentIsRawId: parent?.raw ?? false,
@@ -178,7 +254,7 @@ function importRowFromEntry(
  */
 export function mapEntriesToImportRows(
   entries: ReadonlyArray<FetchRecentProviderSessionEntry>,
-  folderFor: (cwd: string) => ImportRowFolder | null,
+  projectFor: (cwd: string) => string | null,
 ): ImportRow[] {
   const seen = new Set<string>();
   const rows: ImportRow[] = [];
@@ -186,7 +262,7 @@ export function mapEntriesToImportRows(
     const key = importRowKey(entry);
     if (seen.has(key)) continue;
     seen.add(key);
-    rows.push(importRowFromEntry(entry, key, folderFor));
+    rows.push(importRowFromEntry(entry, key, projectFor));
   }
   // R2-14: unknown dates (null) sink below every trustworthy one (0=epoch 序).
   rows.sort((a, b) => (b.lastActivityAt ?? 0) - (a.lastActivityAt ?? 0));

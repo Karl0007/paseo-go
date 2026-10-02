@@ -1,7 +1,8 @@
 // C10 验收 2：导入项映射/选择态纯逻辑单测。覆盖：key 形态、去重+倒序、标题/预览
 // 回退、勾选幂等与取消、导入结果分类（daemon 的「already imported」幂等语义）。
-// KI-4 验收 2 → B8-IMPORT F23：标题回退矩阵（first→last→官方，副标题才是末条
-// 摘要）、nameLabel、buildImportTree（父子嵌套/孤儿子组/自父防御/两层展平/顺序保持）。
+// KI-4 验收 2 → B8-IMPORT F23 → B9-TITLE F30：标题=会话行同款项目串（同函数钉
+// 例）、别名/子行决议、副标题预览/占位、nameLabel 回退矩阵、buildImportTree
+// （父子嵌套/孤儿子组/自父防御/两层展平/顺序保持）。
 // B4-IMPORT（裁定 11/12）：rootKey/childCount、默认折叠/搜索自动展开、
 // handle↔persistence 徽标匹配（sessionId/nativeHandle 双字段、provider 域）与父行
 // 聚合；F23 起两源合并口径=已归档 > 已导入（mergeImportBadgeFacts + 索引归档优先）。
@@ -12,6 +13,7 @@ import {
   buildBadgeOpenTarget,
   buildImportAgentHandleIndex,
   buildImportRowBadgeMap,
+  buildImportRowSubtitle,
   buildImportToastParts,
   buildImportTree,
   classifyImportError,
@@ -24,12 +26,14 @@ import {
   importTreeAutoExpandKeys,
   mapEntriesToImportRows,
   mergeImportBadgeFacts,
+  resolveImportRowTitle,
   summarizeImportAttempts,
   toggleRowSelection,
   type ImportAgentHandleSource,
   type ImportStatusInput,
   type ImportTreeItem,
 } from "./rows";
+import { buildChatRowTitle } from "@/shell/chats/row-title";
 
 function entry(
   overrides: Partial<FetchRecentProviderSessionEntry> = {},
@@ -56,12 +60,14 @@ describe("mapEntriesToImportRows", () => {
       providerLabel: "Codex",
       providerHandleId: "handle-1",
       cwd: "C:/work/repo",
-      // F23：标题=首次用户输入（副标题才是末条摘要），官方 title 降级为 nameLabel。
-      title: "fix the flaky suite",
+      // B9-TITLE：项目串走会话行同款格式化器（本例行无归属信息=空串）；
+      // 原标题链降级 fallbackTitle；preview/firstUserMsg 是裸值（空串=缺席）。
+      projectTitle: "",
+      fallbackTitle: "fix the flaky suite",
       nameLabel: "Fix flaky test",
       parentHandleId: null,
-      preview: "done", // 末条摘要（F23 起进副标题；KI-5 契约：取值规则不碰）。
-      folder: null,
+      preview: "done",
+      firstUserMsg: "fix the flaky suite",
       projectName: null,
       lastActivityAt: Date.parse("2026-09-25T08:00:00.000Z"),
     });
@@ -85,19 +91,21 @@ describe("mapEntriesToImportRows", () => {
     expect(rows.map((row) => row.key)).toEqual(["codex:handle-1", "claude:handle-1"]);
   });
 
-  it("falls back through the F23 title chain and maps folder + project name", () => {
+  it("falls back through the title chain and maps project name into the title", () => {
     const [row] = mapEntriesToImportRows(
       [entry({ title: "   ", firstPromptPreview: "head only", lastPromptPreview: "tail only" })],
-      (cwd) => (cwd === "C:/work/repo" ? { label: "repo · sub", projectName: "repo" } : null),
+      (cwd) => (cwd === "C:/work/repo" ? "repo" : null),
     );
-    // F23 回退链=firstPromptPreview → lastPromptPreview → 官方 getSessionTitle；
-    // 官方 title 只有空白 → nameLabel=null。钉具体值——`length > 0` 对任何
-    // 非空垃圾都成立（R2-23 假绿修复纪律）。
-    expect(row.title).toBe("head only");
+    // fallbackTitle 回退链=firstPromptPreview → lastPromptPreview → 官方
+    // getSessionTitle；官方 title 只有空白 → nameLabel=null。钉具体值——
+    // `length > 0` 对任何非空垃圾都成立（R2-23 假绿修复纪律）。
+    expect(row.fallbackTitle).toBe("head only");
     expect(row.nameLabel).toBeNull();
     expect(row.preview).toBe("tail only");
-    expect(row.folder).toBe("repo · sub");
+    expect(row.firstUserMsg).toBe("head only");
     expect(row.projectName).toBe("repo");
+    // B9-TITLE：cwd 尾段与项目同名 → worktree 段省略，标题=「repo」。
+    expect(row.projectTitle).toBe("repo");
   });
 });
 
@@ -414,9 +422,9 @@ describe("F23 title chain + nameLabel", () => {
       [entry({ title: "Official", firstPromptPreview: "F", lastPromptPreview: "L" })],
       () => null,
     );
-    // F23（用户拍板）：标题=第一条用户输入；末条摘要走 preview（副标题段），
-    // 于是同一行不再把同一段字写两遍。
-    expect(firstWins.title).toBe("F");
+    // B9-TITLE：原标题链降级为 fallbackTitle（子行无名时的标题兜底）；
+    // 末条摘要走 preview（副标题段），同一行不再把同一段字写两遍。
+    expect(firstWins.fallbackTitle).toBe("F");
     expect(firstWins.preview).toBe("L");
     // 官方 title 与新 title 不同 → 降级 nameLabel（子代理名 ReworkR45 不丢）。
     expect(firstWins.nameLabel).toBe("Official");
@@ -425,16 +433,16 @@ describe("F23 title chain + nameLabel", () => {
       [entry({ title: "Official", firstPromptPreview: " F ", lastPromptPreview: "   " })],
       () => null,
     );
-    expect(firstNext.title).toBe("F"); // trim 后判空，纯空白不算末次输入。
+    expect(firstNext.fallbackTitle).toBe("F"); // trim 后判空，纯空白不算末次输入。
     expect(firstNext.nameLabel).toBe("Official");
 
     const [officialLast] = mapEntriesToImportRows(
       [entry({ title: "Official", firstPromptPreview: null, lastPromptPreview: null })],
       () => null,
     );
-    expect(officialLast.title).toBe("Official");
+    expect(officialLast.fallbackTitle).toBe("Official");
     // 与新 title 相同 → null（meta 行不重复展示同一个名字）。
-    expect(officialLast.nameLabel).toBeNull();
+    expect(officialLast.nameLabel).toBeNull(); // 与 fallbackTitle 相同 → 不重复展示。
   });
 
   it("nameLabel is null without an official title; parentHandleId is trimmed, blanks null", () => {
@@ -446,6 +454,111 @@ describe("F23 title chain + nameLabel", () => {
     expect(row.parentHandleId).toBe("C:/omp/s/parent.jsonl");
     const [blank] = mapEntriesToImportRows([entry({ parentHandleId: "   " })], () => null);
     expect(blank.parentHandleId).toBeNull();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// B9-TITLE（批次九 F30，用户口径「导入的标题和小字跟会话不一样」）：
+// 标题=会话行同款项目串（同一 buildChatRowTitle，钉一例防两屏漂移）；已导入的
+// 行别名优先（壳重命名=唯一「备注」源，D21 口径）；子行（└）=nameLabel；
+// 副标题去项目段，预览为空退 firstUserMsg，全空退占位小字（小字恒在）。
+// ---------------------------------------------------------------------------
+describe("B9-TITLE: title = 会话行同款项目串（F30 裁定 1）", () => {
+  it("钉例：同 cwd/同项目名的导入行标题与会话行格式化输出逐字相等", () => {
+    const cwd = "C:/work/paseo-go/.paseo/worktrees/b9";
+    const [row] = mapEntriesToImportRows([entry({ cwd })], () => "paseo-go");
+    expect(row.projectTitle).toBe(buildChatRowTitle({ projectName: "paseo-go", cwd, note: null }));
+    // 具体串：worktree 段与项目不同名 → 括号形态（会话行同款，非手抄第二份规则）。
+    expect(row.projectTitle).toBe("paseo-go(b9)");
+  });
+
+  it("remote owner/repo 项目名只显短名，与会话行同规则", () => {
+    const [row] = mapEntriesToImportRows(
+      [entry({ cwd: "/home/dev/paseo" })],
+      () => "getpaseo/paseo",
+    );
+    expect(row.projectTitle).toBe(
+      buildChatRowTitle({ projectName: "getpaseo/paseo", cwd: "/home/dev/paseo", note: null }),
+    );
+    expect(row.projectTitle).toBe("paseo");
+  });
+
+  it("resolveImportRowTitle: 已导入行的别名压过项目串（两屏同一串）", () => {
+    const row = { projectTitle: "paseo-go(b9)", nameLabel: null, fallbackTitle: "首个输入" };
+    expect(resolveImportRowTitle(row, 0, "登录修复")).toBe("登录修复");
+    expect(resolveImportRowTitle(row, 0, "  登录修复  ")).toBe("登录修复"); // trim 后判空。
+    expect(resolveImportRowTitle(row, 0, "   ")).toBe("paseo-go(b9)"); // 纯空白=无别名。
+    expect(resolveImportRowTitle(row, 0, null)).toBe("paseo-go(b9)");
+  });
+});
+
+describe("B9-TITLE: 子行标题 = nameLabel（F30 裁定 2）", () => {
+  it("有子代理名用名字，无名退 fallbackTitle，别名仍压过一切", () => {
+    const row = { projectTitle: "paseo-go", nameLabel: "ReworkR45", fallbackTitle: "首个输入" };
+    expect(resolveImportRowTitle(row, 1, null)).toBe("ReworkR45");
+    expect(resolveImportRowTitle(row, 1, "登录修复")).toBe("登录修复");
+    expect(resolveImportRowTitle({ ...row, nameLabel: null }, 1, null)).toBe("首个输入");
+    expect(resolveImportRowTitle({ ...row, nameLabel: "  " }, 1, null)).toBe("首个输入");
+  });
+
+  it("屏未给归属信息（projectTitle 空串）时 depth0 也退 fallbackTitle", () => {
+    const [row] = mapEntriesToImportRows([entry()], () => null);
+    expect(row.projectTitle).toBe("");
+    expect(resolveImportRowTitle(row, 0, null)).toBe("fix the flaky suite");
+  });
+});
+
+describe("B9-TITLE: 副标题 = 预览 + 占位，项目段退役（F30 裁定 3/4）", () => {
+  const labels = { emptyLabel: "暂无消息" };
+
+  it("预览非空=裸预览（导入条目协议无角色字段，不加「我: 」前缀）", () => {
+    expect(
+      buildImportRowSubtitle(
+        { preview: "已经修好了", firstUserMsg: "帮我修登录", nameLabel: null },
+        { title: "paseo-go", ...labels },
+      ),
+    ).toBe("已经修好了");
+  });
+
+  it("预览为空 → firstUserMsg 兜底（搜索命中可读，裁定 4）", () => {
+    expect(
+      buildImportRowSubtitle(
+        { preview: "", firstUserMsg: "帮我修登录", nameLabel: null },
+        { title: "paseo-go", ...labels },
+      ),
+    ).toBe("帮我修登录");
+  });
+
+  it("空链 → 会话行同款占位小字（小字恒在，行高不塌）", () => {
+    expect(
+      buildImportRowSubtitle(
+        { preview: "   ", firstUserMsg: "", nameLabel: null },
+        { title: "paseo-go", ...labels },
+      ),
+    ).toBe("暂无消息");
+  });
+
+  it("nameLabel 留在副标题直到被提进标题；与标题同串不重复展示", () => {
+    const row = { preview: "末条摘要", firstUserMsg: "首个输入", nameLabel: "ReworkR45" };
+    // depth0：标题=项目串 → 名字仍在副标题（KI-4 名字不丢）。
+    expect(buildImportRowSubtitle(row, { title: "paseo-go", ...labels })).toBe(
+      "ReworkR45 · 末条摘要",
+    );
+    // depth1：名字就是标题 → 副标题不再重复一遍。
+    expect(buildImportRowSubtitle(row, { title: "ReworkR45", ...labels })).toBe("末条摘要");
+    // 别名接管标题后名字与标题不同串 → 同样保留（不变量不因别名让路）。
+    expect(buildImportRowSubtitle(row, { title: "登录修复", ...labels })).toBe(
+      "ReworkR45 · 末条摘要",
+    );
+  });
+
+  it("唯一串就是标题 → 不写两遍，退占位", () => {
+    expect(
+      buildImportRowSubtitle(
+        { preview: "ReworkR45", firstUserMsg: "ReworkR45", nameLabel: null },
+        { title: "ReworkR45", ...labels },
+      ),
+    ).toBe("暂无消息");
   });
 });
 

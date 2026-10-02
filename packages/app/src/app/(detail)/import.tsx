@@ -35,7 +35,6 @@ import { LoadingSpinner } from "@/components/ui/loading-spinner";
 import { IDENTITY_GLYPH_COLOR } from "@/styles/identity-colors";
 import {
   buildProviderLabelMap,
-  formatDirectoryLabel,
   resolveDirectoryLabel,
   resolveProvidersToFetch,
 } from "@/components/import-session-sheet-view-model";
@@ -58,6 +57,7 @@ import {
   applyImportTreeCollapse,
   buildBadgeOpenTarget,
   buildImportRowBadgeMap,
+  buildImportRowSubtitle,
   buildImportToastParts,
   buildImportTree,
   classifyImportError,
@@ -65,12 +65,12 @@ import {
   filterImportEntriesByQuery,
   importTreeAutoExpandKeys,
   mapEntriesToImportRows,
+  resolveImportRowTitle,
   summarizeImportAttempts,
   type ImportAttempt,
   type ImportParentLabel,
   type ImportRow,
   type ImportRowBadge,
-  type ImportRowFolder,
   type ImportTreeItem,
 } from "@/shell/import/rows";
 import { useImportList } from "@/shell/import/use-import-list";
@@ -88,6 +88,7 @@ import { confirmDialog } from "@/utils/confirm-dialog";
 import { useSessionStore } from "@/stores/session-store";
 import { usePaseoGoReadStateStore } from "@/shell/stores/readState";
 import { usePaseoGoForkAckStore } from "@/shell/stores/forkAck";
+import { usePaseoGoPinsStore } from "@/shell/stores/pins";
 
 // B5-IMPORT2 (D20): 60→200=服务端 limit 上限；includeExisting 起列表不再剔除
 // 已存在行，行数≈omp resume 可见数，200 内一屏全覆盖（超出分页=后续卡）。
@@ -144,9 +145,11 @@ function ImportProjectAvatar({
 
 /**
  * B4-IMPORT（裁定 11/12）行渲染事实 + B8-IMPORT（F23）版式对齐壳会话行终态
- * （B8-ROWPILL 落地后的 chat-list-row，对齐观感非照抄实现）：项目 icon 色块 |
- * 标题行=标题（截断）+「可能活跃」/状态徽标紧随+时间贴右缘 | 副标题=项目 · 末条
- * 摘要。checkbox 列与 chevron/子计数列原样保留（多选语义不动）。
+ * （B8-ROWPILL 落地后的 chat-list-row，对齐观感非照抄实现）+ B9-TITLE（F30）
+ * 标题/小字改走会话行同款推导（规则在 @/shell/import/rows 纯函数，本 cell 只
+ * 注入别名与占位措辞）：项目 icon 色块 | 标题行=标题（截断）+「可能活跃」/状态
+ * 徽标紧随+时间贴右缘 | 副标题=名字 · 预览/占位。checkbox 列与 chevron/子计数
+ * 列原样保留（多选语义不动）。
  * - childCount>0 → 左侧 chevron+计数徽标「N」独立命中区（点 chevron=展开/收起，
  *   行主体=勾选，现语义不动）；无子行占同宽空槽保持标题对齐。
  * - badge=已导入/已归档 → 标题行灰徽标（归档带箱形 icon=壳内归档语义形，Q2③
@@ -161,6 +164,7 @@ export function ImportRowCell({
   selected,
   disabled,
   badge,
+  alias,
   childCount,
   rootKey,
   expanded,
@@ -174,6 +178,12 @@ export function ImportRowCell({
   selected: boolean;
   disabled: boolean;
   badge: ImportRowBadge | null;
+  /**
+   * B9-TITLE（F30 裁定 1）：已导入行的壳重命名别名——屏按徽标携带的 agentId 查
+   * pins store（与会话行 D21 同源）注入。同一会话在对话 tab 改过名，这里就说
+   * 同一串。null=无别名（未导入 / 没改过名），走默认推导。
+   */
+  alias: string | null;
   childCount: number;
   rootKey: string;
   expanded: boolean;
@@ -190,11 +200,14 @@ export function ImportRowCell({
   const timeLabel =
     useWechatTimeLabel(row.lastActivityAt === null ? null : new Date(row.lastActivityAt)) ||
     t("import.metaTimeUnknown");
-  // F23: 副标题=项目 · 末条摘要（会话行同款两段落）。nameLabel=官方 title
-  // （子代理名那类）仍降级在这里，名字不丢（KI-4 不变量）；单条输入的会话
-  // preview 与标题同文，不重复展示。时间不在此行——它贴标题行的右缘。
-  const summary = row.preview === row.title ? null : row.preview;
-  const subtitle = [row.folder, row.nameLabel, summary].filter(Boolean).join(" · ");
+  // B9-TITLE（F30 裁定 1-4）：标题=别名 > 子行 nameLabel > 项目串；副标题=
+  // 名字 · 预览（空退首条输入，再退会话行同款占位小字）。项目段退役——项目已
+  // 进标题，再写一遍就是同文两遍。时间不在此行——它贴标题行的右缘。
+  const title = resolveImportRowTitle(row, depth, alias);
+  const subtitle = buildImportRowSubtitle(row, {
+    title,
+    emptyLabel: t("chats.row.noMessages"),
+  });
   const handleExpand = useCallback(() => onToggleExpand(rootKey), [onToggleExpand, rootKey]);
   const handlePress = useCallback(() => {
     if (badge?.agentId) {
@@ -214,7 +227,7 @@ export function ImportRowCell({
   // label，且只说标题）。REVIEW-B8-08：chip 此前渲染在 label 之内、串之外=
   // 读屏丢失；并入后顺序=视觉序（标题→可能活跃→副标题→时间→徽标）。
   const activeLabel = row.looksActive ? t("import.activeBadge") : null;
-  const rowLabel = [row.title, activeLabel, subtitle, timeLabel, badgeLabel]
+  const rowLabel = [title, activeLabel, subtitle, timeLabel, badgeLabel]
     .filter(Boolean)
     .join(" · ");
   return (
@@ -258,7 +271,7 @@ export function ImportRowCell({
             testID={`shell-import-row-${index}-title`}
           >
             {depth === 1 ? "└ " : ""}
-            {row.title}
+            {title}
           </Text>
           {/* C25: 「可能活跃」= mtime 新鲜度启发式，非存活证明；token 色小徽标
               （刻意不用状态灯，避免与会话 tab 四态灯混淆）。F23 不动它的逻辑。 */}
@@ -515,7 +528,7 @@ export default function ShellImportScreen() {
   );
 
   const hostProjects = useHostProjects(serverId ? [serverId] : []);
-  // 目录解析的输入面（一次映射，folderFor 逐行只读）。
+  // 目录解析的输入面（一次映射，projectFor 逐行只读）。
   const projectDirs = useMemo(
     () =>
       hostProjects.map((project) => ({
@@ -524,19 +537,16 @@ export default function ShellImportScreen() {
       })),
     [hostProjects],
   );
-  // F23: 一次目录解析出两段事实——副标题的项目段（官方 formatDirectoryLabel 结果，
-  // 含 worktree detail）+ icon 色块的项目名。项目名与会话行同源：命中在册项目=
-  // 项目名（=projectPlacement.projectName 同串→同色）；未命中时 resolveDirectoryLabel
-  // 回吐整条路径，这时取 cwd 尾段=会话行的兜底名 deriveProjectName(deriveProjectKey(cwd))，
-  // 于是同一个目录在导入屏与对话 tab 落在同一格颜色上。
-  const folderFor = useCallback(
-    (cwd: string): ImportRowFolder => {
+  // B9-TITLE（F30）：副标题的项目段退役（项目已进标题），目录解析只再输出项目名
+  // 一段——命中在册项目=项目名（=projectPlacement.projectName 同串→同色）；未命中
+  // 时 resolveDirectoryLabel 回吐整条路径，这时取 cwd 尾段=会话行的兜底名
+  // deriveProjectName(deriveProjectKey(cwd))。标题串（buildChatRowTitle）与 icon
+  // 色块都吃这一段，同一个项目在两屏同一串、同一格颜色。
+  const projectFor = useCallback(
+    (cwd: string): string => {
       const label = resolveDirectoryLabel(cwd, projectDirs);
       const owned = projectDirs.some((project) => project.name === label.name);
-      return {
-        label: formatDirectoryLabel(label),
-        projectName: owned ? label.name : deriveProjectName(deriveProjectKey(cwd)),
-      };
+      return owned ? label.name : deriveProjectName(deriveProjectKey(cwd));
     },
     [projectDirs],
   );
@@ -546,8 +556,8 @@ export default function ShellImportScreen() {
       !supportsSearch && normalizedQuery.length > 0
         ? filterImportEntriesByQuery(listState.entries, normalizedQuery)
         : listState.entries;
-    return mapEntriesToImportRows(entries, folderFor);
-  }, [folderFor, listState.entries, normalizedQuery, supportsSearch]);
+    return mapEntriesToImportRows(entries, projectFor);
+  }, [projectFor, listState.entries, normalizedQuery, supportsSearch]);
 
   // KI-4: 过滤发生在条目层（rows 已按 query 筛过），树在过滤视图上现建——
   // 被过滤掉的父自然让子成为孤儿组。
@@ -562,6 +572,18 @@ export default function ShellImportScreen() {
   const badgeMap = useMemo(
     () => buildImportRowBadgeMap(treeItems, agentIndex),
     [agentIndex, treeItems],
+  );
+
+  // B9-TITLE（F30 裁定 1）：已导入行的标题别名=壳重命名（pins store，与会话行
+  // D21 同源，key=`${serverId}:${agentId}`），按徽标（服务端 existing ∪ 壳侧索引
+  // 合并的产物）携带的 agentId 查。聚合徽标（agentId=null，父全子已导入）没有
+  // 单一「该会话」，不带别名。订阅整张 aliases：重命名罕见，换来与会话行同款的
+  // 改名即时刷新。
+  const aliases = usePaseoGoPinsStore((state) => state.aliases);
+  const aliasForBadge = useCallback(
+    (badge: ImportRowBadge | null): string | null =>
+      badge?.agentId && serverId ? (aliases[`${serverId}:${badge.agentId}`] ?? null) : null,
+    [aliases, serverId],
   );
 
   // B4-IMPORT 裁定 11: 折叠态=纯组件态（不持久化，每次进屏默认全折叠）；
@@ -755,15 +777,29 @@ export default function ShellImportScreen() {
   );
 
   const renderItem = useCallback(
-    ({ item, index }: { item: ImportTreeItem; index: number }) =>
-      item.kind === "session" ? (
+    ({ item, index }: { item: ImportTreeItem; index: number }) => {
+      if (item.kind !== "session") {
+        return (
+          <ImportOrphanGroupHeader
+            label={item.label}
+            index={index}
+            childCount={item.childCount}
+            rootKey={item.key}
+            expanded={expandedRoots.has(item.key)}
+            onToggleExpand={handleToggleExpand}
+          />
+        );
+      }
+      const badge = badgeMap.get(item.row.key) ?? null;
+      return (
         <ImportRowCell
           row={item.row}
           depth={item.depth}
           index={index}
           selected={selectedSet.has(item.row.key)}
           disabled={progress !== null}
-          badge={badgeMap.get(item.row.key) ?? null}
+          badge={badge}
+          alias={aliasForBadge(badge)}
           childCount={item.childCount}
           rootKey={item.rootKey}
           expanded={expandedRoots.has(item.rootKey)}
@@ -771,17 +807,10 @@ export default function ShellImportScreen() {
           onToggleExpand={handleToggleExpand}
           onOpenBadge={handleOpenBadge}
         />
-      ) : (
-        <ImportOrphanGroupHeader
-          label={item.label}
-          index={index}
-          childCount={item.childCount}
-          rootKey={item.key}
-          expanded={expandedRoots.has(item.key)}
-          onToggleExpand={handleToggleExpand}
-        />
-      ),
+      );
+    },
     [
+      aliasForBadge,
       badgeMap,
       expandedRoots,
       handleOpenBadge,
@@ -1100,7 +1129,7 @@ const styles = StyleSheet.create((theme) => ({
     color: theme.colors.foregroundMuted,
     fontSize: theme.fontSize.sm,
   },
-  // F23: 副标题=项目 · 末条摘要（会话行 subtitle 同款字号/色）。
+  // F23 版式 + B9-TITLE（F30）内容：副标题=名字 · 预览/占位（会话行 subtitle 同款字号/色）。
   rowMeta: {
     color: theme.colors.foregroundMuted,
     fontSize: theme.fontSize.sm,
