@@ -32,12 +32,7 @@ import {
 import * as Haptics from "expo-haptics";
 import { Button } from "@/components/ui/button";
 import { LoadingSpinner } from "@/components/ui/loading-spinner";
-import {
-  IDENTITY_COLOR_NAMES,
-  IDENTITY_GLYPH_COLOR,
-  identityColor,
-  type IdentityColorName,
-} from "@/styles/identity-colors";
+import { IDENTITY_GLYPH_COLOR } from "@/styles/identity-colors";
 import {
   buildProviderLabelMap,
   formatDirectoryLabel,
@@ -68,7 +63,6 @@ import {
   classifyImportError,
   deriveImportStatus,
   filterImportEntriesByQuery,
-  importRowTimeLabel,
   importTreeAutoExpandKeys,
   mapEntriesToImportRows,
   summarizeImportAttempts,
@@ -85,7 +79,8 @@ import { useImportAgentHandleIndex } from "@/shell/import/use-import-agent-index
 import { shellNavigateToAgent } from "@/shell/chats/shell-navigate-to-agent";
 import { createChatOpener } from "@/shell/chats/open-agent";
 import { chatLastEventAtFromAgent } from "@/shell/chats/derive";
-import { projectAvatarFor } from "@/shell/chats/project-avatar";
+import { AVATAR_FILL, projectAvatarFor } from "@/shell/chats/project-avatar";
+import { useWechatTimeLabel } from "@/shell/chats/use-wechat-time-label";
 import { deriveProjectKey, deriveProjectName } from "@/utils/agent-grouping";
 import { OWNERSHIP_OPEN_DIALOG_KEYS, OWNERSHIP_SEND_BODY_KEY } from "@/shell/chats/ownership";
 import { requestChatsFilter } from "@/shell/chats/filter-request";
@@ -118,12 +113,9 @@ function childRowPressStyle({ pressed }: { pressed: boolean }) {
   return [styles.row, styles.rowChild, pressed && styles.rowPressed];
 }
 
-// B8-IMPORT F23: 与会话行同一张色块表——identity 调色板的十个静音填充是
-// scheme-independent 的，模块级建一次，每次渲染交给 Unistyles 同一个对象
-// （chat-list-row 同款纪律：无内联样式、无逐帧 identity 抖动）。
-const AVATAR_FILL = Object.fromEntries(
-  IDENTITY_COLOR_NAMES.map((name) => [name, { backgroundColor: identityColor(name) }]),
-) as Record<IdentityColorName, { backgroundColor: string }>;
+// B8-IMPORT F23 + REVIEW-B8-05: 与会话行同一张色块表——填充表上收
+// `shell/chats/project-avatar` 的 AVATAR_FILL（两屏 import 同一个对象，
+// 改一处两屏同动，「同项目同色」不再靠手抄维持）。
 
 /**
  * 项目 icon 色块（F23）：复用会话行同款取字/配色算法（`projectAvatarFor`=项目名
@@ -190,10 +182,14 @@ export function ImportRowCell({
   onOpenBadge: (badge: ImportRowBadge) => void;
 }) {
   const { t } = useTranslation(SHELL_I18N_NAMESPACE);
-  // R2-14: a non-compliant host's date string maps to lastActivityAt=null on
-  // the row; the meta shows the bilingual placeholder instead of the
-  // "Invalid Date NaN" the formatter would produce for NaN.
-  const timeLabel = importRowTimeLabel(row.lastActivityAt) ?? t("import.metaTimeUnknown");
+  // REVIEW-B8-13（用户拍板 U7=B）：时间与对话行同函数同输出——走
+  // useWechatTimeLabel（会话行 ChatTimestamp 按着的那个出口：绝对微信档 +
+  // 同款日界订阅），不再另发一套「8h/1d」相对制。
+  // R2-14 保留：不可解析的主机日期串在行上=null → 占位文案，绝不产出
+  // "Invalid Date NaN"（hook 对 null/NaN 回空串，这里接住）。
+  const timeLabel =
+    useWechatTimeLabel(row.lastActivityAt === null ? null : new Date(row.lastActivityAt)) ||
+    t("import.metaTimeUnknown");
   // F23: 副标题=项目 · 末条摘要（会话行同款两段落）。nameLabel=官方 title
   // （子代理名那类）仍降级在这里，名字不丢（KI-4 不变量）；单条输入的会话
   // preview 与标题同文，不重复展示。时间不在此行——它贴标题行的右缘。
@@ -214,8 +210,13 @@ export function ImportRowCell({
     ? t(badge.state === "archived" ? "import.badgeArchived" : "import.badgeImported")
     : null;
   // 会话行同款纪律（R4-13）：accessibilityLabel 替换掉全部子文本，所以标题、
-  // 副标题、时间、徽标都要在这条串里说完（此前只有徽标行有 label，且只说标题）。
-  const rowLabel = [row.title, subtitle, timeLabel, badgeLabel].filter(Boolean).join(" · ");
+  //「可能活跃」chip、副标题、时间、徽标都要在这条串里说完（此前只有徽标行有
+  // label，且只说标题）。REVIEW-B8-08：chip 此前渲染在 label 之内、串之外=
+  // 读屏丢失；并入后顺序=视觉序（标题→可能活跃→副标题→时间→徽标）。
+  const activeLabel = row.looksActive ? t("import.activeBadge") : null;
+  const rowLabel = [row.title, activeLabel, subtitle, timeLabel, badgeLabel]
+    .filter(Boolean)
+    .join(" · ");
   return (
     <Pressable
       onPress={handlePress}
@@ -263,7 +264,7 @@ export function ImportRowCell({
               （刻意不用状态灯，避免与会话 tab 四态灯混淆）。F23 不动它的逻辑。 */}
           {row.looksActive ? (
             <Text style={styles.rowActiveBadge} testID={`shell-import-row-${index}-active`}>
-              {t("import.activeBadge")}
+              {activeLabel}
             </Text>
           ) : null}
           {/* B4-IMPORT 裁定 12: 已导入（灰）/已归档（灰+箱形归档语义 icon）。
@@ -394,12 +395,20 @@ function ImportStatusBlock({
 // 最近 M 条 transcript），对话列表却是全部 agent——此前用户拿这两个数对账，
 // 得出「导入屏少标了一大截」的结论。这一行把两个口径并排说出来。
 // 旧 daemon 不报 claimedTotal（null）/ 零认领（0）/ 尚未拿到响应 → 整行不出现。
+// REVIEW-B8-01: ① shown 与「列表展示」同轴=屏上折叠树的行数（visibleItems），
+// 不是窗口条目数——窗满 200 而屏上折叠后只有 27 行时，说明行不能再报 200；
+// ② 搜索态 rows 被 query 过滤，「最近 M 条」口径不成立，换命中口径
+//（zh「命中 {shown} 条」/en 同构）；③ en 长句窄屏允许两行截断。
 export function ImportClaimSummary({
   claimedTotal,
   shown,
+  searching,
 }: {
   claimedTotal: number | null;
+  /** 屏上折叠树的行数（与列表同轴，卡 01）。 */
   shown: number;
+  /** true = 搜索/过滤态（query 非空），M 的口径从「最近」换成「命中」。 */
+  searching: boolean;
 }) {
   const { t } = useTranslation(SHELL_I18N_NAMESPACE);
   if (claimedTotal === null || claimedTotal <= 0) {
@@ -407,8 +416,15 @@ export function ImportClaimSummary({
   }
   return (
     <View style={styles.claimSummary} testID="shell-import-claim-summary">
-      <Text style={styles.claimSummaryText} numberOfLines={1}>
-        {t("import.claimedSummary", { count: claimedTotal, shown })}
+      <Text
+        style={styles.claimSummaryText}
+        numberOfLines={2}
+        testID="shell-import-claim-summary-text"
+      >
+        {t(searching ? "import.claimedSummarySearch" : "import.claimedSummary", {
+          count: claimedTotal,
+          shown,
+        })}
       </Text>
     </View>
   );
@@ -860,7 +876,12 @@ export default function ShellImportScreen() {
         )}
       </View>
 
-      <ImportClaimSummary claimedTotal={listState.claimedTotal} shown={rows.length} />
+      {/* 卡 01：M=屏上行数（与 FlatList 的 data 同轴），搜索态换命中口径。 */}
+      <ImportClaimSummary
+        claimedTotal={listState.claimedTotal}
+        shown={visibleItems.length}
+        searching={normalizedQuery.length > 0}
+      />
       <FlatList
         data={visibleItems}
         keyExtractor={keyExtractor}

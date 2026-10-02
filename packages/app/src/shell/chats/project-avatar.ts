@@ -12,6 +12,7 @@
 // load-bearing upstream, which is a second reason not to invent a third palette.
 import {
   deriveIdentityColorName,
+  IDENTITY_COLOR_NAMES,
   identityColor,
   type IdentityColorName,
 } from "@/styles/identity-colors";
@@ -52,3 +53,17 @@ export function projectAvatarFor(projectName: string): ProjectAvatar {
   const colorName = deriveIdentityColorName(projectName.trim());
   return { initial: projectInitial(projectName), colorName, color: identityColor(colorName) };
 }
+
+/**
+ * REVIEW-B8-05: the pre-computed tile fills — ONE table for every row surface.
+ * The identity palette's ten muted fills are scheme-independent by construction,
+ * so the map is built once at module scope and every render hands Unistyles the
+ * SAME object (no inline style prop, no per-frame identity churn). Both the chat
+ * row and the import row import THIS table: a palette edit moves both screens in
+ * one commit, and the same colorName cannot drift to a different background on
+ * the two paths (the F23 「同项目同色」 guarantee, now machine-enforced — see
+ * project-avatar.test.ts + the per-consumer DOM pins).
+ */
+export const AVATAR_FILL = Object.fromEntries(
+  IDENTITY_COLOR_NAMES.map((name) => [name, { backgroundColor: identityColor(name) }]),
+) as Record<IdentityColorName, { backgroundColor: string }>;

@@ -46,13 +46,8 @@ import {
   type RowMenuController,
 } from "@/shell/components/use-shell-row-drag-menu";
 import { CONTEXT_MENU_DELAY_MS } from "@/shell/components/drag-menu-arbitration";
-import {
-  IDENTITY_COLOR_NAMES,
-  IDENTITY_GLYPH_COLOR,
-  identityColor,
-  type IdentityColorName,
-} from "@/styles/identity-colors";
-import { projectAvatarFor } from "@/shell/chats/project-avatar";
+import { IDENTITY_GLYPH_COLOR } from "@/styles/identity-colors";
+import { AVATAR_FILL, projectAvatarFor } from "@/shell/chats/project-avatar";
 import {
   buildChatSubtitle,
   buildChatRowTitle,
@@ -139,16 +134,14 @@ function ChatBadge({
   return null;
 }
 
-// Ruling 3: the tile is the PROJECT, not the provider. The identity palette is
-// scheme-independent by construction (one muted fill per hue, tuned to one contrast
-// band for a light glyph in either theme), so the ten backgrounds are built once here
-// and every render hands Unistyles the SAME object — no inline style prop, no
-// per-frame identity churn. The glyph takes `accentForeground`, the theme's own
-// on-a-filled-chip text token (the unread count pill above pairs the same two), which
-// keeps DESIGN §5's no-literal rule while the hue still reads at a glance.
-const AVATAR_FILL = Object.fromEntries(
-  IDENTITY_COLOR_NAMES.map((name) => [name, { backgroundColor: identityColor(name) }]),
-) as Record<IdentityColorName, { backgroundColor: string }>;
+// Ruling 3: the tile is the PROJECT, not the provider. The fill table lives in
+// `shell/chats/project-avatar` (REVIEW-B8-05) — the import row imports the SAME
+// object, so a palette edit moves both screens in one commit and the
+// 「同项目同色」 invariant cannot drift per-file. Scheme-independent by
+// construction (ten muted fills, one contrast band for a light glyph in either
+// theme), built once at module scope: no inline style prop, no per-frame
+// identity churn. The glyph takes `IDENTITY_GLYPH_COLOR`, the palette's own
+// light-glyph constant, which keeps DESIGN §5's no-literal rule.
 
 // Ruling 8: running rides a 12dp spinner left of the time. A numeric `size` is what
 // pins it (the official sidebar's archive spinner does the same at 8), and

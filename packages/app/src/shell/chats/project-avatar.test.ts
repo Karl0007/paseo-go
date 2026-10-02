@@ -8,7 +8,7 @@ import {
   deriveIdentityColorName,
   identityColor,
 } from "@/styles/identity-colors";
-import { projectAvatarFor, projectInitial } from "./project-avatar";
+import { AVATAR_FILL, projectAvatarFor, projectInitial } from "./project-avatar";
 
 const PALETTE = new Set(IDENTITY_COLOR_NAMES.map(identityColor));
 
@@ -61,5 +61,21 @@ describe("projectAvatarFor", () => {
     // Ten slots over eight inputs: the hash must actually spread them, or the tiles
     // would tell projects apart by glyph alone.
     expect(seen.size).toBeGreaterThan(1);
+  });
+});
+
+// REVIEW-B8-05: 两屏色块的填充表只有这一个真相源——会话行与导入行都 import
+// 这张表（此前两文件各抄一份同款推导）。断言钉到 identityColor 函数本身：
+// 这张表或任何消费路径换常量→必红（两屏 DOM 同色断言分别钉在
+// chat-list-row.test.tsx 与 import.test.tsx 的消费路径上）。
+describe("AVATAR_FILL (REVIEW-B8-05 两屏色块唯一真相)", () => {
+  it("gives every palette slot the identity color itself", () => {
+    for (const name of IDENTITY_COLOR_NAMES) {
+      expect(AVATAR_FILL[name]).toEqual({ backgroundColor: identityColor(name) });
+    }
+  });
+
+  it("covers exactly the slots projectAvatarFor can return", () => {
+    expect(Object.keys(AVATAR_FILL).sort()).toEqual([...IDENTITY_COLOR_NAMES].sort());
   });
 });

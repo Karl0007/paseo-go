@@ -21,7 +21,6 @@ import {
   filterImportEntriesByQuery,
   importEntryMatchesQuery,
   importRowKey,
-  importRowTimeLabel,
   importTreeAutoExpandKeys,
   mapEntriesToImportRows,
   mergeImportBadgeFacts,
@@ -402,15 +401,9 @@ describe("R2-14 — non-compliant host dates", () => {
     expect(rows[2]?.lastActivityAt).toBeNull();
   });
 
-  it("importRowTimeLabel: null for unknown; compact label for a real instant — never Invalid Date", () => {
-    expect(importRowTimeLabel(null)).toBeNull();
-    expect(
-      importRowTimeLabel(
-        Date.parse("2026-09-25T08:00:00.000Z"),
-        new Date("2026-09-25T08:05:00.000Z"),
-      ),
-    ).toBe("5m");
-  });
+  // REVIEW-B8-13: 时间段格式化改走 shell/chats/use-wechat-time-label（与对话行
+  // 同函数同输出，U7=B）——importRowTimeLabel 已删，行时间/null→占位的契约改钉
+  // 在渲染面：import.test.tsx「两屏同一串」+ metaTimeUnknown 占位两例。
 });
 
 // KI-4 验收 2 → B8-IMPORT F23：标题回退矩阵（first→last→官方）+ nameLabel +

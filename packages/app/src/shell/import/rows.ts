@@ -6,7 +6,6 @@
 import type { FetchRecentProviderSessionEntry } from "@getpaseo/client/internal/daemon-client";
 import { parseDateOrNull } from "@getpaseo/protocol/messages";
 import { getPromptPreview, getSessionTitle } from "@/components/import-session-sheet-view-model";
-import { formatCompactTimeAgo } from "@/utils/time";
 import type { ChatOpenTarget } from "@/shell/chats/open-agent";
 import { chatLastEventAtFromAgent } from "@/shell/chats/derive";
 import { isImportedProviderSession } from "@getpaseo/protocol/agent-labels";
@@ -348,18 +347,6 @@ export function buildImportTree(rows: ReadonlyArray<ImportRow>): ImportTreeItem[
     emitRootUnit(row);
   }
   return items;
-}
-
-/**
- * 行 meta 的时间段（纯函数，屏只负责占位措辞的 t() 包裹）。
- * R2-14: null = 主机日期串不可解析 → 屏渲染占位，绝不让
- * formatCompactTimeAgo(new Date(NaN)) 吐出 "Invalid Date NaN"。
- */
-export function importRowTimeLabel(
-  lastActivityAt: number | null,
-  now: Date = new Date(),
-): string | null {
-  return lastActivityAt === null ? null : formatCompactTimeAgo(new Date(lastActivityAt), now);
 }
 
 /**

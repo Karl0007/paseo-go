@@ -11,6 +11,8 @@
 import React from "react";
 import { cleanup, render, screen } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { identityColor } from "@/styles/identity-colors";
+import { projectAvatarFor } from "@/shell/chats/project-avatar";
 
 vi.mock("react-i18next", () => ({
   // Echo t: the row's title is built from plain strings; only the 占位 fallback is a
@@ -234,5 +236,42 @@ describe("ChatListRow title line layout (F21 right-edge clock)", () => {
     const kids = Array.from(trailing.children);
     expect(kids.indexOf(spinner)).toBeGreaterThanOrEqual(0);
     expect(kids.indexOf(spinner)).toBeLessThan(kids.indexOf(time));
+  });
+});
+
+/** #rrggbb → css rgb()，即 react-native-web 写进 DOM 的形态。 */
+function cssRgb(hex: string): string {
+  const value = hex.replace("#", "");
+  const channels = [0, 2, 4].map((i) => Number.parseInt(value.slice(i, i + 2), 16));
+  return `rgb(${channels.join(", ")})`;
+}
+
+// REVIEW-B8-05: 两屏同色断言的对话列路径——色块底色钉到 identityColor 函数
+// 本身（填充表已上收 project-avatar.ts 单一真相；导入行同款断言钉在
+// import.test.tsx，任一路径换常量→必红）。
+describe("ChatListRow project tile fill (REVIEW-B8-05 两屏同色)", () => {
+  it("fills the tile with the shared identity color", () => {
+    renderRow(agentFixture());
+    const avatar = screen.getByTestId(`shell-chat-avatar-${KEY}`);
+    expect(avatar.style.backgroundColor).toBe(
+      cssRgb(identityColor(projectAvatarFor("paseo-go").colorName)),
+    );
+  });
+});
+
+// REVIEW-B8-13（用户拍板 U7=B）：「同一时间输入→两屏同一串」的对话列例——
+// 昨天正午 → 「昨天」微信串（echo-t 按 key 钉）。导入行改走同函数后与这里
+// 同串（对例钉在 import.test.tsx，修复前行走「1d」相对制必红）。
+describe("ChatListRow clock tier (REVIEW-B8-13 两屏同串)", () => {
+  beforeEach(() => {
+    vi.useFakeTimers({ now: new Date(2026, 9, 2, 15, 0, 0).getTime(), toFake: ["Date"] });
+  });
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it("says yesterday for yesterday-noon", () => {
+    renderRow(agentFixture({ lastActivityAt: new Date(2026, 9, 1, 12, 0, 0) }));
+    expect(screen.getByTestId(`shell-chat-time-${KEY}`).textContent).toBe("chats.time.yesterday");
   });
 });
