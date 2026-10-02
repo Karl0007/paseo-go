@@ -3,14 +3,16 @@
 // and the session header capsule. The rules live in shell/chats/ownership.ts
 // (`ownershipPresentation`); this is the renderer.
 //
-// Visual contract: the pill is ALWAYS there — 原生 (paseo holds the session, or the
-// session was born here and nobody else has written it: D22's birth axis) /
-// 外部·外部·运行中 (the B4 warning pair, unchanged: warning-tint with the
-// statusWarning word) / 未知 (a host that reported neither an ownership pair nor a
-// birth — we honestly cannot tell). The two quiet states stay out of both existing
-// markers' color stories (BATCH4-ALIGNMENT F8.6): 原生 rides a neutral surface fill,
-// 未知 a bare outline — the WORD carries the state, the fill only grades loudness,
-// and only 外部 is allowed to shout.
+// Visual contract (F22, B8-ROWPILL, 用户拍板): the pill is ALWAYS there — 原生
+// (paseo holds the session, or the session was born here and nobody else has
+// written it: D22's birth axis) / 外部·外部·运行中 (the B4 word pair, unchanged) /
+// 未知 (a host that reported neither an ownership pair nor a birth — we honestly
+// cannot tell). All three now wear a low-saturation tint fill with the SAME
+// family's deep word on top: 原生 = the success pair, 外部 = the warning pair,
+// 未知 = the theme's neutral pair (surface2 + foregroundMuted). Every color is a
+// theme token so light/dark follow automatically — no hardcoded hex. The tint
+// tokens ARE the status color at 12-16% alpha (theme.ts `statusTints`), which is
+// what keeps the grade a 浅染 instead of a shout.
 import { memo } from "react";
 import { Text, View } from "react-native";
 import { StyleSheet } from "react-native-unistyles";
@@ -21,10 +23,17 @@ import { SHELL_I18N_NAMESPACE } from "@/shell/i18n";
 // Tone → style, resolved once per theme by StyleSheet.create below; the row and
 // the capsule hand the pill FLAT primitive props (it is memo'd and re-renders on
 // every directory tick — an object prop would defeat that, and lint).
-const PILL_TONE_STYLE: Record<OwnershipPillTone, "pillWarning" | "pillNeutral" | "pillOutline"> = {
+const PILL_TONE_STYLE: Record<OwnershipPillTone, "pillWarning" | "pillSuccess" | "pillQuiet"> = {
   warning: "pillWarning",
-  neutral: "pillNeutral",
-  outline: "pillOutline",
+  neutral: "pillSuccess",
+  outline: "pillQuiet",
+};
+// The word is the fill's own family at full depth — one hue per state, so fill
+// and text never drift apart across theme switches.
+const PILL_TONE_TEXT: Record<OwnershipPillTone, "textWarning" | "textSuccess" | "textQuiet"> = {
+  warning: "textWarning",
+  neutral: "textSuccess",
+  outline: "textQuiet",
 };
 
 export const OwnershipBadge = memo(function OwnershipBadge({
@@ -45,12 +54,7 @@ export const OwnershipBadge = memo(function OwnershipBadge({
   const presentation = ownershipPresentation({ ownership, externalLooksActive, origin });
   return (
     <View style={[styles.pill, styles[PILL_TONE_STYLE[presentation.tone]]]} testID={testID}>
-      <Text
-        style={[
-          styles.text,
-          presentation.tone === "warning" ? styles.textWarning : styles.textQuiet,
-        ]}
-      >
+      <Text style={[styles.text, styles[PILL_TONE_TEXT[presentation.tone]]]}>
         {t(presentation.labelKey)}
       </Text>
     </View>
@@ -71,19 +75,24 @@ const styles = StyleSheet.create((theme) => ({
     fontSize: theme.fontSize.sm,
     fontWeight: theme.fontWeight.medium,
   },
-  // The B4 warning story, unchanged: external is the only loud state.
+  // 外部 keeps the B4 warning pair verbatim; 原生 moves onto the success pair
+  // (F22: the quiet-but-owned state earns its own hue); 未知 takes the neutral
+  // pair — the outline it used to wear read as a rendering artifact next to two
+  // filled siblings, the fill keeps the three states one shape family.
   pillWarning: {
     backgroundColor: theme.colors.statusWarningTint,
   },
   textWarning: {
     color: theme.colors.statusWarning,
   },
-  pillNeutral: {
-    backgroundColor: theme.colors.surface2,
+  pillSuccess: {
+    backgroundColor: theme.colors.statusSuccessTint,
   },
-  pillOutline: {
-    borderWidth: theme.borderWidth[1],
-    borderColor: theme.colors.border,
+  textSuccess: {
+    color: theme.colors.statusSuccess,
+  },
+  pillQuiet: {
+    backgroundColor: theme.colors.surface2,
   },
   textQuiet: {
     color: theme.colors.foregroundMuted,

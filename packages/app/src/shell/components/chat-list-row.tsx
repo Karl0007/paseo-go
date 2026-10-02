@@ -172,14 +172,15 @@ function ProjectAvatar({ projectName, rowKey }: { projectName: string; rowKey: s
   );
 }
 
-// Ruling 6: the time left the subtitle and became WeChat's absolute label, pinned
-// right on the title line. Its state stays in this one `<Text>` — the same discipline
-// the old relative clock used, so a tick never reaches the row.
-function ChatTimestamp({ at }: { at: Date }) {
+// Ruling 6 + F21 (B8-ROWPILL): WeChat's line — the absolute time is pinned to the
+// title line's RIGHT edge (inside `titleTrailing`), so any title length leaves it
+// in place instead of trailing the pill. Its state stays in this one `<Text>` —
+// the same discipline the old relative clock used, so a tick never reaches the row.
+function ChatTimestamp({ at, testID }: { at: Date; testID?: string }) {
   const label = useWechatTimeLabel(at);
   if (label.length === 0) return null;
   return (
-    <Text style={styles.time} numberOfLines={1}>
+    <Text style={styles.time} numberOfLines={1} testID={testID}>
       {label}
     </Text>
   );
@@ -534,7 +535,11 @@ function ChatRowInner({
         <ProjectAvatar projectName={projectName} rowKey={agent.key} />
         <View style={styles.body}>
           <View style={styles.titleRow}>
-            <Text style={[styles.title, unread && styles.titleUnread]} numberOfLines={1}>
+            <Text
+              style={[styles.title, unread && styles.titleUnread]}
+              numberOfLines={1}
+              testID={`shell-chat-title-${agent.key}`}
+            >
               {displayTitle}
             </Text>
             <OwnershipBadge
@@ -543,20 +548,28 @@ function ChatRowInner({
               origin={agent.agent.origin}
               testID={`shell-chat-ownership-${agent.key}`}
             />
-            {showSpinner ? (
-              <RunningSpinner
-                size={RUNNING_SPINNER_SIZE}
-                uniProps={runningSpinnerColor}
-                testID={`shell-chat-running-${agent.key}`}
+            {/* F21: the right-edge group — spinner (ruling 8: still left of the
+                time), the unread/count badge, then the clock as the row's last
+                pixel. It eats the leftover width, so the title truncates first. */}
+            <View style={styles.titleTrailing}>
+              {showSpinner ? (
+                <RunningSpinner
+                  size={RUNNING_SPINNER_SIZE}
+                  uniProps={runningSpinnerColor}
+                  testID={`shell-chat-running-${agent.key}`}
+                />
+              ) : null}
+              <ChatBadge
+                bucket={agent.bucket}
+                count={pendingCount}
+                unread={unread}
+                rowKey={agent.key}
               />
-            ) : null}
-            <ChatTimestamp at={agent.agent.lastActivityAt} />
-            <ChatBadge
-              bucket={agent.bucket}
-              count={pendingCount}
-              unread={unread}
-              rowKey={agent.key}
-            />
+              <ChatTimestamp
+                at={agent.agent.lastActivityAt}
+                testID={`shell-chat-time-${agent.key}`}
+              />
+            </View>
           </View>
           <ChatSubtitle segments={subtitleSegments} />
         </View>
@@ -643,11 +656,25 @@ const styles = StyleSheet.create((theme) => ({
     alignItems: "center",
     gap: theme.spacing[2],
   },
-  // Ruling 6: the time sits at the title line's right edge, quiet and small — the
-  // title flexes, this never does.
+  // F21 (B8-ROWPILL): title + pill own the line's left, this group owns its right
+  // edge — flexGrow takes the leftover width, flex-end pins the content to it,
+  // flexShrink 0 means a long title squeezes the TITLE (ruling 6's posture), never
+  // the clock out of the row.
+  titleTrailing: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: theme.spacing[2],
+    flexGrow: 1,
+    flexShrink: 0,
+    justifyContent: "flex-end",
+  },
+  // Ruling 6 + F21: the time is the row's right-edge label — the theme's smallest
+  // text tier (`sm` = 12, the xs band; the theme has no smaller token), muted
+  // grey, and it never shrinks.
   time: {
     fontSize: theme.fontSize.sm,
-    color: theme.colors.foregroundExtraMuted,
+    color: theme.colors.foregroundMuted,
+    flexShrink: 0,
   },
   title: {
     flexShrink: 1,

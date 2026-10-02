@@ -31,7 +31,11 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
-function pillText(ownership: unknown, externalLooksActive: unknown, origin?: unknown): string {
+function renderPill(
+  ownership: unknown,
+  externalLooksActive: unknown,
+  origin?: unknown,
+): { pill: HTMLElement; word: HTMLElement } {
   cleanup(); // one pill per assertion — tests probe several postures in a row
   render(
     <OwnershipBadge
@@ -41,7 +45,31 @@ function pillText(ownership: unknown, externalLooksActive: unknown, origin?: unk
       testID="pill"
     />,
   );
-  return screen.getByTestId("pill").textContent ?? "";
+  const pill = screen.getByTestId("pill");
+  return { pill, word: pill.firstElementChild as HTMLElement };
+}
+
+function pillText(ownership: unknown, externalLooksActive: unknown, origin?: unknown): string {
+  return renderPill(ownership, externalLooksActive, origin).pill.textContent ?? "";
+}
+// jsdom (CSSOM) and react-native-web round an 8-digit hex alpha differently
+// (0.122 vs 0.12), so the tint assertions compare parsed rgba components with a
+// tolerance instead of the serialized strings. Both sides go through the same
+// CSS parser; an unparseable value fails loudly instead of "" === "".
+function rgbaOf(value: string): [number, number, number, number] {
+  const probe = document.createElement("div");
+  probe.style.color = value;
+  const parsed = probe.style.color;
+  if (parsed.length === 0) throw new Error(`jsdom could not parse color ${value}`);
+  const nums = parsed.match(/[\d.]+/g)!.map(Number);
+  return [nums[0]!, nums[1]!, nums[2]!, nums.length > 3 ? nums[3]! : 1];
+}
+
+function expectCssColor(actual: string, expected: string): void {
+  const [ar, ag, ab, aa] = rgbaOf(actual);
+  const [er, eg, eb, ea] = rgbaOf(expected);
+  expect([ar, ag, ab]).toEqual([er, eg, eb]);
+  expect(Math.abs(aa! - ea!)).toBeLessThan(0.01);
 }
 
 describe("OwnershipBadge tri-state rendering (always-on)", () => {
@@ -87,5 +115,35 @@ describe("OwnershipBadge birth axis (B6-OWN-HEAL)", () => {
 
   it("still says 未知 when neither axis was reported", () => {
     expect(pillText("none", false, null)).toBe("chats.ownership.state.unknown");
+  });
+});
+
+// B8-ROWPILL (F22, 用户拍板): the three states read apart by COLOR story, not just
+// by word — 原生=success 浅染, 外部=warning 浅染, 未知=中性. The literals below are
+// the fixture theme's token VALUES (test-stubs/react-native-unistyles.ts mirrors the
+// real light band: tint = the status color at 12% alpha); pinning them here is what
+// catches a style block quietly falling back to surface2 or a hardcoded hex.
+describe("OwnershipBadge tri-state tint (B8 F22)", () => {
+  it("原生 wears the success pair: statusSuccessTint fill + statusSuccess word", () => {
+    const { pill, word } = renderPill("paseo", false);
+    expectCssColor(pill.style.backgroundColor, "#15803d1f"); // statusSuccessTint
+    expectCssColor(word.style.color, "#15803d"); // statusSuccess
+  });
+
+  it("外部 keeps the B4 warning pair verbatim", () => {
+    const { pill, word } = renderPill("external", true);
+    expectCssColor(pill.style.backgroundColor, "#d977061f"); // statusWarningTint
+    expectCssColor(word.style.color, "#d97706"); // statusWarning
+  });
+
+  it("未知 wears the neutral pair: surface2 fill + foregroundMuted word", () => {
+    const { pill, word } = renderPill("none", false, null);
+    expectCssColor(pill.style.backgroundColor, "#f4f4f5"); // surface2
+    expectCssColor(word.style.color, "#666666"); // foregroundMuted
+  });
+
+  it("stays shrink-safe on the title line (F21's pill posture)", () => {
+    const { pill } = renderPill("paseo", false);
+    expect(pill.style.flexShrink).toBe("0");
   });
 });

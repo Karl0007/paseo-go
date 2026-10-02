@@ -79,6 +79,9 @@ function agentFixture(overrides: Record<string, unknown> = {}): ShellChatAgent {
       serverId: "host-1",
       serverLabel: "host-1",
       title: PROVISIONAL_TITLE,
+      // AggregatedAgent carries the clock as a Date (the row hands it straight to
+      // useWechatTimeLabel); without it the title line renders no timestamp.
+      lastActivityAt: new Date(),
       status: "closed",
       cwd: "/home/dev/paseo-go/.paseo/worktrees/fix-login",
       provider: "omp",
@@ -191,5 +194,45 @@ describe("ChatListRow ownership pill (D22 birth axis)", () => {
     expect(screen.getByTestId(`shell-chat-ownership-${KEY}`).textContent).toBe(
       "chats.ownership.state.native",
     );
+  });
+});
+
+// B8-ROWPILL (F21, 用户拍板): WeChat's title line — title + pill own the left,
+// the clock is pinned to the line's RIGHT edge and survives ANY title length.
+// The assertions read the inline styles react-native-web puts on the DOM, i.e.
+// the exact flex contract the native row lays out with.
+describe("ChatListRow title line layout (F21 right-edge clock)", () => {
+  it("keeps the clock in the right-edge group under an 80-char title", () => {
+    usePaseoGoPinsStore.setState({ aliases: { [KEY]: "长".repeat(80) } });
+    renderRow(agentFixture());
+    const title = screen.getByTestId(`shell-chat-title-${KEY}`);
+    const pill = screen.getByTestId(`shell-chat-ownership-${KEY}`);
+    const time = screen.getByTestId(`shell-chat-time-${KEY}`);
+    const trailing = time.parentElement as HTMLElement;
+    // Paint order on the line: title, pill 紧随, then the right-edge group —
+    // and the clock is that group's LAST child (the row's rightmost pixel).
+    expect(pill.previousElementSibling).toBe(title);
+    expect(trailing.previousElementSibling).toBe(pill);
+    expect(trailing.lastElementChild).toBe(time);
+    // The group eats the leftover width and right-aligns its content; only the
+    // title may shrink — pill and clock are shrink-0, never squeezed out.
+    expect(trailing.style.flexGrow).toBe("1");
+    expect(trailing.style.justifyContent).toBe("flex-end");
+    expect(trailing.style.flexShrink).toBe("0");
+    expect(title.style.flexShrink).toBe("1");
+    expect(pill.style.flexShrink).toBe("0");
+    expect(time.style.flexShrink).toBe("0");
+    // F21's 右上小灰字: the theme's muted grey token (fixture #666666).
+    expect(time.style.color).toBe("rgb(102, 102, 102)");
+  });
+
+  it("keeps the running spinner left of the clock inside the group (ruling 8)", () => {
+    renderRow({ ...agentFixture(), bucket: "running" });
+    const time = screen.getByTestId(`shell-chat-time-${KEY}`);
+    const spinner = screen.getByTestId(`shell-chat-running-${KEY}`);
+    const trailing = time.parentElement as HTMLElement;
+    const kids = Array.from(trailing.children);
+    expect(kids.indexOf(spinner)).toBeGreaterThanOrEqual(0);
+    expect(kids.indexOf(spinner)).toBeLessThan(kids.indexOf(time));
   });
 });
