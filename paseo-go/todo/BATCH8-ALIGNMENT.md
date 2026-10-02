@@ -136,3 +136,12 @@
 - ✅ **F28-KI1 链窗加固**（`1eef1e4a9`）：命中即停上限 24→200+链尾记忆（knownTail，空 tick 零头读）；洪泛复刻+成本有界测修复前必红。
 - ✅ **F31-B 子任务可见性**（`089b809e6`，20 文件）：watcher 链扩树（父 sessionId 子目录 stat 零头读）+运行态传染+协议 activeSubagents（COMPAT）+对话行右缘「子任务×N」圆标（骑 F32 槽位家族）+导入屏子行 watcher 实况覆盖+replica-cache 携带（F25 同型泄漏同批堵）；devd9 实录 2→0→2 衰减复燃周期+f6 三信号同屏帧。
 - 过程账：B9Subact 超请求预算被停但保树唤醒收口；其「全量 server 0 failed」不实申报**自查勘误**（超时中断），全量门禁由编排者补跑；devd9 OMP_SESSION_DIR 覆盖+设备 stay_on 均已复原。
+
+## 批次九终态门禁（编排者亲跑，HEAD=e530f2dd8，机器空闲时点）
+
+- app 6522 绿；失败 4 文件=locale×3+tz×1（W1）+forges 收集（W1）+tracks-panel browser-pool（chromium 面环境类）。
+- protocol 747 绿；1 失败=providers-snapshot 5s import 超时（pre-count 判决实验已证既存）。
+- server 6254 测；3 失败=checkout-git ×2（git.exe 0xC0000005 段错误，**-t 隔离复跑双双转绿=负载性**）+index.posix（posix-only，W1 在案）。
+- use-agent-history（前轮高载超时）本轮全量绿。
+- **判定：失败集⊆环境基线，零批次九回归 → PASS**。
+- 过程账：G1 探针 worktree `--force` 递归删 junction 连坐主树 node_modules/.bin（npm install 修复+scoped 2599 复绿+pre-commit 全绿；**教训入册：探针树禁 node_modules junction，用 NODE_PATH**）；npm 元数据 edgesOut 残留待服务空闲窗 `npm install` 幂等清（不阻塞运行时）。
