@@ -68,6 +68,67 @@ describe("decideShellSwipe — tab 环 (F26)", () => {
   });
 });
 
+describe("decideShellSwipe — 文件页内层段 pager (F29)", () => {
+  // 单仲裁器原则：segment posture 在场 = 这条 Pan 是文件页的内层段手势，
+  // 角色判给 files-segment；栈页/环的分支不参与（让位/接管是 RNGH 的事）。
+  const seg = (index: number, count: number) => ({
+    ...OPEN_GATE,
+    stackInFront: true,
+    segment: { index, count },
+  });
+
+  it("中段双向都判给 files-segment 且 activate（stackInFront 不再压住内滑）", () => {
+    expect(decideShellSwipe({ deltaX: -20, deltaY: 0 }, seg(1, 3))).toEqual({
+      role: "files-segment",
+      intent: "activate",
+    });
+    expect(decideShellSwipe({ deltaX: 20, deltaY: 0 }, seg(1, 3))).toEqual({
+      role: "files-segment",
+      intent: "activate",
+    });
+  });
+
+  it("边界外抛谓词经仲裁器落地：最左+右滑、最右+左滑 = fail（同流让位祖先面）", () => {
+    expect(decideShellSwipe({ deltaX: 60, deltaY: 0 }, seg(0, 3))).toEqual({
+      role: "files-segment",
+      intent: "fail",
+    });
+    expect(decideShellSwipe({ deltaX: -60, deltaY: 0 }, seg(2, 3))).toEqual({
+      role: "files-segment",
+      intent: "fail",
+    });
+  });
+
+  it("gates 先于内层：blocked（搜索态/换页中）与横滚豁免都让段手势哑火", () => {
+    expect(decideShellSwipe({ deltaX: -20, deltaY: 0 }, { ...seg(1, 3), blocked: true })).toEqual({
+      role: "files-segment",
+      intent: "fail",
+    });
+    expect(
+      decideShellSwipe({ deltaX: 20, deltaY: 0 }, { ...seg(1, 3), horizontalScrolled: true }),
+    ).toEqual({ role: "files-segment", intent: "fail" });
+  });
+
+  it("灰段退化：count=1 双向 fail，role 仍是 files-segment（外抛由祖先面接住）", () => {
+    expect(decideShellSwipe({ deltaX: -80, deltaY: 0 }, seg(0, 1)).role).toBe("files-segment");
+    expect(decideShellSwipe({ deltaX: -80, deltaY: 0 }, seg(0, 1)).intent).toBe("fail");
+    expect(decideShellSwipe({ deltaX: 80, deltaY: 0 }, seg(0, 1)).intent).toBe("fail");
+  });
+
+  it("posture 缺席 = 旧行为逐字不变（环/栈页两分支零回归）", () => {
+    expect(
+      decideShellSwipe({ deltaX: -40, deltaY: 0 }, { ...OPEN_GATE, stackInFront: true }),
+    ).toEqual({
+      role: "stack-back",
+      intent: "fail",
+    });
+    expect(decideShellSwipe({ deltaX: -40, deltaY: 0 }, OPEN_GATE)).toEqual({
+      role: "tab-ring",
+      intent: "activate",
+    });
+  });
+});
+
 describe("decideShellSwipe — gates (互斥清单 + 声明性豁免)", () => {
   it("the blocked band kills both roles, whichever owns the front", () => {
     expect(decideShellSwipe({ deltaX: 40, deltaY: 0 }, { ...OPEN_GATE, blocked: true })).toEqual({

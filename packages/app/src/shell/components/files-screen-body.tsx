@@ -21,6 +21,8 @@
 // say why (official unsupported idiom: nothing to embed).
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { FlatList, Pressable, ScrollView, Text, View } from "react-native";
+import { GestureDetector } from "react-native-gesture-handler";
+import Animated from "react-native-reanimated";
 import { router, type Href } from "expo-router";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useTranslation } from "react-i18next";
@@ -61,12 +63,15 @@ import {
 import {
   buildWorkspaceFileSearchSource,
   constrainFilesScreenTab,
+  FILES_SCREEN_TABS,
   gitTabsDisabled,
   type FilesScreenTab,
 } from "@/shell/files/files-tabs";
 import { SearchModeBar } from "@/shell/components/search/search-mode-bar";
 import { useShellSearchBackPriority } from "@/shell/search/use-shell-search-back-priority";
 import { setStackBackBlocked } from "@/shell/gestures/stack-back-gate";
+import { useFilesSegmentSwipe } from "@/shell/gestures/use-files-segment-swipe";
+import { filesSegmentIndexForTab, filesSegmentTabForIndex } from "@/shell/gestures/files-segment";
 import { FileSearchRow } from "@/shell/components/search/file-search-row";
 import { ContentSearchRow } from "@/shell/components/search/content-search-row";
 import { collectBrowsedWorkspaces, type FileSearchHit } from "@/shell/search/file-search";
@@ -498,6 +503,26 @@ export function FilesScreenBody({
 
   const hasWorkspace = workspace !== undefined;
 
+  // ---- B8-FILESWIP (F29) 三段屏内横滑 + 边界级联 -------------------------------
+  // 手势层在共享 body 上：谁挂载谁生效（当前唯一宿主 = (detail) 栈页；未来的
+  // tab 宿主自动获得同款级联）。边界外抛是结构事实：内层 Pan 在边界 FAIL =
+  // 同一触摸流让位祖先面（栈页 = ShellStackBackHost 的全宽右滑返回，tab 宿主 =
+  // 主环），绝不回卷；内层激活则 RNGH cancel 祖先 Pan——换段与返回永不双触发。
+  // 非 git 灰两段 → count=1 → 内滑全 FAIL 只剩外抛。搜索态 = blocked 互斥带。
+  const handleSegmentSwitch = useCallback(
+    (target: number) => {
+      const next = filesSegmentTabForIndex(target);
+      if (next !== null) handleTabChange(next);
+    },
+    [handleTabChange],
+  );
+  const segment = useFilesSegmentSwipe({
+    index: filesSegmentIndexForTab(activeTab),
+    count: gitDisabled ? 1 : FILES_SCREEN_TABS.length,
+    blocked: search.active,
+    onSwitchSegment: handleSegmentSwitch,
+  });
+
   return (
     <View style={styles.screen}>
       <FilesHeader
@@ -523,37 +548,43 @@ export function FilesScreenBody({
           {t("files.notGitHint")}
         </Text>
       ) : null}
-      <View style={styles.body}>
-        {search.active ? (
-          // 结果替换内容区 (C9 ruling): the retained panels go display:none (state
-          // survives), the hit list takes over the body.
-          <FilesSearchBody
-            result={search.result}
-            onClear={search.cancel}
-            onOpenHit={handleOpenHit}
-            onOpenContentHit={handleOpenContentHit}
+      <GestureDetector gesture={segment.gesture}>
+        <Animated.View
+          collapsable={false}
+          style={[styles.body, styles.segmentSurface, segment.surfaceStyle]}
+          onLayout={segment.onSurfaceLayout}
+        >
+          {search.active ? (
+            // 结果替换内容区 (C9 ruling): the retained panels go display:none (state
+            // survives), the hit list takes over the body.
+            <FilesSearchBody
+              result={search.result}
+              onClear={search.cancel}
+              onOpenHit={handleOpenHit}
+              onOpenContentHit={handleOpenContentHit}
+            />
+          ) : null}
+          <FilesTabPanels
+            visited={visited}
+            activeTab={activeTab}
+            searchActive={search.active}
+            serverId={serverId}
+            workspaceId={workspaceId}
+            rootPath={rootPath}
+            hasWorkspace={hasWorkspace}
+            status={checkoutStatus.status}
+            workspacesHydrated={workspacesHydrated}
+            notFoundLabel={t("files.notFound")}
+            selectedEntry={selectedEntry}
+            changesState={changesState}
+            onChangesStateChange={setChangesState}
+            onClearSelection={handleClearSelection}
+            onOpenFile={handleOpenFile}
+            onAddToChat={handleAddToChat}
+            onCommitPress={handleCommitPress}
           />
-        ) : null}
-        <FilesTabPanels
-          visited={visited}
-          activeTab={activeTab}
-          searchActive={search.active}
-          serverId={serverId}
-          workspaceId={workspaceId}
-          rootPath={rootPath}
-          hasWorkspace={hasWorkspace}
-          status={checkoutStatus.status}
-          workspacesHydrated={workspacesHydrated}
-          notFoundLabel={t("files.notFound")}
-          selectedEntry={selectedEntry}
-          changesState={changesState}
-          onChangesStateChange={setChangesState}
-          onClearSelection={handleClearSelection}
-          onOpenFile={handleOpenFile}
-          onAddToChat={handleAddToChat}
-          onCommitPress={handleCommitPress}
-        />
-      </View>
+        </Animated.View>
+      </GestureDetector>
     </View>
   );
 }
@@ -927,6 +958,10 @@ const styles = StyleSheet.create((theme) => ({
   },
   body: {
     flex: 1,
+  },
+  // B8-FILESWIP: 跟手面裁掉墙外（环 swipeSurface 同款；flex:1 由 body 提供）。
+  segmentSurface: {
+    overflow: "hidden",
   },
   panels: {
     flex: 1,
