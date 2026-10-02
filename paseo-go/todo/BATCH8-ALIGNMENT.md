@@ -121,3 +121,9 @@
 
 - 现场：计数圆标在时间左（titleTrailing spinner→badge→time），行最右另有未读点=两处分居。裁定=统一收时间右侧唯一槽（count 圆标/点互斥单枚）；F31-B 的子任务徽标复用右缘家族同款。卡=B9-BADGE（先于 B9-SUBACT，后者骑其槽位）。
 - F31 拍板=**B+**：watcher 扩子任务树（pill 运行态传染）+对话行右缘「子任务×N」徽标+导入屏子行实况活跃。卡=B9-SUBACT（排 B9Title/B9Badge 后，同文件域串行）。
+
+## F33 诊断改判（B9Watch2 生产取证，编排者拍板 2026-10-02 20:5x）
+
+- **实锤根因≠洪泛链窗**：用户终端直接往 handle 文件本体追加（无 resume 分叉）；真因=**live-idle 盲区**——agent-manager.ts:4016 把 live agent 整体排除出 watch 候选 + applyTranscriptChange 对 live 恒 PENDING(R5)，daemon 侧 idle 时终端写入永不可见 → pill 停原生。
+- 拍板：B9-WATCH2 收窄=live-idle 进候选（idle+增长→external·running；busy 自写不翻；acquire 纠正竞态；两测钉死；文件域扩 agent-manager.ts 批准）。**链窗加固拆出=新卡 B9-WATCH3**（24→200+命中即停+链尾记忆+洪泛复刻必红测，F28-KI1 后续，排队尾）。
+- 附带：旧式 UUID parentSession 停走=正确退化，注释写明。
