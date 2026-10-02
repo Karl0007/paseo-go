@@ -250,6 +250,14 @@ const StoredAgentSnapshotSchema = z.strictObject({
   attentionReason: z.enum(["finished", "error", "permission"]).nullable().optional(),
   attentionTimestamp: IsoDateSchema.nullable().optional(),
   archivedAt: IsoDateSchema.nullable().optional(),
+  // COMPAT(agentOwnership)/COMPAT(agentOrigin): Paseo Go B8-CACHE (batch-8 F25). The
+  // pill's two axes are pure-add optional-nullable wire fields, so they are optional
+  // here too: a row written before this build simply misses the keys and deserializes
+  // to `null` (= unknown), never a parse failure. Without them a refresh that hydrates
+  // from the cache stripped the fields and 原生/外部 jumped back to 未知.
+  ownership: z.enum(["paseo", "external", "none"]).nullable().optional(),
+  externalLooksActive: z.boolean().nullable().optional(),
+  origin: z.enum(["launch", "import"]).nullable().optional(),
 });
 
 const StoredAgentSchema = z.strictObject({
@@ -595,6 +603,20 @@ function serializeProjectPlacement(agent: Agent): StoredAgent["projectPlacement"
   return agent.projectPlacement ?? null;
 }
 
+// Present-only keys, so "the host never reported it" stays absent on the row instead
+// of storing a null a newer reader cannot tell apart from an explicit unknown.
+function serializeAgentAxes(
+  agent: Agent,
+): Pick<StoredAgent["snapshot"], "ownership" | "externalLooksActive" | "origin"> {
+  return {
+    ...(agent.ownership !== undefined ? { ownership: agent.ownership } : {}),
+    ...(agent.externalLooksActive !== undefined
+      ? { externalLooksActive: agent.externalLooksActive }
+      : {}),
+    ...(agent.origin !== undefined ? { origin: agent.origin } : {}),
+  };
+}
+
 function serializeAgentTurn(agent: Agent): NonNullable<StoredAgent["turn"]> {
   if (agent.turn.phase === "idle") return { phase: "idle" };
   return {
@@ -651,6 +673,8 @@ function serializeAgent(agent: Agent): StoredAgent {
     ...(agent.lastError ? { lastError: agent.lastError } : {}),
     title: agent.title,
     labels: agent.labels,
+    // B8-CACHE (batch-8 F25): the pill's two axes ride the row; see serializeAgentAxes.
+    ...serializeAgentAxes(agent),
     requiresAttention: agent.requiresAttention ?? false,
     attentionReason: agent.attentionReason ?? null,
     attentionTimestamp: agent.attentionTimestamp?.toISOString() ?? null,
@@ -665,6 +689,9 @@ function serializeAgent(agent: Agent): StoredAgent {
 }
 
 function deserializeAgent(serverId: string, stored: StoredAgent): Agent {
+  // The ownership pair and the birth axis ride in on `stored.snapshot` and come back
+  // through normalizeAgentSnapshot (B8-CACHE); a row written before those keys existed
+  // normalizes them to `null`, which the pill reads as 未知 exactly like a pre-B4 daemon.
   const normalized = normalizeAgentSnapshot(stored.snapshot, serverId);
   let turn = normalized.turn;
   if (stored.turn?.phase === "idle") turn = { phase: "idle", cancellationRequestId: null };

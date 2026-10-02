@@ -81,6 +81,16 @@ export function projectAgentSnapshot(agent: Agent): AgentSnapshotPayload {
     ...(agent.lastError ? { lastError: agent.lastError } : {}),
     title: agent.title,
     labels: agent.labels,
+    // COMPAT(agentOwnership)/COMPAT(agentOrigin): Paseo Go B8-CACHE (batch-8 F25) —
+    // the ownership pair and the birth axis are projected back out so a replica-cache
+    // round-trip (and the directory reconciliation that consumes this projection)
+    // keeps the pill's inputs instead of stripping them to 未知. `!== undefined`
+    // rather than truthiness: `externalLooksActive: false` is a real state.
+    ...(agent.ownership !== undefined ? { ownership: agent.ownership } : {}),
+    ...(agent.externalLooksActive !== undefined
+      ? { externalLooksActive: agent.externalLooksActive }
+      : {}),
+    ...(agent.origin !== undefined ? { origin: agent.origin } : {}),
     requiresAttention: agent.requiresAttention ?? false,
     attentionReason: agent.attentionReason ?? null,
     attentionTimestamp: agent.attentionTimestamp?.toISOString() ?? null,
@@ -142,15 +152,17 @@ export function normalizeAgentSnapshot(snapshot: AgentSnapshotPayload, serverId:
     lastMessagePreview: snapshot.lastMessagePreview ?? null,
     lastMessageRole: snapshot.lastMessageRole ?? null,
     // COMPAT(agentOwnership): Paseo Go B4-OWNERSHIP pure-add; old daemons omit the
-    // pair and consumers read that as `none`/`false`. Like the preview pair this is
-    // deliberately NOT projected back out by projectAgentSnapshot: the replica
-    // cache's strict StoredAgentSnapshotSchema does not carry it, so a cold cache
-    // restore shows no badge until the directory re-syncs.
+    // pair and consumers read that as `none`/`false`. B8-CACHE (batch-8 F25) closed the
+    // one remaining leak: projectAgentSnapshot projects the pair and the replica
+    // cache's StoredAgentSnapshotSchema carries it, so a cold cache restore keeps the
+    // badge instead of dropping a live session back to 未知 until the directory
+    // re-syncs. A pre-B4 cache row simply misses the keys → `null` (unknown), never a
+    // throw.
     ownership: snapshot.ownership ?? null,
     externalLooksActive: snapshot.externalLooksActive ?? null,
     // COMPAT(agentOrigin): Paseo Go B6-OWN-HEAL pure-add birth axis; a daemon older
-    // than the build omits it and the pill keeps its 未知 state. Same posture as the
-    // ownership pair above: NOT projected back out by projectAgentSnapshot.
+    // than the build omits it and the pill keeps its 未知 state. Cache-preserved on the
+    // same posture as the ownership pair above.
     origin: snapshot.origin ?? null,
   };
 }

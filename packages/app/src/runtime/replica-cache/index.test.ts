@@ -6,7 +6,7 @@ import {
   type Agent,
 } from "@/stores/session-store";
 import type { StreamItem } from "@/types/stream";
-import { normalizeAgentSnapshot } from "@/utils/agent-snapshots";
+import { normalizeAgentSnapshot, projectAgentSnapshot } from "@/utils/agent-snapshots";
 import { ReplicaCache } from ".";
 import type { DirectoryCheckpoint } from "@/runtime/replica-cache";
 import type { ReplicaHostRows, ReplicaRow, ReplicaRowChanges, ReplicaRowStore } from "./row-store";
@@ -424,6 +424,91 @@ describe("ReplicaCache", () => {
         cancellationRequestId: null,
       },
     });
+  });
+
+  it("keeps the ownership pair and the birth axis across a cache round-trip", async () => {
+    // B8-CACHE (batch-8 F25): a refresh hydrated from this cache used to strip the
+    // pill's two axes, so 原生/外部 jumped back to 未知 even for a live session.
+    const cases = [
+      { id: "paseo", ownership: "paseo", externalLooksActive: false, origin: "launch" },
+      { id: "external-live", ownership: "external", externalLooksActive: true, origin: "launch" },
+      {
+        id: "external-idle-import",
+        ownership: "external",
+        externalLooksActive: false,
+        origin: "import",
+      },
+      { id: "none-import", ownership: "none", externalLooksActive: null, origin: "import" },
+      { id: "not-reported", ownership: null, externalLooksActive: null, origin: null },
+    ] as const;
+    const storage = new MemoryStorage();
+    const writer = createCache(storage);
+    const entries = cases.map((facts) => {
+      const original = agent(facts.id);
+      original.ownership = facts.ownership;
+      original.externalLooksActive = facts.externalLooksActive;
+      original.origin = facts.origin;
+      return { facts, original };
+    });
+    writer.commitDirectoryMutations(
+      SERVER_ID,
+      entries.map(({ facts, original }) => ({
+        kind: "agent" as const,
+        type: "upsert" as const,
+        id: facts.id,
+        value: original,
+      })),
+    );
+    await writer.flush();
+
+    const restored = await createCache(storage).readDirectory(SERVER_ID);
+
+    for (const { facts, original } of entries) {
+      const restoredAgent = restored.agents.get(facts.id);
+      if (!restoredAgent) throw new Error(`${facts.id} was not restored`);
+      expect({
+        ownership: restoredAgent.ownership,
+        externalLooksActive: restoredAgent.externalLooksActive,
+        origin: restoredAgent.origin,
+      }).toEqual({
+        ownership: facts.ownership,
+        externalLooksActive: facts.externalLooksActive,
+        origin: facts.origin,
+      });
+      // Nothing else the cache is meant to carry moved either.
+      expect(projectAgentSnapshot(restoredAgent)).toEqual(projectAgentSnapshot(original));
+    }
+  });
+
+  it("reads a cache row written before the axes existed as unknown, not as corrupt", async () => {
+    const storage = new MemoryStorage();
+    const writer = createCache(storage);
+    const owned = agent("legacy-row");
+    owned.ownership = "external";
+    owned.externalLooksActive = true;
+    owned.origin = "import";
+    writer.commitDirectoryMutations(SERVER_ID, [
+      { kind: "agent", type: "upsert", id: owned.id, value: owned },
+    ]);
+    await writer.flush();
+
+    const key = `${SERVER_ID}:agent:legacy-row`;
+    const row = storage.rows.get(key);
+    if (!row) throw new Error("agent row was not written");
+    // Exactly what the previous build durable-wrote: the whitelist had no such keys.
+    const payload = JSON.parse(row.payload) as { snapshot: Record<string, unknown> };
+    delete payload.snapshot.ownership;
+    delete payload.snapshot.externalLooksActive;
+    delete payload.snapshot.origin;
+    storage.rows.set(key, { ...row, payload: JSON.stringify(payload) });
+
+    const restored = await createCache(storage).readDirectory(SERVER_ID);
+    const legacy = restored.agents.get("legacy-row");
+
+    expect(legacy?.ownership).toBeNull();
+    expect(legacy?.externalLooksActive).toBeNull();
+    expect(legacy?.origin).toBeNull();
+    expect(legacy?.title).toBe("Cached agent");
   });
 
   it("coalesces timeline values before serialization", async () => {

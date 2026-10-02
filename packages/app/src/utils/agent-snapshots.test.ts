@@ -32,6 +32,12 @@ function createSnapshot(
     persistence: input.persistence ?? null,
     title: input.title ?? null,
     labels: (input.labels ?? {}) as AgentSnapshotPayload["labels"],
+    // Absent unless the test asks for them, exactly like a pre-B4/B6 daemon payload.
+    ...(input.ownership !== undefined ? { ownership: input.ownership } : {}),
+    ...(input.externalLooksActive !== undefined
+      ? { externalLooksActive: input.externalLooksActive }
+      : {}),
+    ...(input.origin !== undefined ? { origin: input.origin } : {}),
   };
 }
 
@@ -46,6 +52,31 @@ describe("normalizeAgentSnapshot", () => {
       status: "running",
       activeTurn: snapshot.activeTurn,
     });
+  });
+
+  it("projects the ownership pair and the birth axis back out of the snapshot boundary", () => {
+    // B8-CACHE (batch-8 F25): the replica cache round-trips through this projection,
+    // so an agent reported with live evidence must not come back 未知.
+    const snapshot = createSnapshot({
+      ownership: "external",
+      externalLooksActive: true,
+      origin: "import",
+    });
+
+    expect(projectAgentSnapshot(normalizeAgentSnapshot(snapshot, "server-1"))).toMatchObject({
+      ownership: "external",
+      externalLooksActive: true,
+      origin: "import",
+    });
+  });
+
+  it("keeps an unreported pair honest as unknown across the boundary", () => {
+    // Pre-B4/B6 daemons omit the keys; the projection must not invent a state.
+    const projected = projectAgentSnapshot(normalizeAgentSnapshot(createSnapshot(), "server-1"));
+
+    expect(projected.ownership).toBeNull();
+    expect(projected.externalLooksActive).toBeNull();
+    expect(projected.origin).toBeNull();
   });
 
   it("normalizes identified and legacy active turns at the snapshot boundary", () => {
