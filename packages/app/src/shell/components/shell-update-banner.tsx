@@ -2,14 +2,15 @@
 // release the user hasn't seen yet. 不弹窗 — a thin bar above the tab area; tap =
 // open the release page (下载落点), ✕ = dismiss. Both mark the version seen in the
 // persisted notice store, so the same version never re-arms (a newer one does).
-import { useCallback } from "react";
+import { useCallback, useMemo } from "react";
 import { Pressable, Text, View } from "react-native";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useTranslation } from "react-i18next";
 import { StyleSheet, withUnistyles } from "react-native-unistyles";
 import { X } from "lucide-react-native";
 import { openExternalUrl } from "@/utils/open-external-url";
 import { SHELL_I18N_NAMESPACE } from "@/shell/i18n";
-import type { Theme } from "@/styles/theme";
+import { SPACING, type Theme } from "@/styles/theme";
 import { usePaseoGoUpdateNoticeStore } from "@/shell/stores/updateNotice";
 import { shouldShowBanner, useShellUpdateStore } from "@/shell/update/state";
 
@@ -18,6 +19,7 @@ const ThemedCloseIcon = withUnistyles(X);
 
 export function ShellUpdateBanner() {
   const { t } = useTranslation(SHELL_I18N_NAMESPACE);
+  const insets = useSafeAreaInsets();
   const phase = useShellUpdateStore((state) => state.phase);
   const latest = useShellUpdateStore((state) => state.latest);
   const url = useShellUpdateStore((state) => state.url);
@@ -33,7 +35,16 @@ export function ShellUpdateBanner() {
   const handleDismiss = useCallback(() => {
     if (visible && latest !== null) markSeen(latest);
   }, [visible, latest, markSeen]);
-
+  // F20: the banner sits at the very top of updateRoot (y=0), so it must clear the
+  // status bar itself — insets are a device fact, so the top padding is computed
+  // render-time (shell-session-header's barStyle idiom). SPACING is the static
+  // token module (docs/unistyles.md §2 — no useUnistyles subscription needed;
+  // spacing is theme-invariant). The bar stays in flow: visible → the tab area is
+  // pushed down, inset included.
+  const barStyle = useMemo(
+    () => [styles.bar, { paddingTop: insets.top + SPACING[2] }],
+    [insets.top],
+  );
   // react-perf: stable style callbacks, not per-render closures (SettingRow pattern).
   const pressStyle = useCallback(
     ({ pressed }: { pressed: boolean }) => [styles.press, pressed && styles.pressActive],
@@ -45,7 +56,7 @@ export function ShellUpdateBanner() {
   );
   if (!visible || latest === null) return null;
   return (
-    <View style={styles.bar} testID="shell-update-banner">
+    <View style={barStyle} testID="shell-update-banner">
       <Pressable onPress={handleOpen} accessibilityRole="button" style={pressStyle}>
         <Text style={styles.text} numberOfLines={2}>
           {t("update.banner", { version: latest })}
@@ -71,7 +82,7 @@ const styles = StyleSheet.create((theme) => ({
     alignItems: "center",
     gap: theme.spacing[3],
     paddingHorizontal: theme.spacing[4],
-    paddingVertical: theme.spacing[2],
+    paddingBottom: theme.spacing[2],
     backgroundColor: theme.colors.surface2,
     borderBottomWidth: theme.borderWidth[1],
     borderBottomColor: theme.colors.border,
