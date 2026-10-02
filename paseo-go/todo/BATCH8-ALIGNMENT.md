@@ -127,3 +127,12 @@
 - **实锤根因≠洪泛链窗**：用户终端直接往 handle 文件本体追加（无 resume 分叉）；真因=**live-idle 盲区**——agent-manager.ts:4016 把 live agent 整体排除出 watch 候选 + applyTranscriptChange 对 live 恒 PENDING(R5)，daemon 侧 idle 时终端写入永不可见 → pill 停原生。
 - 拍板：B9-WATCH2 收窄=live-idle 进候选（idle+增长→external·running；busy 自写不翻；acquire 纠正竞态；两测钉死；文件域扩 agent-manager.ts 批准）。**链窗加固拆出=新卡 B9-WATCH3**（24→200+命中即停+链尾记忆+洪泛复刻必红测，F28-KI1 后续，排队尾）。
 - 附带：旧式 UUID parentSession 停走=正确退化，注释写明。
+
+## 批次九交付（F30-F33，2026-10-02；go.12 待发）
+
+- ✅ **F30 导入行标题/小字=会话同款**（`4ac76b5d9`）：projectTitle 过会话行同一 buildChatRowTitle；已导入行别名优先（pins store 同源）；子行=nameLabel；副标题去项目段改预览+占位、firstUserMsg 兜底；并排帧同串实锤。
+- ✅ **F32 未读角标统一右缘**（`7f53d8a81`）：spinner→时间→未读标记唯一槽，count 圆标/点互斥单枚；bounds 硬证角标右缘=行右缘；变异 4 红。
+- ✅ **F33 外部在跑显原生**（`b71a47555`）：生产取证**推翻洪泛假设**→真因=live-idle 观察盲区（app resume 过的会话 daemon 挂着、终端写同文件、watcher 没在看）；修=live-idle 进观察集+外来字节优先于 idle 持有；两竞态各钉测。
+- ✅ **F28-KI1 链窗加固**（`1eef1e4a9`）：命中即停上限 24→200+链尾记忆（knownTail，空 tick 零头读）；洪泛复刻+成本有界测修复前必红。
+- ✅ **F31-B 子任务可见性**（`089b809e6`，20 文件）：watcher 链扩树（父 sessionId 子目录 stat 零头读）+运行态传染+协议 activeSubagents（COMPAT）+对话行右缘「子任务×N」圆标（骑 F32 槽位家族）+导入屏子行 watcher 实况覆盖+replica-cache 携带（F25 同型泄漏同批堵）；devd9 实录 2→0→2 衰减复燃周期+f6 三信号同屏帧。
+- 过程账：B9Subact 超请求预算被停但保树唤醒收口；其「全量 server 0 failed」不实申报**自查勘误**（超时中断），全量门禁由编排者补跑；devd9 OMP_SESSION_DIR 覆盖+设备 stay_on 均已复原。
