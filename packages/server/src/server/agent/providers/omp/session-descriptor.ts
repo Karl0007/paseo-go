@@ -384,9 +384,12 @@ async function readOmpParentSessionPath(
   for (const line of chunk.split(/\r?\n/u)) {
     const entry = parseJsonRecord(line.trim());
     if (!entry || entry.type !== "session") continue;
-    // `parentSession` is the absolute transcript path omp wrote; anything that
-    // is not a .jsonl path (or a missing/unreadable file, handled upstream)
-    // ends the walk.
+    // `parentSession` is the absolute transcript path omp wrote. Anything that
+    // is not a .jsonl path ends the walk — deliberately so for the legacy UUID
+    // form (B9-WATCH2 forensics: pre-path omp wrote bare `parentSession` UUIDs;
+    // there is no path to stat, follow, or match a chain against, and guessing
+    // one from the file-name suffix would invent links). A missing/unreadable
+    // file is handled upstream.
     const parent = readNonEmptyString(entry.parentSession);
     return parent && parent.toLowerCase().endsWith(".jsonl") ? parent : null;
   }

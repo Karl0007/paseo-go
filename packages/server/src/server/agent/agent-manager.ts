@@ -3999,9 +3999,13 @@ export class AgentManager {
 
   /**
    * Sweep candidates: released (or process-failed), non-internal, non-archived
-   * agents with a persistence handle. Live agents are excluded because their own
-   * provider process is the writer — watching it would read paseo's bytes back as
-   * somebody else's.
+   * agents with a persistence handle — plus, since B9-WATCH2 (F33), LIVE agents
+   * the daemon is not currently writing (`idle` with no turn in flight). A live
+   * agent with a run in flight stays excluded: its own provider process is the
+   * writer and watching it would read paseo's bytes back as somebody else's.
+   * Excluding ALL live agents was what left a session the user runs in their
+   * terminal on 「原生」 while the app merely held it open — the watcher never
+   * attached, so the foreign bytes were never observed.
    */
   private async listTranscriptWatchCandidates(): Promise<TranscriptWatchCandidate[]> {
     if (!this.registry) {
@@ -4015,7 +4019,16 @@ export class AgentManager {
       }
       const live = this.agents.get(record.id);
       if (live && live.lifecycle !== "error") {
-        continue;
+        // `hasInFlightRun` covers lifecycle `running`, a foreground turn and
+        // any tracked (autonomous included) run; `activeTurnId` additionally
+        // covers the turn an errored replacement left open (R4-01's window).
+        // `onStreamTurnStarted` detaches the watcher and re-acquires ownership
+        // the moment a paseo turn starts, so between that and this gate the
+        // daemon's own bytes can never be attributed to a foreign writer.
+        const turnInFlight = Boolean(live.activeTurnId) || this.hasInFlightRun(record.id);
+        if (live.lifecycle !== "idle" || turnInFlight) {
+          continue;
+        }
       }
       const nativeHandle =
         typeof record.persistence.nativeHandle === "string"
@@ -4101,20 +4114,21 @@ export class AgentManager {
 
   /**
    * A live agent whose process is mid-turn is writing the transcript ITSELF, so
-   * only a session with no paseo turn in flight (idle / error / initializing,
-   * process presumed gone) can attribute fresh bytes to another writer. There the
-   * observation stays PENDING: the value remains `paseo` and R5's release rule
-   * decides, because the user's terminal may legitimately be interleaving.
+   * only a session with no paseo turn in flight (idle / error) can attribute
+   * fresh bytes to another writer. B9-WATCH2 (F33): there the observation is
+   * EVIDENCE, not just a pending note — a daemon that holds the session without
+   * running a turn never writes its transcript, so foreign bytes escalate to
+   * `external` (pill 「外部·运行中」) even while the idle process still lives;
+   * the next turn start re-acquires and re-pins `paseo`.
    */
   private applyLiveTranscriptChange(live: LiveManagedAgent, change: TranscriptChange): void {
     if (live.lifecycle === "running" || live.activeTurnId) {
       return;
     }
     // B4-OWNERSHIP precision: an idle session whose provider process died is no
-    // longer paseo's. Settle that BEFORE judging the observation, or fresh
-    // external bytes are recorded as a PENDING change that can never escalate
-    // (the value stays `paseo`, and `externalLooksActive` is zeroed with it) —
-    // the R4 warning the user needs never arms.
+    // longer paseo's. Settle that BEFORE judging the observation, so a crash
+    // alone escalates the evidence an earlier observation already recorded —
+    // without a fresh change to carry it (the R4 warning must not wait for one).
     this.syncProcessLiveness(live);
     // R4-01 belt (the chain itself is broken at acquire: the watcher detaches
     // and the cursor resets before paseo writes again): a transcript

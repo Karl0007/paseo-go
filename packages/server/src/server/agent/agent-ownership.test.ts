@@ -43,7 +43,7 @@ const DEAD = { processAlive: false };
 const LIVE = { processAlive: true };
 
 describe("deriveAgentOwnershipValue", () => {
-  it("reports paseo whenever the daemon's provider process holds the session", () => {
+  it("reports paseo while the daemon holds the session with no foreign evidence", () => {
     expect(
       deriveAgentOwnershipValue({
         ...LIVE,
@@ -51,15 +51,18 @@ describe("deriveAgentOwnershipValue", () => {
         externalChangeObserved: false,
       }),
     ).toBe("paseo");
-    // A live process plus an external write is the dual-writer window: paseo still
-    // holds it (the escalation happens when it lets go), never `external` here.
+    // B9-WATCH2 (F33): the dual-writer window inverted. A live process with no
+    // turn in flight never writes its transcript — the manager detaches the
+    // watcher and re-acquires around every run — so an observed foreign write
+    // outranks the idle hold: the pill follows the WRITER, and the next turn
+    // start (acquire) re-pins `paseo`.
     expect(
       deriveAgentOwnershipValue({
         ...LIVE,
         transcriptObservable: true,
         externalChangeObserved: true,
       }),
-    ).toBe("paseo");
+    ).toBe("external");
   });
 
   it("reports none when the transcript cannot be observed at all", () => {
@@ -126,9 +129,12 @@ describe("ownershipOnRelease (R5: process exited)", () => {
   it("escalates to external when a foreign write was seen while paseo still held it", () => {
     const live = ownershipOnAcquire(INITIAL_AGENT_OWNERSHIP);
     // The user resumed the same session in a terminal mid-flight (omp/pi fork,
-    // claude deepest-branch hijack): pending evidence decides the release value.
+    // claude deepest-branch hijack). B9-WATCH2 (F33): the evidence escalates
+    // the moment it is observed — the pill must not wait for a release that
+    // may never come while the app just holds the chat open. Exiting with
+    // the evidence pending still lands on `external` (the R5 fallback below).
     const withPending = ownershipOnExternalChange(live);
-    expect(withPending.value).toBe("paseo");
+    expect(withPending.value).toBe("external");
     expect(ownershipOnRelease(withPending, { transcriptObservable: true })).toMatchObject({
       value: "external",
       processAlive: false,
@@ -265,18 +271,18 @@ describe("ownershipWithProcessLiveness (provider answers directly)", () => {
     expect(ownershipWithProcessLiveness(released, false)).toBe(released);
   });
 
-  it("settles a pending external observation at the moment of death, not at close", () => {
-    // The R5 release rule, applied by the process report itself: a child that
-    // crashes between turns never reaches `prepareAgentForClosure` on its own,
-    // so without this the value stayed `paseo` and `externalLooksActive` was
-    // zeroed with it (withValue only keeps that flag in `external`).
+  it("carries the escalated observation through the moment of death", () => {
+    // B9-WATCH2 (F33): the observation escalates the moment it is recorded —
+    // even while the process still answers alive (an idle hold never writes).
+    // The death report then settles the PROCESS fact, which close may never
+    // deliver on its own (a crashed child only surfaces as `turn_failed`).
     const acquired = ownershipOnAcquire(INITIAL_AGENT_OWNERSHIP);
     const observed = ownershipWithTranscriptVisibility(
       ownershipOnExternalChange(acquired),
       true,
       120,
     );
-    expect(observed.value).toBe("paseo");
+    expect(observed.value).toBe("external");
 
     const dead = ownershipWithProcessLiveness(observed, false);
     expect(dead).toMatchObject({
@@ -299,16 +305,30 @@ describe("ownershipWithProcessLiveness (provider answers directly)", () => {
       false,
     );
     expect(dead.value).toBe("external");
-    expect(ownershipWithProcessLiveness(dead, true).value).toBe("paseo");
+    // A restarted daemon process continues the conversation itself: the
+    // re-claim consumes the stale foreign evidence, exactly like a resume.
+    const reclaimed = ownershipWithProcessLiveness(dead, true);
+    expect(reclaimed.value).toBe("paseo");
+    expect(reclaimed.externalChangeObserved).toBe(false);
   });
 
-  it("arms the R4 signal only once the settled value is external", () => {
-    const observed = ownershipOnExternalChange(
-      ownershipWithTranscriptVisibility(ownershipOnAcquire(INITIAL_AGENT_OWNERSHIP), true, 10),
+  it("arms the R4 signal on the escalated observation, not on the bare hold", () => {
+    // B9-WATCH2 (F33): fresh foreign bytes on a live-idle session ARE the
+    // external state, so the 「运行中」 flag arms with them — the F33 pill.
+    // A hold without evidence is still not a statement about anybody.
+    const held = ownershipWithTranscriptVisibility(
+      ownershipOnAcquire(INITIAL_AGENT_OWNERSHIP),
+      true,
+      10,
     );
-    expect(observed.value).toBe("paseo");
-    // While paseo holds the session the flag is not a statement about anybody.
-    expect(ownershipWithExternalActivity(observed, true).externalLooksActive).toBe(false);
+    expect(ownershipWithExternalActivity(held, true).externalLooksActive).toBe(false);
+
+    const observed = ownershipOnExternalChange(held);
+    expect(observed.value).toBe("external");
+    expect(ownershipWithExternalActivity(observed, true)).toMatchObject({
+      value: "external",
+      externalLooksActive: true,
+    });
 
     const dead = ownershipWithProcessLiveness(observed, false);
     expect(dead.value).toBe("external");
@@ -903,6 +923,164 @@ describe("AgentManager process-liveness reporting (isAlive)", () => {
       // Reverse order: each harness restores the CLAUDE_CONFIG_DIR it found.
       blindHarness.cleanup();
       liveHarness.cleanup();
+    }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// B9-WATCH2 (batch-9 F33): the live-idle blind spot. The app holds a session
+// open (resumed, no turn running) while the user runs that very conversation
+// in their terminal. Pre-fix the candidate filter skipped EVERY live agent,
+// so the watcher never attached, the foreign bytes were never observed, and
+// the pill stayed 「原生」 no matter how long the terminal kept writing.
+// ---------------------------------------------------------------------------
+
+/** A claude live-process registry entry the R4 probe answers `active` to. */
+function writeClaudeRegistryEntry(input: { configDir: string; sessionId: string }): void {
+  const sessionsDir = join(input.configDir, "sessions");
+  mkdirSync(sessionsDir, { recursive: true });
+  // The probe only trusts a positive pid answering signal-0 — the test process
+  // itself is the cheapest pid guaranteed to be alive here.
+  writeFileSync(
+    join(sessionsDir, `${process.pid}.json`),
+    JSON.stringify({ sessionId: input.sessionId, pid: process.pid }),
+  );
+}
+
+function waitForRunning(manager: AgentManager, agentId: string): Promise<void> {
+  return new Promise<void>((resolve) => {
+    const unsubscribe = manager.subscribe(
+      (event) => {
+        if (
+          event.type === "agent_state" &&
+          event.agent.id === agentId &&
+          event.agent.lifecycle === "running"
+        ) {
+          unsubscribe();
+          resolve();
+        }
+      },
+      { agentId, replayState: false },
+    );
+  });
+}
+
+describe("AgentManager live-idle transcript watching (B9-WATCH2, F33)", () => {
+  it("flips a held-open session to external·running when the terminal writes it", async () => {
+    const work = mkdtempSync(join(tmpdir(), "agent-ownership-live-idle-"));
+    const harness = createHarness(work);
+    let agentId: string | null = null;
+    try {
+      const agent = await harness.manager.createAgent(
+        { provider: "claude", cwd: work },
+        undefined,
+        { workspaceId: undefined },
+      );
+      agentId = agent.id;
+      await harness.manager.flush();
+      const sessionId = agent.persistence?.sessionId ?? "";
+      const transcript = join(harness.projectDir, `${sessionId}.jsonl`);
+      writeFileSync(transcript, claudeLine("user", "from the phone", "u1"));
+
+      // The sweep now attaches to the live-IDLE session and baselines it;
+      // holding the session without a turn keeps the claim itself.
+      await harness.manager.sweepTranscriptWatch();
+      expect(harness.manager.getAgent(agent.id)?.ownership.value).toBe("paseo");
+
+      // The user continues at the desk: a foreign row lands, and claude's
+      // live-process registry says that terminal is still running.
+      appendFileSync(transcript, claudeLine("user", "continued at the desk", "u2"));
+      writeClaudeRegistryEntry({ configDir: join(work, "claude-config"), sessionId });
+      await harness.manager.sweepTranscriptWatch();
+      await harness.manager.flush();
+
+      // Pre-fix: no entry existed, so this stayed `paseo` forever — the exact
+      // F33 screenshot (terminal running, pill 「原生」).
+      const live = harness.manager.getAgent(agent.id);
+      expect(live?.ownership.value).toBe("external");
+      expect(live?.ownership.externalLooksActive).toBe(true);
+    } finally {
+      if (agentId) await harness.manager.closeAgent(agentId).catch(() => undefined);
+      harness.cleanup();
+    }
+  });
+
+  it("never attributes the daemon's own bytes: busy is set before the first write (race 1)", async () => {
+    const work = mkdtempSync(join(tmpdir(), "agent-ownership-live-idle-busy-"));
+    const harness = createHarness(work);
+    let agentId: string | null = null;
+    try {
+      const agent = await harness.manager.createAgent(
+        { provider: "claude", cwd: work },
+        undefined,
+        { workspaceId: undefined },
+      );
+      agentId = agent.id;
+      await harness.manager.flush();
+      const transcript = join(harness.projectDir, `${agent.persistence?.sessionId ?? ""}.jsonl`);
+      writeFileSync(transcript, claudeLine("user", "first turn", "u1"));
+      await harness.manager.sweepTranscriptWatch();
+
+      // The user sends from the app: lifecycle goes running BEFORE the
+      // provider process appends its row (turn_started is dispatched on
+      // prompt accept), and `onStreamTurnStarted` detached the watcher +
+      // re-acquired at that same moment. The row lands mid-turn.
+      const running = waitForRunning(harness.manager, agent.id);
+      const draining = drainStream(
+        harness.manager.streamAgent(agent.id, "second turn", { clientMessageId: "cm2" }),
+      );
+      await running;
+      appendFileSync(transcript, claudeLine("user", "second turn", "u2"));
+      await draining;
+      await harness.manager.flush();
+
+      // The post-turn sweep re-attaches with the acquire-reset cursor: it
+      // baselines AT the current size, so paseo's own row is never read back.
+      await harness.manager.sweepTranscriptWatch();
+      await harness.manager.flush();
+      const live = harness.manager.getAgent(agent.id);
+      expect(live?.ownership.value).toBe("paseo");
+      expect(live?.ownership.externalLooksActive).toBe(false);
+    } finally {
+      if (agentId) await harness.manager.closeAgent(agentId).catch(() => undefined);
+      harness.cleanup();
+    }
+  });
+
+  it("the next acquire re-pins paseo after a flip (race 2: correction)", async () => {
+    const work = mkdtempSync(join(tmpdir(), "agent-ownership-live-idle-acquire-"));
+    const harness = createHarness(work);
+    let agentId: string | null = null;
+    try {
+      const agent = await harness.manager.createAgent(
+        { provider: "claude", cwd: work },
+        undefined,
+        { workspaceId: undefined },
+      );
+      agentId = agent.id;
+      await harness.manager.flush();
+      const sessionId = agent.persistence?.sessionId ?? "";
+      const transcript = join(harness.projectDir, `${sessionId}.jsonl`);
+      writeFileSync(transcript, claudeLine("user", "from the phone", "u1"));
+      await harness.manager.sweepTranscriptWatch();
+      appendFileSync(transcript, claudeLine("user", "continued at the desk", "u2"));
+      writeClaudeRegistryEntry({ configDir: join(work, "claude-config"), sessionId });
+      await harness.manager.sweepTranscriptWatch();
+      await harness.manager.flush();
+      expect(harness.manager.getAgent(agent.id)?.ownership.value).toBe("external");
+
+      // Whatever the pill said, sending a prompt from paseo takes the session
+      // back: acquire clears the evidence and the R4 flag with it.
+      await drainStream(
+        harness.manager.streamAgent(agent.id, "paseo takes it back", { clientMessageId: "cm3" }),
+      );
+      await harness.manager.flush();
+      const live = harness.manager.getAgent(agent.id);
+      expect(live?.ownership.value).toBe("paseo");
+      expect(live?.ownership.externalLooksActive).toBe(false);
+    } finally {
+      if (agentId) await harness.manager.closeAgent(agentId).catch(() => undefined);
+      harness.cleanup();
     }
   });
 });

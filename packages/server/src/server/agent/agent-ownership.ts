@@ -8,8 +8,12 @@ import type { AgentSnapshotPayload } from "@getpaseo/protocol/messages";
  * label (birth history never changes; ownership flips back and forth):
  *
  * - `paseo`  — a provider process this daemon spawned holds the session.
- * - `external` — that process is gone AND the transcript was written by somebody
- *   else afterwards (transcript watcher confirmed a byte change).
+ * - `external` — the transcript was written by somebody else afterwards (the
+ *   transcript watcher confirmed a byte change) and no paseo turn is in flight
+ *   to explain those bytes. B9-WATCH2 (F33): the writer outranks the holder —
+ *   a live session with no turn running never writes its transcript, so fresh
+ *   foreign bytes flip the pill even while the daemon's idle process still
+ *   holds the session; the next acquire (turn start) re-pins `paseo`.
  * - `none`   — the process is gone and nothing external was observed: whoever
  *   writes first wins. Also the conservative answer when the daemon has no
  *   transcript to observe at all (see `transcriptObservable`).
@@ -80,7 +84,15 @@ export const INITIAL_AGENT_OWNERSHIP: AgentOwnershipState = {
 
 /** The single derivation rule; every transition below re-derives through it. */
 export function deriveAgentOwnershipValue(facts: AgentOwnershipFacts): AgentOwnershipValue {
-  if (facts.processAlive) {
+  // B9-WATCH2 (F33): `processAlive` pins `paseo` only while there is no
+  // foreign-byte evidence. The manager detaches the watcher and re-acquires
+  // on every turn start (`onStreamTurnStarted`), so a live process cannot be
+  // the writer of bytes the watcher attributed to someone else: the user is
+  // running this conversation in their terminal while the app merely holds
+  // it open — the pill must say 「外部·运行中」, not 「原生」. The evidence is
+  // still sticky and still consumed by the acquire/release transitions, so
+  // R5's release escalation is unchanged.
+  if (facts.processAlive && !facts.externalChangeObserved) {
     return "paseo";
   }
   if (!facts.transcriptObservable) {
@@ -140,9 +152,10 @@ export function ownershipOnRelease(
  * B4-OWNERSHIP precision: the provider transport answered the liveness question
  * directly (`AgentSession.isAlive`) instead of the manager inferring it from
  * "I still hold a session object". A dead process settles through the same R5
- * release rule, so a pending external observation becomes `external` at the
- * moment of death rather than at close (which may never come: a crashed child
- * only ever reaches the manager as `turn_failed`).
+ * release rule — which still matters after B9-WATCH2 (F33): the escalated
+ * observation carries the value, but only the death report settles the process
+ * fact itself, and a crashed child reaches the manager no other way (close may
+ * never come; it surfaces as `turn_failed`).
  *
  * Returns the SAME object when nothing moved, so callers can compare by identity
  * and skip a broadcast.
@@ -154,16 +167,22 @@ export function ownershipWithProcessLiveness(
   if (state.processAlive === processAlive) {
     return state;
   }
+  // A process standing behind the session again is a re-claim, the same
+  // transition a resume performs: from now on every transcript byte is
+  // paseo's work, and stale foreign evidence must not keep the pill on
+  // `external` while the daemon itself continues the conversation.
   return processAlive
-    ? withValue({ ...state, processAlive: true })
+    ? ownershipOnAcquire(state)
     : ownershipOnRelease(state, { transcriptObservable: state.transcriptObservable });
 }
 
 /**
- * R2-lite/R3: the transcript watcher saw bytes change. While paseo still owns the
- * session this only records the pending observation (the live process is the one
- * appending, so its own writes must never escalate — the caller only feeds paseo
- * bytes it did not write). Once released, it is the `external` evidence.
+ * R2-lite/R3: the transcript watcher saw bytes change. The caller only ever
+ * feeds bytes paseo did not write (the manager detaches the watcher around
+ * every run), so B9-WATCH2 (F33) lets the evidence escalate immediately: a
+ * live session with no turn in flight never writes its transcript, and the
+ * pill follows the writer. The flag stays sticky either way — consumed by
+ * the next acquire, honoured by the R5 release fallback.
  */
 export function ownershipOnExternalChange(
   state: AgentOwnershipState,
