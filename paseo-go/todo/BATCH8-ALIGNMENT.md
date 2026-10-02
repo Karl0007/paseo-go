@@ -94,3 +94,11 @@
 - 口径：**文件页面的三个页签**（现场核实具体成员）之间也可用手指左右滑切换，**带跟手动画**，姿势与 B8-SWIPE 环一致（同一状态机/手势底座，勿另起炉灶）。
 - **拍板（D6，编排者裁定）**：内部三段**线性非循环**跟手滑（同环阈值/动画参数）；**边界级联**——最左「文件」再右滑外抛（栈页=返回；工作区 tab=主环接管），最右「提交」再左滑外抛（工作区 tab=主环接管）；段内横向可滚内容声明豁免同前。非 git checkout 两段灰=无内滑只剩外抛。卡=B8-FILESWIP。
 - **用户追加确认（原话要义）**：「文件页签不用循环——手指向右滑在最左页签=返回，而不是回到最后一个页签」→ 已转 F5 钉死为必红断言（first+right→cascade，永不 wrap）。
+
+## 终态门禁（编排者亲跑，HEAD=a025fb0de 时点，F5 在途除外）
+
+- app：3 文件/4 例失败 = `time.test.ts` locale×3 + `parse-changelog` tz×1 + `git/forges/index` 收集错×1 —— **全⊆W1 环境基线**。
+- protocol：1 例失败 `messages.providers-snapshot`「bodyless」= 本机 AOT 动态 import 5.6s>5s 默认超时；**判决实验：回退 pre-COUNT messages.ts 重生成仍红、--testTimeout=30000 全绿** ⇒ 既存负载敏感项非批次八回归。
+- server：1 例失败 `execution-session.websocket` = `EBUSY rmdir` 临时目录（W1 在案 Windows 环境类）。
+- typecheck 全 workspace 绿（每提交 pre-commit + 门禁时点复跑）。
+- 坑账：门禁首跑用 `cd /c/...` 小写盘符 → vitest 双实例 695 文件假红（bg_1 作废）；大写 `C:/` 重跑为准。**BUILD.md 已知问题表待补一行（收口时）**。
