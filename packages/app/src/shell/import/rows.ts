@@ -186,6 +186,61 @@ export function resolveImportRowTitle(
   return project.length > 0 ? project : row.fallbackTitle;
 }
 
+/** 短 id 段的长度（R2-18 同款口径：整串不是名字，截断即可辨认来源）。 */
+const TITLE_SUFFIX_MAX = 8;
+
+/**
+ * 区分段用的短 id：路径形态取名字段（omp 的 transcript 路径 → 文件名）、去扩展名，
+ * 再取尾 8 位；裸 id 形态直接取尾 8 位。
+ */
+function importRowShortId(handle: string): string {
+  const name = (
+    handle
+      .replace(/[/\\]+$/, "")
+      .split(/[/\\]/)
+      .pop() ?? ""
+  ).trim();
+  const stem = name.replace(/\.[^.]+$/, "");
+  const source = stem.length > 0 ? stem : name;
+  return source.length > TITLE_SUFFIX_MAX ? source.slice(-TITLE_SUFFIX_MAX) : source;
+}
+
+/**
+ * REVIEW-B9-10（裁定 B）：可见集内的标题区分段。B9-TITLE 后 depth0 标题恒=项目串、
+ * 空链副标题恒=占位小字——同一个项目的两条会话在勾选界面上逐字同串，只差右缘的
+ * 时间，勾错就是重导一遍。裁定：碰撞才追加，无碰撞逐字保持（F30「两屏同一串」的
+ * 钉例因此一个字都不动）。
+ *
+ * 追加的是短 id，不是时间——时间已经贴在标题行右缘，再写一遍违反 F23「同文不写两
+ * 遍」；也不是 worktree——项目串本身含 `项目名(worktree)`，不同 worktree 压根不撞。
+ * 返回只装碰撞行（key → 追加段）；组内短 id 仍相同就整组退 `providerId:handle`
+ * （mapEntriesToImportRows 按 key 去重=唯一保证），追加的意义就是不再同串。
+ */
+export function importRowTitleSuffixes<R extends Pick<ImportRow, "key" | "providerHandleId">>(
+  rows: ReadonlyArray<R>,
+  baseTitleOf: (row: R) => string,
+): Map<string, string> {
+  const groups = new Map<string, R[]>();
+  for (const row of rows) {
+    const title = baseTitleOf(row).trim();
+    if (title.length === 0) continue;
+    const bucket = groups.get(title);
+    if (bucket) bucket.push(row);
+    else groups.set(title, [row]);
+  }
+  const suffixes = new Map<string, string>();
+  for (const bucket of groups.values()) {
+    if (bucket.length < 2) continue;
+    const shorts = bucket.map((row) => importRowShortId(row.providerHandleId));
+    const shortIsEnough = new Set(shorts).size === bucket.length;
+    bucket.forEach((row, index) => {
+      const suffix = shortIsEnough ? (shorts[index] ?? "") : row.key;
+      if (suffix.length > 0) suffixes.set(row.key, suffix);
+    });
+  }
+  return suffixes;
+}
+
 /**
  * B9-TITLE（F30 裁定 3/4）副标题=会话行同款尾段，去项目段（项目已进标题）：
  * `[nameLabel ·] 预览/占位`。规则：

@@ -63,6 +63,7 @@ import {
   classifyImportError,
   deriveImportStatus,
   filterImportEntriesByQuery,
+  importRowTitleSuffixes,
   importTreeAutoExpandKeys,
   mapEntriesToImportRows,
   resolveImportRowTitle,
@@ -165,6 +166,7 @@ export function ImportRowCell({
   disabled,
   badge,
   alias,
+  titleSuffix,
   childCount,
   rootKey,
   expanded,
@@ -184,6 +186,12 @@ export function ImportRowCell({
    * 同一串。null=无别名（未导入 / 没改过名），走默认推导。
    */
   alias: string | null;
+  /**
+   * REVIEW-B9-10（裁定 B）：可见集内标题碰撞时屏追加的区分段（短 id）。null=无碰撞
+   * → 标题逐字保持 F30 那一串。副标题按未追加的 base 串判「同文不写两遍」，所以
+   * 区分段只出现在标题行，不会把预览段挤掉。
+   */
+  titleSuffix: string | null;
   childCount: number;
   rootKey: string;
   expanded: boolean;
@@ -203,9 +211,12 @@ export function ImportRowCell({
   // B9-TITLE（F30 裁定 1-4）：标题=别名 > 子行 nameLabel > 项目串；副标题=
   // 名字 · 预览（空退首条输入，再退会话行同款占位小字）。项目段退役——项目已
   // 进标题，再写一遍就是同文两遍。时间不在此行——它贴标题行的右缘。
-  const title = resolveImportRowTitle(row, depth, alias);
+  // REVIEW-B9-10：同项目两条空链行逐字同串=勾错风险，屏只在可见集碰撞时给一个
+  // 区分段（追加在标题尾），base 串仍是 F30 那一串，副标题照它判重。
+  const baseTitle = resolveImportRowTitle(row, depth, alias);
+  const title = titleSuffix === null ? baseTitle : `${baseTitle} · ${titleSuffix}`;
   const subtitle = buildImportRowSubtitle(row, {
-    title,
+    title: baseTitle,
     emptyLabel: t("chats.row.noMessages"),
   });
   const handleExpand = useCallback(() => onToggleExpand(rootKey), [onToggleExpand, rootKey]);
@@ -605,6 +616,20 @@ export default function ShellImportScreen() {
     () => applyImportTreeCollapse(treeItems, expandedRoots),
     [expandedRoots, treeItems],
   );
+
+  // REVIEW-B9-10（裁定 B）：可见集内的标题区分段——只在屏上真看得见的 depth0 行之间
+  // 判碰撞（收起的子行不在界面上，不该为它们把标题改长），标题口径与 cell 逐字一致
+  // （别名优先），否则「按什么判撞」和「显示什么串」会分叉。
+  const titleSuffixes = useMemo(
+    () =>
+      importRowTitleSuffixes(
+        visibleItems.flatMap((item) =>
+          item.kind === "session" && item.depth === 0 ? [item.row] : [],
+        ),
+        (row) => resolveImportRowTitle(row, 0, aliasForBadge(badgeMap.get(row.key) ?? null)),
+      ),
+    [aliasForBadge, badgeMap, visibleItems],
+  );
   const handleToggleExpand = useCallback(
     (rootKey: string) => {
       setExpandedState((prev) => {
@@ -800,6 +825,7 @@ export default function ShellImportScreen() {
           disabled={progress !== null}
           badge={badge}
           alias={aliasForBadge(badge)}
+          titleSuffix={titleSuffixes.get(item.row.key) ?? null}
           childCount={item.childCount}
           rootKey={item.rootKey}
           expanded={expandedRoots.has(item.rootKey)}
@@ -818,6 +844,7 @@ export default function ShellImportScreen() {
       handleToggleExpand,
       progress,
       selectedSet,
+      titleSuffixes,
     ],
   );
   const keyExtractor = useCallback(

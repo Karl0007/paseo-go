@@ -22,6 +22,7 @@ import type * as HostFeaturesModule from "@/runtime/host-features";
 import type * as ProvidersSnapshotModule from "@/hooks/use-providers-snapshot";
 import type * as HostProjectsModule from "@/projects/host-projects";
 import type { ImportRow, ImportRowBadge } from "@/shell/import/rows";
+import { usePaseoGoPinsStore } from "@/shell/stores/pins";
 import type { FetchRecentProviderSessionEntry } from "@getpaseo/client/internal/daemon-client";
 
 // ── 固定钟（卡 13）────────────────────────────────────────────────────────
@@ -160,6 +161,7 @@ function renderCell(
     row?: Partial<ImportRow>;
     badge?: ImportRowBadge | null;
     alias?: string | null;
+    titleSuffix?: string | null;
     index?: number;
     depth?: 0 | 1;
     childCount?: number;
@@ -177,6 +179,7 @@ function renderCell(
       disabled={false}
       badge={overrides.badge ?? null}
       alias={overrides.alias ?? null}
+      titleSuffix={overrides.titleSuffix ?? null}
       childCount={overrides.childCount ?? 0}
       rootKey="omp:handle-1"
       expanded={false}
@@ -253,6 +256,7 @@ beforeEach(() => {
 afterEach(() => {
   cleanup();
   vi.useRealTimers();
+  usePaseoGoPinsStore.setState({ aliases: {}, pinnedIds: [] });
 });
 
 describe("ImportRowCell project tile (F23 与会话行同款取字/配色)", () => {
@@ -330,9 +334,23 @@ describe("ImportRowCell clock = 对话行同款微信时间 (REVIEW-B8-13)", () 
 // B9-TITLE（F30）：标题/小字改走会话行同款推导（决议规则钉在 rows.test.ts，
 // 这里钉的是屏——cell 把别名/深度/占位措辞接进了正确的函数）。
 describe("ImportRowCell title = 会话行同款（B9-TITLE F30）", () => {
-  it("depth0 默认标题=项目串，不再是首条输入", () => {
+  // REVIEW-B9-10（裁定 B）把 F30 这一条钉成两例：无碰撞逐字同串（口径一个字不动），
+  // 有碰撞由屏追加区分段——追加只进标题，副标题仍按 base 串判「同文不写两遍」。
+  it("无碰撞（屏没给区分段）→ 标题逐字=项目串，不再是首条输入", () => {
     renderCell();
     expect(screen.getByTestId("shell-import-row-0-title").textContent).toBe("paseo-go");
+  });
+
+  it("有碰撞（屏给了区分段）→ 标题尾追短 id，副标题与读屏串跟着分家", () => {
+    renderCell({ titleSuffix: "55556666" });
+    expect(screen.getByTestId("shell-import-row-0-title").textContent).toBe("paseo-go · 55556666");
+    expect(screen.getByTestId("shell-import-row-0-subtitle").textContent).toBe(
+      "ReworkR45 · 已经修好了，测试全绿",
+    );
+    // accessibilityLabel 替换全部子文本（R4-13）——读屏也要听见区分段。
+    expect(screen.getByTestId("shell-import-row-0").getAttribute("aria-label")).toContain(
+      "paseo-go · 55556666 · ReworkR45",
+    );
   });
 
   it("已导入+重命名 → 别名标题（与对话 tab 同一串）", () => {
@@ -508,5 +526,81 @@ describe("ShellImportScreen claim summary wiring (REVIEW-B8-01)", () => {
       key: "import.claimedSummarySearch",
       options: { count: 6597, shown: 3 },
     });
+  });
+});
+
+// 屏→cell 的接线此前只有说明行被钉住（REVIEW-B8-01）。本批次改这段 JSX 时
+// `childCount` 被顺手删掉而全绿——树里的 childCount（rows.test.ts 钉）与行上的
+// 展开命中区之间没有网，tsgo 才拦住。补一张：带子的 depth0 行必须有 chevron 命中区。
+describe("ShellImportScreen 行命中区接线（屏→cell props 回归网）", () => {
+  it("childCount>0 的 depth0 行仍渲染 chevron + 子计数", () => {
+    screenData.entries = [entry("p-1"), entry("c-1", { parentHandleId: "p-1" })];
+    render(<ShellImportScreen />);
+    expect(screen.getByTestId("shell-import-row-0-chevron").textContent).toBe("1");
+  });
+});
+
+// REVIEW-B9-10（裁定 B）验收：同 cwd 的两条空链行在屏上不再逐字同串。此前两行都是
+// 「repo / chats.row.noMessages」，只差右缘时间——勾选界面勾错就是重导一遍。
+describe("ShellImportScreen 同项目多行标题去重 (REVIEW-B9-10)", () => {
+  const blankChain = (
+    handle: string,
+    at: string,
+    cwd = "C:/work/repo",
+  ): FetchRecentProviderSessionEntry =>
+    entry(handle, {
+      cwd,
+      title: "",
+      firstPromptPreview: "",
+      lastPromptPreview: "",
+      lastActivityAt: at,
+    });
+
+  it("两条同项目空链 → 标题各带短 id，副标题仍是同款占位小字", () => {
+    screenData.entries = [
+      blankChain("/s/2f14e0a1-b2c3-4d5e-8f60-111122223333.jsonl", "2026-10-01T12:00:00.000Z"),
+      blankChain("/s/9b7c6d5e-a1b2-4c3d-9e8f-444455556666.jsonl", "2026-10-01T11:00:00.000Z"),
+    ];
+    render(<ShellImportScreen />);
+    expect(screen.getByTestId("shell-import-row-0-title").textContent).toBe("repo · 22223333");
+    expect(screen.getByTestId("shell-import-row-1-title").textContent).toBe("repo · 55556666");
+    expect(screen.getByTestId("shell-import-row-0-subtitle").textContent).toBe(
+      "chats.row.noMessages",
+    );
+  });
+
+  it("两个不同项目 → 无碰撞，标题逐字=各自项目串", () => {
+    screenData.entries = [
+      blankChain("/s/aaaa1111.jsonl", "2026-10-01T12:00:00.000Z"),
+      blankChain("/s/bbbb2222.jsonl", "2026-10-01T11:00:00.000Z", "C:/work/other"),
+    ];
+    render(<ShellImportScreen />);
+    expect(screen.getByTestId("shell-import-row-0-title").textContent).toBe("repo");
+    expect(screen.getByTestId("shell-import-row-1-title").textContent).toBe("other");
+  });
+});
+
+// REVIEW-B9-14（P3）：别名取源接线此前零测——读侧键形 `${serverId}:${agentId}` 在屏里
+// 内联复制，写侧键形在 pins store 那一头。键构造改坏（少一段前缀）时 F30 的「别名优先」
+// 会静默退化回项目串，界面上看不出任何错。两例一头钉「认」一头钉「不乱认」。
+describe("ShellImportScreen 别名取源接线 (REVIEW-B9-14)", () => {
+  const importedRow = (): FetchRecentProviderSessionEntry =>
+    entry("h-1", { existing: { agentId: "agent-1", archived: false } });
+
+  it("pins store 挂着 `host-1:agent-1` → 行标题=别名，徽标仍是已导入", () => {
+    screenData.entries = [importedRow()];
+    usePaseoGoPinsStore.setState({ aliases: { "host-1:agent-1": "登录修复" } });
+    render(<ShellImportScreen />);
+    expect(screen.getByTestId("shell-import-row-0-title").textContent).toBe("登录修复");
+    expect(screen.getByTestId("shell-import-row-0-badge-imported").textContent).toBe(
+      "import.badgeImported",
+    );
+  });
+
+  it("别名挂在缺 serverId 段的键上 → 不认，标题退回项目串", () => {
+    screenData.entries = [importedRow()];
+    usePaseoGoPinsStore.setState({ aliases: { "agent-1": "登录修复" } });
+    render(<ShellImportScreen />);
+    expect(screen.getByTestId("shell-import-row-0-title").textContent).toBe("repo");
   });
 });

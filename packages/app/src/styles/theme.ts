@@ -171,17 +171,157 @@ const darkStatusColors = {
 // Status tints — the fill of a status badge. The status color itself at low opacity, so a
 // badge takes its state's hue from the same source as its text and never drifts from it.
 // Dark surfaces swallow more of the tint, so the dark band runs a little stronger.
-function statusTints(colors: typeof lightStatusColors, alphaHex: string) {
-  return {
-    statusSuccessTint: `${colors.statusSuccess}${alphaHex}`,
-    statusDangerTint: `${colors.statusDanger}${alphaHex}`,
-    statusWarningTint: `${colors.statusWarning}${alphaHex}`,
-    statusNeutralTint: `${colors.statusNeutral}${alphaHex}`,
-  };
+//
+// The alpha is not a constant the variants inherit: it is solved per (surface0, status
+// pair). A badge's three colors sit on one luminance line — row, fill, word — and contrast
+// multiplies along it:
+//
+//   contrast(word, row) = contrast(word, fill) × contrast(fill, row)
+//
+// so the two floors are not two knobs. Pushing the fill off the row (1.15 — REVIEW-B8-10
+// 裁定 D6: a pill must still read as a pill) drags it toward its own word, and the word's
+// AA floor (4.5 at fontSize.sm) is what stops it. Their product, 5.175, is the minimum span
+// a row owes the pair. The band alpha was only ever verified against the two primary rows.
+// ghostty's surface0 (#282c34) is the brightest row in the catalog: the neutral pair has a
+// span of 5.46 there, and the inherited 16% spent so much of it on the fill that the 未知
+// word read 4.12:1 — no band-wide constant could have said otherwise, which is why the fix
+// is a solve and not a new number (REVIEW-B9-09 裁定 A).
+//
+// The authored band alpha stays the CAP. A pair that already clears both floors keeps it
+// byte for byte — six of the seven built-in themes ship exactly what they shipped before —
+// and a pair that does not gets the middle of its own window, never a value above the band.
+// A pair with no landing at all takes the AA floor and lets the fill go as strong as the
+// word allows: a word one must read outranks a fill one may skip. Two kinds of "no
+// landing": statusDanger on ghostty never had the span (5.00 < 5.175), and statusWarning
+// clears the span by 0.3% but not by an achievable step — the composite rounds to 8 bits,
+// so the fill moves 1.1451 → 1.1610 and the window 1.1500–1.1538 has no rung in it. Both
+// land on the AA floor (warning 3.99 → 4.52) and the 外部 pill's fill stops at 1.145 on
+// that row — pinned where it is measured, not where it wishes, in ownership-badge.test.tsx.
+const STATUS_WORD_FLOOR = 4.5;
+const STATUS_FILL_FLOOR = 1.15;
+const LIGHT_STATUS_TINT_ALPHA = "1f"; // 12%
+const DARK_STATUS_TINT_ALPHA = "29"; // 16%
+
+type Rgb = number[];
+
+/** `#rgb` / `#rrggbb` / `#rrggbbaa` → channels; anything else → null (never a guess). */
+function hexChannels(color: string): Rgb | null {
+  const digits = color.replace("#", "");
+  const hex =
+    digits.length === 3
+      ? digits
+          .split("")
+          .map((digit) => digit + digit)
+          .join("")
+      : digits;
+  if (!/^[0-9a-fA-F]{6}/.test(hex)) return null;
+  return [0, 2, 4].map((i) => Number.parseInt(hex.slice(i, i + 2), 16));
 }
 
-const lightStatusTints = statusTints(lightStatusColors, "1f"); // 12%
-const darkStatusTints = statusTints(darkStatusColors, "29"); // 16%
+function channelLinear(byte: number): number {
+  const s = byte / 255;
+  return s <= 0.04045 ? s / 12.92 : ((s + 0.055) / 1.055) ** 2.4;
+}
+
+function luminance(channels: Rgb): number {
+  return (
+    0.2126 * channelLinear(channels[0] ?? 0) +
+    0.7152 * channelLinear(channels[1] ?? 0) +
+    0.0722 * channelLinear(channels[2] ?? 0)
+  );
+}
+
+function contrastRatio(a: Rgb, b: Rgb): number {
+  const first = luminance(a);
+  const second = luminance(b);
+  return (Math.max(first, second) + 0.05) / (Math.min(first, second) + 0.05);
+}
+
+/** What the row actually shows through an 8-bit-alpha fill (same rounding a compositor does). */
+function compositeOverRow(tint: Rgb, alpha: number, row: Rgb): Rgb {
+  const mix = (i: number) => Math.round(alpha * (tint[i] ?? 0) + (1 - alpha) * (row[i] ?? 0));
+  return [mix(0), mix(1), mix(2)];
+}
+
+/**
+ * The tint's alpha as a number in [0,1]: the authored band value when that value clears
+ * both floors on this row, the middle of the feasible window when it does not, and the
+ * word floor's ceiling when the window is empty.
+ *
+ * Both floors are monotone in alpha here — the fill is the word's own color, so raising
+ * alpha walks the fill from the row toward the word and never past it: fill/row can only
+ * grow, word/fill can only shrink. That is what makes a bisection the whole solve.
+ */
+function solveStatusTintAlpha(
+  wordOK: (alpha: number) => boolean,
+  fillOK: (alpha: number) => boolean,
+  authored: number,
+): number {
+  if (!wordOK(0)) return 0; // The row alone already fails AA; a stronger fill only lies.
+  let capLo = 0;
+  let capHi = 1;
+  if (!wordOK(1)) {
+    for (let i = 0; i < 60; i += 1) {
+      const mid = (capLo + capHi) / 2;
+      if (wordOK(mid)) capLo = mid;
+      else capHi = mid;
+    }
+  }
+  const cap = wordOK(1) ? 1 : capLo;
+  let floor = 0;
+  if (!fillOK(0)) {
+    if (fillOK(1)) {
+      let floorLo = 0;
+      let floorHi = 1;
+      for (let i = 0; i < 60; i += 1) {
+        const mid = (floorLo + floorHi) / 2;
+        if (fillOK(mid)) floorHi = mid;
+        else floorLo = mid;
+      }
+      floor = floorHi;
+    } else {
+      floor = 1;
+    }
+  }
+  if (floor > cap) return cap;
+  if (authored >= floor && authored <= cap) return authored;
+  return (floor + cap) / 2;
+}
+
+/**
+ * One badge fill: the status color over `surface0` at the alpha this row can carry.
+ * Stays an 8-digit hex whenever a whole alpha byte holds both floors (the band's shape);
+ * only a window narrower than one byte of alpha writes itself out as rgba — and then the
+ * alpha is truncated, never rounded up, because rounding up walks past the AA floor the
+ * value was solved for.
+ */
+function statusTintToken(color: string, surface0: string, authoredAlphaHex: string): string {
+  const channels = hexChannels(color);
+  const row = hexChannels(surface0);
+  const authored = Number.parseInt(authoredAlphaHex, 16) / 255;
+  // 解析不了的输入（插件给的怪串）不参与求解：照发 band 的写法，绝不因求解改色。
+  if (!channels || !row || !Number.isFinite(authored)) return `${color}${authoredAlphaHex}`;
+  const fillAt = (alpha: number) => compositeOverRow(channels, alpha, row);
+  const wordOK = (alpha: number) => contrastRatio(channels, fillAt(alpha)) >= STATUS_WORD_FLOOR;
+  const fillOK = (alpha: number) => contrastRatio(fillAt(alpha), row) >= STATUS_FILL_FLOOR;
+  const alpha = solveStatusTintAlpha(wordOK, fillOK, authored);
+  const byte = Math.min(255, Math.round(alpha * 255));
+  if (wordOK(byte / 255) && fillOK(byte / 255)) {
+    return `${color}${byte.toString(16).padStart(2, "0")}`;
+  }
+  const truncated = Math.floor(alpha * 1e6) / 1e6;
+  const [r = 0, g = 0, b = 0] = channels;
+  return `rgba(${r}, ${g}, ${b}, ${truncated.toFixed(6)})`;
+}
+
+function statusTints(colors: typeof lightStatusColors, surface0: string, alphaHex: string) {
+  return {
+    statusSuccessTint: statusTintToken(colors.statusSuccess, surface0, alphaHex),
+    statusDangerTint: statusTintToken(colors.statusDanger, surface0, alphaHex),
+    statusWarningTint: statusTintToken(colors.statusWarning, surface0, alphaHex),
+    statusNeutralTint: statusTintToken(colors.statusNeutral, surface0, alphaHex),
+  };
+}
 
 // Status *dot* colors — the small filled discs on a sidebar row, and the glyphs that stand in
 // for them. Same four hues and the same generation rule as the status colors above, but its
@@ -313,7 +453,8 @@ export function buildLightSemanticColors(tint: LightThemeConfig) {
 
     ...lightDiffColors,
     ...lightStatusColors,
-    ...lightStatusTints,
+    // 逐主题求解：tint 的 alpha 按这一份 surface0 反算，不共用一个常数。
+    ...statusTints(lightStatusColors, tint.surface0, LIGHT_STATUS_TINT_ALPHA),
     ...lightStatusDotColors,
 
     terminal: {
@@ -445,7 +586,8 @@ export function buildDarkSemanticColors(tint: DarkThemeConfig) {
 
     ...darkDiffColors,
     ...darkStatusColors,
-    ...darkStatusTints,
+    // 逐主题求解：变体的 surface0 越亮，同一档 alpha 越吃字下限（REVIEW-B9-09）。
+    ...statusTints(darkStatusColors, tint.surface0, DARK_STATUS_TINT_ALPHA),
     ...darkStatusDotColors,
 
     terminal: {

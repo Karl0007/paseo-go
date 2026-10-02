@@ -23,6 +23,7 @@ import {
   filterImportEntriesByQuery,
   importEntryMatchesQuery,
   importRowKey,
+  importRowTitleSuffixes,
   importTreeAutoExpandKeys,
   mapEntriesToImportRows,
   mergeImportBadgeFacts,
@@ -559,6 +560,62 @@ describe("B9-TITLE: 副标题 = 预览 + 占位，项目段退役（F30 裁定 3
         { title: "ReworkR45", ...labels },
       ),
     ).toBe("暂无消息");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// REVIEW-B9-10（裁定 B）：可见集内标题碰撞才追加区分段。两例各守一头——无碰撞必须
+// 逐字同串（F30「两屏同一串」不许被顺手改坏），有碰撞必须分开（同项目两条空链行在
+// 勾选界面上只差右缘时间，勾错=重导一遍）。
+// ---------------------------------------------------------------------------
+describe("REVIEW-B9-10: 可见集内碰撞才追加区分段", () => {
+  const row = (handle: string, projectTitle = "repo") => ({
+    key: `omp:${handle}`,
+    providerHandleId: handle,
+    projectTitle,
+  });
+  const baseOf = (r: { projectTitle: string }) => r.projectTitle;
+
+  it("无碰撞 → 空表：屏逐字保持 F30 那一串", () => {
+    const rows = [row("omp-aaaa1111"), row("omp-bbbb2222", "other")];
+    expect(importRowTitleSuffixes(rows, baseOf)).toEqual(new Map());
+  });
+
+  it("worktree 段已区分（repo(a) / repo(b)）→ 不重复追加", () => {
+    const rows = [row("omp-aaaa1111", "repo(a)"), row("omp-bbbb2222", "repo(b)")];
+    expect(importRowTitleSuffixes(rows, baseOf).size).toBe(0);
+  });
+
+  it("屏未给归属信息（base 空串）→ 不追加，免得造出「 · id」怪串", () => {
+    const rows = [row("omp-aaaa1111", ""), row("omp-bbbb2222", "")];
+    expect(importRowTitleSuffixes(rows, baseOf).size).toBe(0);
+  });
+
+  it("同项目两条空链 → 各得 handle 尾段，组合串不再同字", () => {
+    const rows = [
+      row("/home/u/.paseo/sessions/2f14e0a1-b2c3-4d5e-8f60-111122223333.jsonl"),
+      row("/home/u/.paseo/sessions/9b7c6d5e-a1b2-4c3d-9e8f-444455556666.jsonl"),
+    ];
+    const suffixes = importRowTitleSuffixes(rows, baseOf);
+    expect([...suffixes.values()]).toEqual(["22223333", "55556666"]);
+    const titles = rows.map((r) => `repo · ${suffixes.get(r.key)}`);
+    expect(new Set(titles).size).toBe(2);
+  });
+
+  it("尾 8 位仍相同 → 整组退 key（providerId:handle 唯一=追加的意义）", () => {
+    const rows = [row("/s/prefix-1-aaaaaaaa.jsonl"), row("/s/prefix-2-aaaaaaaa.jsonl")];
+    expect([...importRowTitleSuffixes(rows, baseOf).values()]).toEqual([
+      "omp:/s/prefix-1-aaaaaaaa.jsonl",
+      "omp:/s/prefix-2-aaaaaaaa.jsonl",
+    ]);
+  });
+
+  it("判撞按传入的标题口径（别名口径）：项目串不同、别名相同 → 仍算碰撞", () => {
+    const rows = [row("omp-aaaa1111", "repo(a)"), row("omp-bbbb2222", "repo(b)")];
+    expect([...importRowTitleSuffixes(rows, () => "登录修复").values()]).toEqual([
+      "aaaa1111",
+      "bbbb2222",
+    ]);
   });
 });
 
