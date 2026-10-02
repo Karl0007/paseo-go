@@ -81,3 +81,10 @@
 
 **修复方向（卡内定）**：watcher 观察时顺链**正向迁移**——检测同目录新出现且 parentSession 指向被观察文件的 transcript，attach 跟到新文件（含 sweep 的 stat 目标更新+ownership 基线重定）；或 attach 时即解析链尾（resolveOmpResumeAncestorPaths 已有走链能力，反向复用找最新叶子）。回归=导入屏该行为「外部·运行中」+对话列表 pill 翻外部+preview 实时推进；生产数据实测。
 **关联**：与 F24（计数口径）、F25（缓存回跳）同属所有权/导入数据面，建议同车。
+
+## 收卡裁定（编排者，2026-10-02）
+
+- **B8-IMPORT KI#2 provider 图标退场**：接受（对齐会话行=用户明令；会话行亦无 provider glyph）。若日后要可见性，色块角标另卡再拍。
+- **B8-IMPORT KI#1 Windows 反斜杠/盘符大小写 cwd 匹配缺口**：并入 B8-COUNT（同文件域 import-sessions.ts），服务端出口做归一。
+- **B8-IMPORT 残留归档会话**：两 home 均查无此记录（grep echo hi 仅命中 09-30 旧 C11 记录；今日 archivedAt 零命中）→ 归档点击与取消归档点击同属未落，无残留需清。手机 UI 若见则手动解。
+- **B8-CACHE KI: preview 键未进缓存白名单**：冷缓存回水化预览行短暂空、重取即愈=瞬态，记 KI-10 缓办不立案。

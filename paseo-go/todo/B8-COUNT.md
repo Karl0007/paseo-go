@@ -10,6 +10,10 @@
 2. **服务端**：`server/agent/import-sessions.ts` 组装 claimedTotal（复用已有 claim 索引，勿全量扫盘）。
 3. **壳**：导入屏顶部一行「共 N 个会话已是你的 agent · 列表展示最近 M 条」，N=claimedTotal（旧 daemon 无字段时降级不显示 N）。
 
+## 追加口径（编排者并入，B8-IMPORT KI#1）
+
+服务端出口对 provider session 条目的 cwd 做**主机感知归一**（反斜杠→正斜杠、盘符大小写规范化；仅显示/匹配辅助字段，勿动 handle 与认领键），使导入屏副标题项目段与色块在 Windows 反斜杠 cwd 上也能命中在册项目（B8-IMPORT 帧 02 首行「C」vs 会话 tab「K」即此缺口）。配单测（`c:\\work\\paseo-go` 与 `C:/work/paseo-go` 归一同值）。
+
 ## 文件域
 
 - `packages/protocol/src/messages.ts`（+validators codegen）、`packages/server/src/server/agent/import-sessions.ts`、`packages/app/src/shell/import/*` 或 import.tsx 顶部。
