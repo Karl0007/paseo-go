@@ -97,3 +97,7 @@ evidence/
 .tmp/
 packages/app/.tmp/
 packages/app/packages/
+
+# release 产物只上 GitHub Releases，不进 git（go.12 误提交 105MB APK 教训）
+*.apk
+*.apk.sha256
