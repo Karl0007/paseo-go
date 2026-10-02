@@ -102,3 +102,9 @@
 - server：1 例失败 `execution-session.websocket` = `EBUSY rmdir` 临时目录（W1 在案 Windows 环境类）。
 - typecheck 全 workspace 绿（每提交 pre-commit + 门禁时点复跑）。
 - 坑账：门禁首跑用 `cd /c/...` 小写盘符 → vitest 双实例 695 文件假红（bg_1 作废）；大写 `C:/` 重跑为准。**BUILD.md #8 已有同纪律，本次=踩坑复证**（教训：门禁命令模板应强制大写 cwd）。
+
+## F30（批次九开线，2026-10-02 20:1x）导入行标题/小字与会话不一致
+
+- 现场核实：会话行标题=`项目(worktree)`/壳重命名（row-title.ts 模型），副标题=状态标+「我: 」预览/占位；导入行标题=firstUserMsg 链、副标题=项目·摘要——**信息同集但两槽互换**。
+- 拍板：导入行改走会话行同款推导（卡=B9-TITLE；已导入行别名优先；子行=nameLabel；firstUserMsg 降级为副标题兜底）。
+- 发布策略：客户端改动，**go.12 暂缓**——等用户反馈流收敛一并切，避免连发。
