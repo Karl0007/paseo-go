@@ -116,3 +116,8 @@
 **现场事实**：子 transcript 带 `parentHandleId` 链（omp/session-descriptor.ts，导入树已按它分组）；watcher（F28）只跟 resume 链（parentSession），**不跟子链**；导入屏子行有逐行 looksActive（mtime 窗）但对话列表无任何子任务信号。
 
 **修复面（服务端 watcher 扩展）**：观察单位从「链」扩为「树」——attach/chase 时同目录匹配 parentHandleId∈本树的兄弟 transcript，子文件写入=该 agent 的外来活动 → pill 翻外部·运行中；游标/基线语义沿用 F28。成本：子发现并入既有 chase 目录扫（同窗同闸），静默档不扩。
+
+## F32 未读角标统一行右缘（2026-10-02 20:3x，截图钉死）
+
+- 现场：计数圆标在时间左（titleTrailing spinner→badge→time），行最右另有未读点=两处分居。裁定=统一收时间右侧唯一槽（count 圆标/点互斥单枚）；F31-B 的子任务徽标复用右缘家族同款。卡=B9-BADGE（先于 B9-SUBACT，后者骑其槽位）。
+- F31 拍板=**B+**：watcher 扩子任务树（pill 运行态传染）+对话行右缘「子任务×N」徽标+导入屏子行实况活跃。卡=B9-SUBACT（排 B9Title/B9Badge 后，同文件域串行）。
