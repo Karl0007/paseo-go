@@ -1,3 +1,18 @@
+# Paseo Go v0.10.2-go.12 落档（批次九发布，2026-10-03）
+
+- 内容=批次九：F30 导入行标题/小字=会话同款（别名优先/子行=子代理名/碰撞追加短 id）｜F31-B 子任务运行可见性（树观察+live-idle 传染+右缘「图标+数字」徽标+导入子行实况）｜F32 未读角标统一右缘唯一槽｜F33 live-idle 观察盲区根修｜review 轮 15 卡全闭（3×P1 含帧证溢出）+G3 排后。
+- VERSION commit=`821325fa8`；tag `v0.10.2-go.12`（镜像锚 fe8062f）；镜像 22 patches 树对账 5398≡5398 EMPTY。
+- 本机 APK sha256=`e43b5a55…c1a1`（105,849,772 B，hbc stamp go.12×1）；装机帧 evidence/B12-RELEASE/01-05（stamp 实拍+a11y+新徽标家族+导入消歧）。
+- CI run=`37044441329`（APK job 驱逐八连=预期红）；assemble=`go12asm` 绿；22 资产；win32 CLI sha=`8a19617b…cd0ac`。
+- **生产 go.11→go.12 切换事故实录（本仓最重一次，全因新增闸拦下）**：
+  1. 首跑（Release12 agent）：`npm i -g` 因 cacache 损坏条目报 Z_DATA_ERROR **失败但脚本无退出码闸**→旧版 go.11 原地重启，自检（无版本门）**谎报「DONE OK go12 production live」**。编排者对账 VERSION 字段戳破。
+  2. 补丁三闸：npm 退出码→自动回滚重启；装后版本断言；自检重试环内 VERSION 门；装前 npm cache verify。PowerShell 语法校验过。
+  3. 二跑：新闸生效——npm 再败→**自动回滚 go.11 成功**（exit 3，生产无恙）。
+  4. 根因定位：tarball 本体 node 严格 gunzip 双绿=非损坏；一次性 prefix 安装成功=run1 写入的 cacache 条目被 cache verify 清掉后链路恢复。
+  5. 三跑：**INSTALLED go.12 → 停机 201.9s → 自检 #2 命中 → DONE OK（VERSION 门真过）**；官方 CLI 兼容复跑绿。
+  - 教训入册：**部署脚本「DONE OK」必须含版本断言**（已在 go12 脚本固化，后续脚本模板继承）；npm 大 tarball 全局装可能写坏缓存，重试前先 `npm cache verify`。
+- 现场：metro9c/devd9 ready；设备已装 go.12；npm 元数据 edgesOut 残留已由 cache verify 清除。
+
 # Paseo Go v0.10.2-go.11 落档（批次八发布，2026-10-02）
 
 - 内容=批次八 13 卡+review 14 卡全闭：微信行版式（时间右缘）/pill 三态染色/导入屏版式对齐+归档优先/claimedTotal 全量消歧+cwd 归一/replica-cache 两轴不回跳/横滑环切页+堆叠页全宽返回/文件页三段横滑（永不回卷，边界级联返回）/watcher 顺 omp resume 链正向迁移。review 轮抓到并修复 2 个逃逸 P1：F27 全宽返回此前**所有堆叠屏从未生效**（Portal 兄弟层收不到触点→(detail) 布局根重写）、workspace/me 换页动画未挂 surfaceStyle。
