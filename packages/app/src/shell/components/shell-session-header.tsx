@@ -26,10 +26,14 @@
 // Edge gestures are re-routed for the capsule's whole visible span: the
 // provider's symbol-keyed open-gesture blocker parks the official left-open
 // (agent list) and right-open (explorer) swipes and releases them on unmount
-// (shell-off / non-session routes see zero behaviour change), while a
-// transparent 32dp left-edge band carries the shell's own rightward-swipe →
-// the same back verb (shell-header/edge-swipe + use-shell-edge-back-gesture,
-// KI-17③: detailBack — pop, or replace onto (shell)/chats on a headless stack).
+// (shell-off / non-session routes see zero behaviour change). The shell's own
+// rightward-swipe → the same back verb (KI-17③: detailBack — pop, or replace
+// onto (shell)/chats on a headless stack) does NOT ride this layer: REVIEW-B8-14
+// moved it to the session screen's ANCESTOR surface
+// (shell/gestures/shell-session-edge-back-host, mounted by the tablet split
+// host) — this layer is a navigator SIBLING and its 32dp band anchor is
+// pointerEvents="none", so a mid-screen start never enters this layer's handler
+// chain (device verdict 2026-10-02: bar-start pops, mid-screen starts dead).
 // While the compact explorer overlay is open the capsule yields its band
 // (visibility input explorerOverlayOpen) — the overlay owns the top rail then.
 //
@@ -44,8 +48,7 @@
 // system back/gesture pop it untouched.
 import { useCallback, useMemo } from "react";
 import { Pressable, Text, View } from "react-native";
-import { GestureDetector } from "react-native-gesture-handler";
-import { router, usePathname, useRootNavigation } from "expo-router";
+import { router } from "expo-router";
 import { Portal } from "@gorhom/portal";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useTranslation } from "react-i18next";
@@ -71,7 +74,6 @@ import { MenuSubTrigger, type MenuPageDefinition } from "@/components/ui/menu";
 import { useAggregatedAgents, type AggregatedAgent } from "@/hooks/use-aggregated-agents";
 import { useSessionStore } from "@/stores/session-store";
 import { useWorkspace } from "@/stores/session-store-hooks";
-import { selectIsCompactFileExplorerOpen, usePanelStore } from "@/stores/panel-store";
 import { deriveSidebarStateBucket, type SidebarStateBucket } from "@/utils/sidebar-agent-state";
 import { isImportedProviderSession } from "@getpaseo/protocol/agent-labels";
 import { useCheckoutStatusQuery } from "@/git/use-status-query";
@@ -80,11 +82,9 @@ import { SHELL_I18N_NAMESPACE } from "@/shell/i18n";
 import { SHELL, shellFilesHref, shellRenameHref } from "@/shell/routes";
 import { detailBack } from "@/shell/detail-back";
 import { usePaseoGoPinsStore } from "@/shell/stores/pins";
-import { usePaseoGoShellActive } from "@/shell/stores/settings";
 import { useShellAgentActions, type ShellChatTarget } from "@/shell/shellAgentActions";
 import { ChatStatusLight } from "@/shell/components/chat-status-light";
 import { OwnershipBadge } from "@/shell/components/ownership-badge";
-import { useShellWindowCompact } from "@/shell/tablet/form-factor";
 import {
   createSessionHeaderRunner,
   resolveShellSessionWorkspace,
@@ -94,9 +94,9 @@ import {
   type SessionHeaderActionId,
   type ShellSessionWorkspaceTarget,
 } from "@/shell/session-header/visibility";
+import { useShellSessionVisibilityInput } from "@/shell/session-header/visibility-input";
 import { SessionHeaderScriptsPage } from "@/shell/session-header/scripts-submenu";
 import { SHELL_EDGE_BAND_WIDTH_DP } from "@/shell/session-header/edge-swipe";
-import { useShellEdgeBackGesture } from "@/shell/session-header/use-shell-edge-back-gesture";
 import {
   SESSION_HEADER_CONTROL_HEIGHT_DP,
   TEXT_LINE_HEIGHT_CEILING,
@@ -159,37 +159,11 @@ function actionLeading(id: SessionHeaderActionId) {
 }
 
 export function ShellSessionHeaderOverlay() {
-  const shellActive = usePaseoGoShellActive();
-  const pathname = usePathname();
-  // C21: the compact explorer overlay paints its own top rail (tab dropdown +
-  // close) exactly under the capsule band — while it is open the capsule yields
-  // (visibility input). Wide layouts open the Explorer as a pane instead and
-  // never flip mobilePanel.target, so this subscription is constant there.
-  const explorerOverlayOpen = usePanelStore(selectIsCompactFileExplorerOpen);
-  // Root-Stack provenance: the layout component is not a screen, so neither
-  // useRootNavigationState (resolves to the router `__root` container) nor the
-  // ambient useNavigation context is dependable here. The navigation CONTAINER's
-  // state has one `__root` route whose nested state IS the app Stack — the array
-  // carrying the `(shell)` / `h/[serverId]` entries. Render-time read is current:
-  // every push/pop changes the pathname below, which re-renders this overlay.
-  const rootState = useRootNavigation()?.getState()?.routes[0]?.state;
-
-  // C31-F1/C32: the compact flag comes from the window-dimension source the
-  // tablet split uses — a runtime rotation flips the capsule's compact/wide
-  // metrics together with the split (the Unistyles breakpoint stayed stale).
-  const isCompact = useShellWindowCompact();
-
-  const visibilityInput = useMemo(
-    () => ({
-      shellMode: shellActive,
-      pathname,
-      rootRoutes: (rootState?.routes ?? []).map((route) => route.name),
-      rootIndex: rootState?.index ?? -1,
-      explorerOverlayOpen,
-      isCompact,
-    }),
-    [shellActive, pathname, rootState, explorerOverlayOpen, isCompact],
-  );
+  // REVIEW-B8-14: the input assembly is SHARED with the session screen's
+  // ancestor edge-back host (shell/session-header/visibility-input) — the
+  // capsule and the band can never disagree about "is the capsule up".
+  const visibilityInput = useShellSessionVisibilityInput();
+  const isCompact = visibilityInput.isCompact;
   const workspace = useMemo(() => resolveShellSessionWorkspace(visibilityInput), [visibilityInput]);
   // C32 裁定 2: the left-edge back band is compact-only (wide pops via
   // hardware back / the capsule's 返回 key — an edge band would sit over the
@@ -274,9 +248,12 @@ function CapsuleInner({
   // The hook registers a fresh Symbol and releases it on unmount, so shell-off
   // and every non-session route see the official gestures untouched.
   useBlockMobilePanelOpenGestures(true);
-  // C21 edge reroute, part 2: the shell's own left-edge right-swipe → back.
-  // C32 裁定 2: enabled only while compact (the overlay's pure predicate decides).
-  const edgeGesture = useShellEdgeBackGesture(edgeBackEnabled);
+  // C21 edge reroute, part 2 (REVIEW-B8-14): the shell's own left-edge
+  // right-swipe → back NO LONGER rides this layer — it lives on the session
+  // screen's ancestor surface (shell/gestures/shell-session-edge-back-host);
+  // this Portal layer is a navigator sibling, so only touches that hit the bar
+  // below ever entered its handler chain. The edgeBackEnabled prop now gates
+  // the band anchor alone (the gate's on-device proof).
 
   const key = `${workspace.serverId}:${agent.id}`;
   const alias = usePaseoGoPinsStore((state) => state.aliases[key]);
@@ -422,52 +399,48 @@ function CapsuleInner({
 
   return (
     <>
-      {/* C21 edge-back Pan: attached to the box-none layer, NOT a band View —
-          a GestureDetector's own view is touchable on Android and a band would
-          steal the left 32dp column's taps/scrolls from the session (measured).
-          The layer is skipped by RN's hit-test, so touches land on the session
-          underneath while RNGH still arbitrates the stream; the ≈32dp edge is
-          the hook's start-x gate. The plain band View below is a layout/testID
-          anchor for that edge only — and compact-only (C32 裁定 2): wide drops
-          it, so the testID's absence is the on-device proof of the gate. */}
-      <GestureDetector gesture={edgeGesture}>
-        <View pointerEvents="box-none" style={styles.layer}>
-          {edgeBackEnabled ? (
-            <View
-              pointerEvents="none"
-              style={styles.edgeBand}
-              testID={`shell-session-edge-band-${key}`}
-            />
-          ) : null}
-          <View style={barStyle} testID={`shell-session-header-${key}`}>
-            <Pressable
-              onPress={goBack}
-              accessibilityRole="button"
-              accessibilityLabel={t("header.back")}
-              hitSlop={6}
-              style={iconButtonStyle}
-              testID={`shell-session-back-${key}`}
-            >
-              <ThemedChevronLeft size={20} />
-            </Pressable>
-            <HeaderRowsText rows={headerRows} agent={agent} bucket={bucket} targetKey={key} />
-            <Pressable
-              // C33 popover form needs an anchor: the engine measures this button
-              // through its trigger ref (the row menus get it from ContextMenuTrigger).
-              ref={menu.triggerRef}
-              collapsable={false}
-              onPress={openMenu}
-              accessibilityRole="button"
-              accessibilityLabel={t("header.menu")}
-              hitSlop={6}
-              style={iconButtonStyle}
-              testID={`shell-session-menu-open-${key}`}
-            >
-              <ThemedMoreHorizontal size={18} />
-            </Pressable>
-          </View>
+      {/* REVIEW-B8-14: the band View is a layout/testID anchor for the 32dp
+          edge only — the Pan itself rides the session screen's ancestor host.
+          The anchor is compact-only (C32 裁定 2): wide drops it, so the
+          testID's absence is the on-device proof of the gate. The box-none
+          layer stays untouched by RN's hit-test: touches outside the bar pass
+          through to the session underneath. */}
+      <View pointerEvents="box-none" style={styles.layer}>
+        {edgeBackEnabled ? (
+          <View
+            pointerEvents="none"
+            style={styles.edgeBand}
+            testID={`shell-session-edge-band-${key}`}
+          />
+        ) : null}
+        <View style={barStyle} testID={`shell-session-header-${key}`}>
+          <Pressable
+            onPress={goBack}
+            accessibilityRole="button"
+            accessibilityLabel={t("header.back")}
+            hitSlop={6}
+            style={iconButtonStyle}
+            testID={`shell-session-back-${key}`}
+          >
+            <ThemedChevronLeft size={20} />
+          </Pressable>
+          <HeaderRowsText rows={headerRows} agent={agent} bucket={bucket} targetKey={key} />
+          <Pressable
+            // C33 popover form needs an anchor: the engine measures this button
+            // through its trigger ref (the row menus get it from ContextMenuTrigger).
+            ref={menu.triggerRef}
+            collapsable={false}
+            onPress={openMenu}
+            accessibilityRole="button"
+            accessibilityLabel={t("header.menu")}
+            hitSlop={6}
+            style={iconButtonStyle}
+            testID={`shell-session-menu-open-${key}`}
+          >
+            <ThemedMoreHorizontal size={18} />
+          </Pressable>
         </View>
-      </GestureDetector>
+      </View>
       <ContextMenuContent width={280} pages={scriptsPages} testID={`shell-session-menu-${key}`}>
         {sessionHeaderMenuPlan({
           stoppable,

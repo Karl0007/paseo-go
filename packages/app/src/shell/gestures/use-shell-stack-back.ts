@@ -1,11 +1,12 @@
 // B8-SWIPE (F27) — the actuator of 堆叠页全宽右滑返回: the C21 edge-back Pan with
 // its start-x band gate REMOVED (the band stays only on the official session
 // screen, `use-shell-edge-back-gesture`; 卡片口径: 挂不住的上游滚动体由左缘带兜底).
-// Same proven topology — the Pan rides a full-screen `box-none` layer so touches
-// keep landing on the screen underneath while RNGH still arbitrates the stream —
-// and the same pure direction lock (`resolveShellEdgeSwipeIntent` via
-// `decideShellSwipe`): rightward ≥ 24dp with horizontal dominance pops, leftward
-// FAILS (堆叠页上左滑不切 tab), vertical goes to the scroll views.
+// Same proven topology — the Pan rides an ANCESTOR View of every screen it
+// governs (卡 09 重拍 + 卡 14 复量：Portal 的 box-none 兄弟层一次也没拿到触摸流，
+// 手势面必须是滚动体的祖先) — and the same pure direction lock
+// (`resolveShellEdgeSwipeIntent` via `decideShellSwipe`): rightward ≥ 24dp with
+// horizontal dominance pops, leftward FAILS (堆叠页上左滑不切 tab), vertical goes
+// to the scroll views.
 //
 // Gates: `enabled` (frontmost-is-(detail) — the overlay's layout sibling cannot
 // see the stack itself), `blocked` (声明性豁免 bus: 搜索态/打开的 sheet), and the

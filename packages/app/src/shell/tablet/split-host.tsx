@@ -18,12 +18,14 @@
 // host — RNGH's passive cleanup runs after the layout mount it races with).
 // The stable shape also makes §2 "转屏不触导航栈" structurally true: navigator
 // state, list scroll offsets and in-flight screens survive every rotation.
-// Compact cost: two transparent flex:1 Views around the tree (no visual,
-// gesture or layout delta — verified on-device, portrait screenshots unchanged).
+// Compact cost: three transparent flex:1 Views around the tree (no visual,
+// gesture or layout delta — verified on-device, portrait screenshots unchanged;
+// the third is the REVIEW-B8-14 edge-back host, itself part of the stable chain).
 import React, { type ReactNode } from "react";
 import { View } from "react-native";
 import { StyleSheet } from "react-native-unistyles";
 import { ShellRowMenuHost } from "@/shell/components/chat-row-menu";
+import { ShellSessionEdgeBackHost } from "@/shell/gestures/shell-session-edge-back-host";
 import { TabletListColumn } from "./list-column";
 import { TABLET_DETAIL_MIN_WIDTH } from "./metrics";
 import { TabletNavRail } from "./nav-rail";
@@ -38,7 +40,11 @@ export default function ShellTabletSplitHost({ children }: { children: ReactNode
     >
       {split.active ? <TabletNavRail section={split.section} /> : null}
       {split.active ? <TabletListColumn section={split.section} /> : null}
-      <View style={split.active ? styles.detail : styles.passthrough}>{children}</View>
+      <View style={split.active ? styles.detail : styles.passthrough}>
+        {/* REVIEW-B8-14: C21 左缘带兜底挂在会话屏的祖先面上（常挂载、跨翻转
+            稳定；禁用态不接管触摸）。见该组件头注的真机拓扑裁定。 */}
+        <ShellSessionEdgeBackHost>{children}</ShellSessionEdgeBackHost>
+      </View>
       {/* KI-11 ruling ①: the chat-row menu's window-hosted surface (the engine
           Modal cannot open mid-gesture without killing the row's touch stream).
           Mounted here — above the rail, the list columns and the navigator —

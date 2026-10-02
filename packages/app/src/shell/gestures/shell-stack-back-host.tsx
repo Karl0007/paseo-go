@@ -2,16 +2,21 @@
 // 的挂靠面。拓扑是量出来的，不是推的（批次八 review 卡 09 重拍，2026-10-02）：初版把
 // 一层无子节点的 `box-none` 图层 Portal 进 `content-floating-panels`，真机上 Pan 一
 // 次也没拿到触摸流——该层是导航器的「兄弟」，命中测试落在它下面的屏幕上，而那次触摸
-// 的 handler 链里没有它（C21 胶囊浮在同一个 host 里能用，是因为它的 32dp 带是手指底下
-// 一个真实的 view）。RNGH 会仲裁的姿势是滚动体的「祖先」——与 tab 环、官方 explorer
-// 手势同一拓扑——所以 Pan 挂在组自己的根 View 上，栈页内的每一次触摸都经过它。
+// 的 handler 链里没有它。C21 胶囊浮在同一个 host 里【只在顶部 bar 上】能用：bar 是
+// 层内唯一可命中的真实子视图，命中它的触摸其祖先链里有这层；32dp 带是
+// pointerEvents="none" 的锚点、不可命中——卡 14 真机裁定（2026-10-02）：bar 区起滑
+// pop、屏幕中段左缘起滑全部无响应，兜底已迁到会话屏的祖先面
+// （shell-session-edge-back-host）。RNGH 会仲裁的姿势是滚动体的「祖先」——与 tab 环、
+// 官方 explorer 手势同一拓扑——所以 Pan 挂在组自己的根 View 上，栈页内的每一次触摸都
+// 经过它。
 //
 // 全宽 = 整个栈页（不再有 start-x 带），不是整个窗口：宽屏下 (detail) 组就是右栏，
 // 左栏的环在「有栈页在前」时由 frontmost 总线让位（swipe-machine 的 stackInFront），
 // 所以左栏上的右滑谁的都不是——与修复前的观测一致，只是少了一个假想的所有者。
 //
 // 两道门照旧：`enabled`＝根栈当前聚焦项就是 (detail) 组（组布局在官方会话屏盖上来
-// 之后仍然挂载，此时 Pan 必须让位给胶囊的左缘带，见 visibility.ts 裁定 2）；
+// 之后仍然挂载，此时 Pan 必须让位给会话屏的左缘带兜底——shell-session-edge-back-host，
+// 见 visibility.ts 裁定 2）；
 // `blocked`＝各屏自己声明的豁免（搜索态/打开的 sheet，stack-back-gate）；再加
 // HorizontalScrollContext 的声明性豁免（diff 代码块滚离前缘后保住自己的右滑）。
 // 返回动词是 `detailBack`：弹回打开它的屏幕，无底深链栈 replace 回 (shell)/chats（KI-17③ 同款）。

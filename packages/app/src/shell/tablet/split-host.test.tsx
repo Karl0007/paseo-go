@@ -13,7 +13,8 @@ import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { router, usePathname } from "expo-router";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { Text } from "react-native";
-import { SHELL } from "@/shell/routes";
+import { OFFICIAL, SHELL } from "@/shell/routes";
+import type { ShellSessionVisibilityInput } from "@/shell/session-header/visibility";
 import { subscribeRailRetap } from "./rail-events";
 import {
   pendingVisits,
@@ -102,6 +103,50 @@ vi.mock("./use-tablet-selection", () => ({
   useTabletSelectedAgentKey: () => env.state.selectedAgentKey,
 }));
 
+// REVIEW-B8-14 (C21 左缘带兜底，卡 09 同款拓扑裁定): 兜底 Pan 必须挂在会话屏的
+// 【祖先】面上。胶囊的 Portal 层是导航器的兄弟、32dp 带锚点是 pointerEvents="none"
+// （不可命中），中段起滑从不进 handler 链——真机裁定（2026-10-02）：bar 区起滑 pop、
+// 屏幕中段三组 y/时长起滑全部无响应。以下替身把兜底宿主（经 split-host 挂载）需要的
+// 手势/可见性面接成可控桩；可见性输入走真实纯谓词 shouldEnableShellEdgeBack。
+const edgeRig = vi.hoisted(() => ({
+  enabledCalls: [] as boolean[],
+  base: {
+    shellMode: true,
+    pathname: "/h/srv_1/workspace/wks_86ef0",
+    rootRoutes: ["(shell)", "h/[serverId]"],
+    rootIndex: 1,
+    isCompact: true,
+  } satisfies ShellSessionVisibilityInput,
+  over: {} as Partial<ShellSessionVisibilityInput>,
+}));
+vi.mock("@/shell/session-header/visibility-input", () => ({
+  useShellSessionVisibilityInput: () => ({ ...edgeRig.base, ...edgeRig.over }),
+}));
+vi.mock("react-native-gesture-handler", () => ({
+  Gesture: {
+    Pan: () => {
+      const pan = {
+        maxPointers: () => pan,
+        manualActivation: () => pan,
+        onTouchesDown: () => pan,
+        onTouchesMove: () => pan,
+        onEnd: () => pan,
+        enabled: (value: boolean) => {
+          edgeRig.enabledCalls.push(value);
+          return pan;
+        },
+      };
+      return pan;
+    },
+  },
+  GestureDetector: ({ children }: { children: React.ReactNode }) => children,
+}));
+vi.mock("react-native-reanimated", () => ({
+  useSharedValue: <T,>(initial: T) => ({ value: initial }),
+}));
+vi.mock("react-native-worklets", () => ({ scheduleOnRN: () => undefined }));
+vi.mock("@/shell/detail-back", () => ({ detailBack: vi.fn() }));
+
 const pathname = vi.mocked(usePathname);
 
 // The detail-column stand-in stamps its mount identity: any remount changes
@@ -141,14 +186,16 @@ describe("ShellTabletSplitHost", () => {
     const { container } = renderHost();
     expect(screen.queryByTestId("shell-tablet-split")).toBeNull();
     expect(screen.queryByTestId("shell-tablet-rail")).toBeNull();
-    // The seam adds a full-size transparent wrapper CHAIN (row → detail slot).
-    // Asserted SEMANTICALLY (R2-23): the child is the only content in the
-    // passthrough tree. The old depth-chain (`firstElementChild.firstElementChild`)
-    // went red for a harmless extra flex wrapper yet stayed green when the slot
-    // grew real extra content — counting testID'd nodes catches the latter and
-    // ignores the former (the no-remount contract below owns the chain shape).
+    // The seam adds a full-size transparent wrapper CHAIN (row → detail slot →
+    // C21 edge-back host). Asserted SEMANTICALLY (R2-23): the child is the only
+    // content in the passthrough tree. The old depth-chain
+    // (`firstElementChild.firstElementChild`) went red for a harmless extra flex
+    // wrapper yet stayed green when the slot grew real extra content — counting
+    // testID'd nodes catches the latter and ignores the former (the no-remount
+    // contract below owns the chain shape). REVIEW-B8-14: the second node is the
+    // edge-back host's gesture surface — an always-mounted ancestor of the child.
     expect(container.contains(screen.getByTestId("split-child"))).toBe(true);
-    expect(container.querySelectorAll("[data-testid]")).toHaveLength(1);
+    expect(container.querySelectorAll("[data-testid]")).toHaveLength(2);
     // Compact never mounts a list body (the tab screens own them there).
     expect(screen.queryByTestId("body-chats")).toBeNull();
   });
@@ -270,5 +317,54 @@ describe("ShellTabletSplitHost", () => {
     renderHost();
     // Section memory keeps 对话 live under the session push; the row key flows down.
     expect(screen.getByTestId("body-chats").textContent).toBe("host:1:a1");
+  });
+});
+
+// REVIEW-B8-14: C21 左缘带兜底的挂载面裁定（卡 09 同款祖先拓扑）。修复前必红：
+// 兜底宿主尚不存在时，下面每一条都拿不到 `shell-session-edge-back-host`。
+describe("C21 左缘带兜底挂载面（REVIEW-B8-14）", () => {
+  beforeEach(() => {
+    edgeRig.enabledCalls.length = 0;
+    edgeRig.over = {};
+    // R2-23: pathname fixtures go through the REAL builders.
+    edgeRig.base = {
+      ...edgeRig.base,
+      pathname: OFFICIAL.workspace("srv_1", "wks_86ef0"),
+    };
+  });
+
+  it("手势面是会话屏的祖先：中段起滑的触摸 handler 链必经过它", () => {
+    env.state.compact = true;
+    const { getByTestId } = renderHost();
+    const host = getByTestId("shell-session-edge-back-host");
+    expect(host.contains(getByTestId("split-child")), "会话屏子树不在手势面内").toBe(true);
+  });
+
+  it("split 激活（wide）时同样在位——稳定链契约不因翻转重挂", () => {
+    env.state.compact = false;
+    const { getByTestId, rerender } = renderHost();
+    expect(getByTestId("shell-session-edge-back-host")).not.toBeNull();
+    env.state.compact = true;
+    rerender(hostTree());
+    expect(getByTestId("shell-session-edge-back-host")).not.toBeNull();
+    expect(childMounts).toBe(1);
+  });
+
+  it("compact 会话屏 = enabled；wide/overlay/非会话路由 = false（纯谓词直通）", () => {
+    env.state.compact = true;
+    const { rerender } = renderHost();
+    expect(edgeRig.enabledCalls.at(-1)).toBe(true);
+
+    edgeRig.over = { isCompact: false };
+    rerender(hostTree());
+    expect(edgeRig.enabledCalls.at(-1)).toBe(false);
+
+    edgeRig.over = { explorerOverlayOpen: true };
+    rerender(hostTree());
+    expect(edgeRig.enabledCalls.at(-1)).toBe(false);
+
+    edgeRig.over = { pathname: "/chats" };
+    rerender(hostTree());
+    expect(edgeRig.enabledCalls.at(-1)).toBe(false);
   });
 });

@@ -1,17 +1,21 @@
-// C21 shell edge-back gesture: the transparent left-edge right-swipe the
-// capsule carries while it is visible. The Pan attaches to the capsule's
-// full-screen `box-none` Portal layer, NOT to a band View: a GestureDetector's
-// own view is touchable on Android, so a 32dp band would steal every tap and
-// vertical drag inside its column from the session underneath (measured
-// on-device — the composer's left edge stopped focusing). A `box-none` host is
-// skipped by RN's hit-test, so touches keep landing on the session's own views
-// (taps focus, vertical drags scroll), while RNGH's root observer still feeds
-// the stream to this Pan; the 32dp edge is enforced by the start-x gate below,
-// mirroring the official open gesture's edge check. Activation goes through the
-// pure direction lock (`edge-swipe`), so only a rightward drag of
-// SHELL_EDGE_BACK_ACTIVATE_DP with horizontal dominance steals the touch from
-// the session and pops the official screen back onto the shell list — the same
-// verb as the capsule's 返回 button and the system back.
+// C21 shell edge-back gesture: the transparent left-edge right-swipe the shell
+// carries while the session capsule is visible. Since REVIEW-B8-14 the Pan
+// attaches to `ShellSessionEdgeBackHost` — an ANCESTOR View of the official
+// session screen (mounted by the tablet split host) — NOT to the capsule's
+// `box-none` Portal layer: that layer is a navigator sibling and its band
+// anchor is pointerEvents="none", so only touches hitting the bar entered its
+// handler chain (device verdict 2026-10-02: bar-start pops, mid-screen starts
+// dead). The host's own View is touchable on Android by design — exactly like
+// the official open gesture's wrapper (MobileGestureWrapper) it sits ABOVE the
+// navigator, so the touch stream reaches this Pan while the session's own views
+// still receive the touch (taps focus, vertical drags scroll: manual
+// activation only steals the stream once the direction lock commits). The
+// ≈32dp edge is the start-x gate below, mirroring the official open gesture's
+// edge check. Activation goes through the pure direction lock (`edge-swipe`),
+// so only a rightward drag of SHELL_EDGE_BACK_ACTIVATE_DP with horizontal
+// dominance steals the touch from the session and pops the official screen back
+// onto the shell list — the same verb as the capsule's 返回 button and the
+// system back.
 //
 // The official left-open/right-open gestures are parked separately, via the
 // provider's symbol-keyed blocker (useBlockMobilePanelOpenGestures in the
