@@ -1,4 +1,4 @@
-import { appendFileSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { appendFileSync, mkdirSync, mkdtempSync, rmSync, utimesSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { describe, expect, it } from "vitest";
@@ -21,6 +21,7 @@ import type {
   AgentStreamEvent,
 } from "./agent-sdk-types.js";
 import { claudeProjectDirSync } from "./providers/claude/project-dir.js";
+import { LOOKS_ACTIVE_MTIME_WINDOW_MS } from "./provider-transcript.js";
 import {
   INITIAL_AGENT_OWNERSHIP,
   deriveAgentOwnershipValue,
@@ -583,13 +584,18 @@ function createCrashableClaudeClient(): { client: AgentClient; crash: () => void
   };
 }
 
-function createHarness(work: string, client?: AgentClient) {
+function createHarness(
+  work: string,
+  client?: AgentClient,
+  managerOptions?: { transcriptChainFollowIntervalMs?: number },
+) {
   const logger = createTestLogger();
   const storage = new AgentStorage(join(work, "agents"), logger);
   const manager = new AgentManager({
     clients: { claude: client ?? createTestAgentClient("claude") },
     registry: storage,
     transcriptStatPollIntervalMs: 60 * 60 * 1000,
+    transcriptChainFollowIntervalMs: managerOptions?.transcriptChainFollowIntervalMs,
     logger,
   });
   const configDir = join(work, "claude-config");
@@ -1041,6 +1047,20 @@ describe("AgentManager live-idle transcript watching (B9-WATCH2, F33)", () => {
       const live = harness.manager.getAgent(agent.id);
       expect(live?.ownership.value).toBe("paseo");
       expect(live?.ownership.externalLooksActive).toBe(false);
+
+      // B9-12 (REVIEW-B9-12): prove that `paseo` above is a BASELINE, not
+      // blindness — a foreign row landing now must flip the pill. Remove the
+      // live-idle candidate filter (the gate this race test guards) and the
+      // watcher never attaches, the `paseo` assertions pass vacuously, and
+      // THIS assertion goes red instead.
+      appendFileSync(transcript, claudeLine("assistant", "continued at the desk", "u3"));
+      writeClaudeRegistryEntry({
+        configDir: join(work, "claude-config"),
+        sessionId: agent.persistence?.sessionId ?? "",
+      });
+      await harness.manager.sweepTranscriptWatch();
+      await harness.manager.flush();
+      expect(harness.manager.getAgent(agent.id)?.ownership.value).toBe("external");
     } finally {
       if (agentId) await harness.manager.closeAgent(agentId).catch(() => undefined);
       harness.cleanup();
@@ -1148,6 +1168,455 @@ describe("AgentManager subagent-tree contagion (B9-SUBACT)", () => {
       // of everything else (the parent row keeps its own scan estimate).
       expect(harness.manager.subagentLiveState(child)).toBe(true);
       expect(harness.manager.subagentLiveState(transcript)).toBeNull();
+    } finally {
+      harness.cleanup();
+    }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// B9-REVIEW-G1 (batch-9 review, cards 01/02/06/11): the tree channel at the
+// manager surface. A daemon that ran its own subagents must not be told it
+// hosts a stranger (01); a count the caller still projects must hear its own
+// decay across the entry gap (02); the decay's COMMIT and EMIT layers carry
+// tests, not just truthy flips (06); and a reload keeps the badge (11).
+// ---------------------------------------------------------------------------
+
+function ompSessionHeader(cwd: string): string {
+  return `${JSON.stringify({
+    type: "session",
+    id: "sess-self",
+    cwd,
+    timestamp: "2026-10-02T00:00:00.000Z",
+  })}\n`;
+}
+
+/**
+ * The fake omp client, wrapped so every session's persistence carries
+ * `nativeHandle` = the transcript path the test controls (an omp handle IS the
+ * transcript file; the bare fake names none, and an unresolvable handle would
+ * make any live-agent watch assertion vacuous).
+ */
+function createOmpClientWithTranscript(transcriptPath: string): AgentClient {
+  const inner = createTestAgentClient("omp");
+  const wrapSession = (session: AgentSession): AgentSession =>
+    new Proxy(session, {
+      get(target, prop, receiver) {
+        if (prop === "describePersistence") {
+          return () => ({
+            ...(target.describePersistence() as AgentPersistenceHandle),
+            nativeHandle: transcriptPath,
+          });
+        }
+        const value = Reflect.get(target, prop, receiver);
+        return typeof value === "function" ? value.bind(target) : value;
+      },
+    });
+  return new Proxy(inner, {
+    get(target, prop) {
+      if (prop === "createSession") {
+        return async (...args: Parameters<AgentClient["createSession"]>) =>
+          wrapSession(await target.createSession(...args));
+      }
+      if (prop === "resumeSession") {
+        return async (...args: Parameters<AgentClient["resumeSession"]>) =>
+          wrapSession(await target.resumeSession(...args));
+      }
+      const value = Reflect.get(target, prop);
+      return typeof value === "function" ? value.bind(target) : value;
+    },
+  });
+}
+
+function createOmpHarness(work: string, transcript: string) {
+  const logger = createTestLogger();
+  const storage = new AgentStorage(join(work, "agents"), logger);
+  const manager = new AgentManager({
+    clients: { omp: createOmpClientWithTranscript(transcript) },
+    registry: storage,
+    transcriptStatPollIntervalMs: 60 * 60 * 1000,
+    // The tree-channel tests observe more than one scan per entry; the
+    // production 5-min gate would collapse them into one.
+    transcriptChainFollowIntervalMs: 0,
+    logger,
+  });
+  return {
+    storage,
+    manager,
+    cleanup: () => {
+      manager.stopTranscriptWatch();
+      rmSync(work, { recursive: true, force: true });
+    },
+  };
+}
+
+describe("AgentManager self-written tree baseline (B9-01)", () => {
+  it("keeps a live-idle agent's own fresh child tree silent: paseo, idle, no count", async () => {
+    const work = mkdtempSync(join(tmpdir(), "agent-ownership-self-tree-"));
+    const transcript = join(work, "sessions", "2026-10-02_self.jsonl");
+    mkdirSync(dirname(transcript), { recursive: true });
+    writeFileSync(transcript, ompSessionHeader(work));
+    const harness = createOmpHarness(work, transcript);
+    let agentId: string | null = null;
+    try {
+      const agent = await harness.manager.createAgent({ provider: "omp", cwd: work }, undefined, {
+        workspaceId: undefined,
+      });
+      agentId = agent.id;
+      await harness.manager.flush();
+
+      // The turn this daemon just ran spawned this child: fresh at attach — the
+      // exact false-positive trigger of the card; pre-fix one sweep flipped the
+      // pill to 外部·运行中. The 2s-past mtime keeps it unambiguously under the
+      // attach floor whatever the clock granularity.
+      const childDir = transcript.slice(0, -".jsonl".length);
+      mkdirSync(childDir, { recursive: true });
+      const ownChild = join(childDir, "Explore.jsonl");
+      writeFileSync(ownChild, ompSessionHeader(childDir));
+      const ownAt = Date.now() - 2_000;
+      utimesSync(ownChild, new Date(ownAt), new Date(ownAt));
+
+      await harness.manager.sweepTranscriptWatch();
+      await harness.manager.flush();
+
+      const live = harness.manager.getAgent(agent.id);
+      expect(live?.ownership.value).toBe("paseo");
+      expect(live?.ownership.externalLooksActive).toBe(false);
+      expect(live?.activeSubagents).toBeUndefined();
+      expect(toAgentPayload(live!)).not.toHaveProperty("activeSubagents");
+      const record = await harness.storage.get(agent.id);
+      expect(record?.ownership).toBe("paseo");
+      expect(record?.activeSubagents).toBeUndefined();
+    } finally {
+      if (agentId) await harness.manager.closeAgent(agentId).catch(() => undefined);
+      harness.cleanup();
+    }
+  });
+
+  it("keeps the released close-attach silent on the same own-child shape", async () => {
+    const work = mkdtempSync(join(tmpdir(), "agent-ownership-self-close-"));
+    const transcript = join(work, "sessions", "2026-10-02_close.jsonl");
+    mkdirSync(dirname(transcript), { recursive: true });
+    writeFileSync(transcript, ompSessionHeader(work));
+    const harness = createOmpHarness(work, transcript);
+    try {
+      const agent = await harness.manager.createAgent({ provider: "omp", cwd: work }, undefined, {
+        workspaceId: undefined,
+      });
+      await harness.manager.flush();
+      const childDir = transcript.slice(0, -".jsonl".length);
+      mkdirSync(childDir, { recursive: true });
+      const ownChild = join(childDir, "Explore.jsonl");
+      writeFileSync(ownChild, ompSessionHeader(childDir));
+      const ownAt = Date.now() - 2_000; // fresh, unambiguously under the floor
+      utimesSync(ownChild, new Date(ownAt), new Date(ownAt));
+
+      await harness.manager.closeAgent(agent.id);
+      await harness.manager.flush();
+      await harness.manager.sweepTranscriptWatch();
+      await harness.manager.flush();
+
+      const record = await harness.storage.get(agent.id);
+      expect(record?.ownership).toBe("none");
+      expect(record?.externalLooksActive).toBeFalsy();
+      expect(record?.activeSubagents).toBeUndefined();
+    } finally {
+      harness.cleanup();
+    }
+  });
+});
+
+describe("AgentManager cross-entry count decay (B9-02)", () => {
+  function decayRecord(input: {
+    transcript: string;
+    baselineBytes: number;
+    activeSubagents?: number;
+  }): StoredAgentRecord {
+    return {
+      id: "agent-decay",
+      provider: "omp",
+      cwd: input.transcript,
+      createdAt: "2026-10-02T00:00:00.000Z",
+      updatedAt: "2026-10-02T00:00:00.000Z",
+      labels: {},
+      lastStatus: "closed",
+      config: null,
+      persistence: { provider: "omp", sessionId: "sess-decay", nativeHandle: input.transcript },
+      ownership: "external",
+      externalLooksActive: true,
+      ownershipBaselineBytes: input.baselineBytes,
+      ...(input.activeSubagents !== undefined ? { activeSubagents: input.activeSubagents } : {}),
+    };
+  }
+
+  function staleTree(work: string): { transcript: string; header: string; stale: number } {
+    const transcript = join(work, "sessions", "parent.jsonl");
+    mkdirSync(dirname(transcript), { recursive: true });
+    const header = ompSessionHeader(work);
+    writeFileSync(transcript, header);
+    const stale = Date.now() - LOOKS_ACTIVE_MTIME_WINDOW_MS - 60_000;
+    utimesSync(transcript, new Date(stale), new Date(stale));
+    const childDir = transcript.slice(0, -".jsonl".length);
+    mkdirSync(childDir, { recursive: true });
+    for (const name of ["A.jsonl", "B.jsonl", "C.jsonl"]) {
+      const file = join(childDir, name);
+      writeFileSync(file, header);
+      utimesSync(file, new Date(stale), new Date(stale));
+    }
+    return { transcript, header, stale };
+  }
+
+  it("tells a persisted 3 → 0 when every child decayed while no entry existed", async () => {
+    const work = mkdtempSync(join(tmpdir(), "agent-ownership-count-decay-"));
+    const harness = createHarness(work);
+    try {
+      const { transcript, header } = staleTree(work);
+      const record = decayRecord({
+        transcript,
+        baselineBytes: Buffer.byteLength(header),
+        activeSubagents: 3,
+      });
+      await harness.storage.upsert(record);
+
+      await harness.manager.sweepTranscriptWatch();
+      await harness.manager.flush();
+
+      const stored = await harness.storage.get("agent-decay");
+      // The badge clears and 运行中 goes dark across the restart…
+      expect(stored?.activeSubagents).toBe(0);
+      expect(stored?.externalLooksActive).toBe(false);
+      expect(stored?.ownership).toBe("external");
+      // …and a derived observation still never reorders the time-ordered list.
+      expect(stored?.updatedAt).toBe(record.updatedAt);
+    } finally {
+      harness.cleanup();
+    }
+  });
+
+  it("keeps the zero-report posture for a legacy record without a persisted count", async () => {
+    const work = mkdtempSync(join(tmpdir(), "agent-ownership-count-legacy-"));
+    const harness = createHarness(work);
+    try {
+      const { transcript, header } = staleTree(work);
+      const record = decayRecord({ transcript, baselineBytes: Buffer.byteLength(header) });
+      await harness.storage.upsert(record);
+
+      await harness.manager.sweepTranscriptWatch();
+      await harness.manager.flush();
+
+      // No seed = the caller never spoke either: `undefined → 0` stays silent.
+      const stored = await harness.storage.get("agent-decay");
+      expect(stored?.activeSubagents).toBeUndefined();
+      expect(stored?.externalLooksActive).toBe(true);
+      expect(stored?.updatedAt).toBe(record.updatedAt);
+    } finally {
+      harness.cleanup();
+    }
+  });
+});
+
+describe("AgentManager subagent count decay commit and emit (B9-06)", () => {
+  it("commits the stored decay to 0 with updatedAt untouched and the payload carrying 0", async () => {
+    const work = mkdtempSync(join(tmpdir(), "agent-ownership-stored-decay-"));
+    const harness = createHarness(work, undefined, { transcriptChainFollowIntervalMs: 0 });
+    const payloads: AgentSnapshotPayload[] = [];
+    // The record id is not a UUID, so the subscription is global and filtered
+    // in the callback; `event.agent` is the snapshot, projected like the wire.
+    const unsubscribe = harness.manager.subscribe((event) => {
+      if (event.type === "agent_state" && event.agent.id === "agent-stored-decay") {
+        payloads.push(toAgentPayload(event.agent));
+      }
+    });
+    try {
+      const transcript = join(work, "sessions", "parent.jsonl");
+      mkdirSync(dirname(transcript), { recursive: true });
+      const header = ompSessionHeader(work);
+      writeFileSync(transcript, header);
+      const childDir = transcript.slice(0, -".jsonl".length);
+      mkdirSync(childDir, { recursive: true });
+      const child = join(childDir, "A.jsonl");
+      writeFileSync(child, header);
+      const record: StoredAgentRecord = {
+        id: "agent-stored-decay",
+        provider: "omp",
+        cwd: work,
+        createdAt: "2026-10-02T00:00:00.000Z",
+        updatedAt: "2026-10-02T00:00:00.000Z",
+        labels: {},
+        lastStatus: "closed",
+        config: null,
+        persistence: { provider: "omp", sessionId: "sess-sd", nativeHandle: transcript },
+      };
+      await harness.storage.upsert(record);
+
+      await harness.manager.sweepTranscriptWatch();
+      await harness.manager.flush();
+      expect((await harness.storage.get("agent-stored-decay"))?.activeSubagents).toBe(1);
+
+      // The subagent finished: the decay must COMMIT — a falsy-swallowing `||`
+      // where the patch resolves `??` leaves the badge stuck on the old value.
+      const stale = Date.now() - LOOKS_ACTIVE_MTIME_WINDOW_MS - 60_000;
+      utimesSync(child, new Date(stale), new Date(stale));
+      utimesSync(transcript, new Date(stale), new Date(stale));
+      payloads.length = 0;
+      await harness.manager.sweepTranscriptWatch();
+      await harness.manager.flush();
+
+      const stored = await harness.storage.get("agent-stored-decay");
+      expect(stored?.activeSubagents).toBe(0);
+      expect(stored?.externalLooksActive).toBe(false);
+      expect(stored?.updatedAt).toBe(record.updatedAt);
+      // The dispatch payload the shell reads carries the cleared badge input.
+      expect(payloads.at(-1)?.activeSubagents).toBe(0);
+      expect(payloads.at(-1)?.externalLooksActive).toBe(false);
+    } finally {
+      unsubscribe();
+      harness.cleanup();
+    }
+  });
+
+  it("re-emits agent_state when a live agent's child tree decays", async () => {
+    const work = mkdtempSync(join(tmpdir(), "agent-ownership-live-decay-"));
+    const transcript = join(work, "sessions", "2026-10-02_live.jsonl");
+    mkdirSync(dirname(transcript), { recursive: true });
+    const header = ompSessionHeader(work);
+    writeFileSync(transcript, header);
+    const harness = createOmpHarness(work, transcript);
+    const states: AgentSnapshotPayload[] = [];
+    let unsubscribe: (() => void) | null = null;
+    try {
+      const agent = await harness.manager.createAgent({ provider: "omp", cwd: work }, undefined, {
+        workspaceId: undefined,
+      });
+      unsubscribe = harness.manager.subscribe(
+        (event) => {
+          if (event.type === "agent_state" && event.agent.id === agent.id) {
+            states.push(toAgentPayload(event.agent));
+          }
+        },
+        { agentId: agent.id, replayState: false },
+      );
+      await harness.manager.sweepTranscriptWatch(); // attach; the floor is now
+
+      // A stranger's children under the held-open session, written past the
+      // floor (the utimes stands in for the sweep gap without sleeping).
+      const childDir = transcript.slice(0, -".jsonl".length);
+      mkdirSync(childDir, { recursive: true });
+      const future = new Date(Date.now() + 10_000);
+      const children = ["A.jsonl", "B.jsonl"].map((name) => {
+        const file = join(childDir, name);
+        writeFileSync(file, header);
+        utimesSync(file, future, future);
+        return file;
+      });
+      await harness.manager.sweepTranscriptWatch();
+      await harness.manager.flush();
+      expect(harness.manager.getAgent(agent.id)?.activeSubagents).toBe(2);
+
+      // The subagents finish: external·running → external changes no ownership
+      // VALUE — the emit must ride the count move anyway.
+      const stale = Date.now() - LOOKS_ACTIVE_MTIME_WINDOW_MS - 60_000;
+      for (const file of children) {
+        utimesSync(file, new Date(stale), new Date(stale));
+      }
+      utimesSync(transcript, new Date(stale), new Date(stale));
+      states.length = 0;
+      await harness.manager.sweepTranscriptWatch();
+      await harness.manager.flush();
+
+      const last = states.at(-1);
+      expect(last).toBeDefined();
+      expect(last?.activeSubagents).toBe(0);
+      expect(last?.externalLooksActive).toBe(false);
+      expect(last?.ownership).toBe("external");
+    } finally {
+      unsubscribe?.();
+      harness.cleanup();
+    }
+  });
+
+  it("re-emits agent_state when only the external-activity flag decays", async () => {
+    // The `settled` belt must honour `externalLooksActive`: an observation that
+    // moves no value, no count and no row (a torn line after the terminal's
+    // registry row is gone) still says 运行中 → 外部 and must reach subscribers.
+    const work = mkdtempSync(join(tmpdir(), "agent-ownership-ela-settle-"));
+    const harness = createHarness(work);
+    const states: AgentSnapshotPayload[] = [];
+    let unsubscribe: (() => void) | null = null;
+    try {
+      const agent = await harness.manager.createAgent(
+        { provider: "claude", cwd: work },
+        undefined,
+        { workspaceId: undefined },
+      );
+      unsubscribe = harness.manager.subscribe(
+        (event) => {
+          if (event.type === "agent_state" && event.agent.id === agent.id) {
+            states.push(toAgentPayload(event.agent));
+          }
+        },
+        { agentId: agent.id, replayState: false },
+      );
+      const sessionId = agent.persistence?.sessionId ?? "";
+      const transcript = join(harness.projectDir, `${sessionId}.jsonl`);
+      writeFileSync(transcript, claudeLine("user", "from the phone", "u1"));
+      await harness.manager.sweepTranscriptWatch();
+      appendFileSync(transcript, claudeLine("user", "continued at the desk", "u2"));
+      writeClaudeRegistryEntry({ configDir: join(work, "claude-config"), sessionId });
+      await harness.manager.sweepTranscriptWatch();
+      await harness.manager.flush();
+      expect(harness.manager.getAgent(agent.id)?.ownership.externalLooksActive).toBe(true);
+
+      rmSync(join(work, "claude-config", "sessions", `${process.pid}.json`));
+      appendFileSync(transcript, '{"type":"assistant","uuid":"a9","message":');
+      states.length = 0;
+      await harness.manager.sweepTranscriptWatch();
+      await harness.manager.flush();
+
+      const last = states.at(-1);
+      expect(last).toBeDefined();
+      expect(last?.ownership).toBe("external");
+      expect(last?.externalLooksActive).toBe(false);
+    } finally {
+      unsubscribe?.();
+      harness.cleanup();
+    }
+  });
+});
+
+describe("AgentManager reload keeps the tree count (B9-11)", () => {
+  it("carries the live count into the rebuilt agent and its record", async () => {
+    const work = mkdtempSync(join(tmpdir(), "agent-ownership-reload-count-"));
+    const transcript = join(work, "sessions", "2026-10-02_reload.jsonl");
+    mkdirSync(dirname(transcript), { recursive: true });
+    const header = ompSessionHeader(work);
+    writeFileSync(transcript, header);
+    const harness = createOmpHarness(work, transcript);
+    try {
+      const agent = await harness.manager.createAgent({ provider: "omp", cwd: work }, undefined, {
+        workspaceId: undefined,
+      });
+      await harness.manager.flush();
+      await harness.manager.sweepTranscriptWatch(); // attach; the floor is now
+      const childDir = transcript.slice(0, -".jsonl".length);
+      mkdirSync(childDir, { recursive: true });
+      const future = new Date(Date.now() + 10_000);
+      for (const name of ["A.jsonl", "B.jsonl"]) {
+        const file = join(childDir, name);
+        writeFileSync(file, header);
+        utimesSync(file, future, future);
+      }
+      await harness.manager.sweepTranscriptWatch();
+      await harness.manager.flush();
+      expect(harness.manager.getAgent(agent.id)?.activeSubagents).toBe(2);
+
+      // A reload is not a stop: the subagents keep running, so the rebuilt
+      // agent and the registry row must both still carry the count.
+      const reloaded = await harness.manager.reloadAgentSession(agent.id);
+      await harness.manager.flush();
+      expect(reloaded.activeSubagents).toBe(2);
+      expect(harness.manager.getAgent(agent.id)?.activeSubagents).toBe(2);
+      expect((await harness.storage.get(agent.id))?.activeSubagents).toBe(2);
     } finally {
       harness.cleanup();
     }

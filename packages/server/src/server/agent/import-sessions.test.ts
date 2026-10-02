@@ -1,5 +1,13 @@
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
-import { mkdirSync, mkdtempSync, realpathSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import {
+  mkdirSync,
+  mkdtempSync,
+  realpathSync,
+  rmSync,
+  symlinkSync,
+  utimesSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import type {
@@ -26,6 +34,10 @@ import {
   normalizeImportAgentRequest,
   normalizeProviderSessionDisplayCwd,
 } from "./import-sessions.js";
+import {
+  TranscriptWatchService,
+  type TranscriptWatchCandidate,
+} from "./transcript-watch-service.js";
 
 const directorySymlinkType = process.platform === "win32" ? "junction" : "dir";
 const importTestDirectories: string[] = [];
@@ -1619,22 +1631,29 @@ test("importProviderSession requires cwd from the selected provider row", async 
   );
 });
 
-// B9-SUBACT (F31 ruling B+, card §5): the import screen's 子行实况. A child
-// transcript of an OBSERVED agent answers from the transcript watcher — replacing
-// the scan's mtime estimate in BOTH directions — while everything the watcher has
-// no verdict for (unobserved parents, post-scan arrivals, other providers, and a
-// manager without the channel at all) keeps the estimate.
+// B9-SUBACT (F31 ruling B+, card §5) + B9-05 (REVIEW-B9-05, ruling A): the
+// import screen's 子行实况. The watcher's verdict replaces the scan's mtime
+// estimate only where it is the FRESHER answer: a positive verdict lights a
+// dark row, and a negative one goes dark only when the estimate is not already
+// positive — mtime is monotonic, so a cached scan can never out-vote a write
+// the list's own scan just saw. Everything the watcher has no verdict for
+// (unobserved parents, post-scan arrivals, other providers, and a manager
+// without the channel at all) keeps the estimate.
 test("listImportableProviderSessions overlays the watcher's live verdict on observed omp children", async () => {
   const childLive = "/tmp/omp-sessions/parent/Explore.jsonl";
   const childQuiet = "/tmp/omp-sessions/parent/Worker.jsonl";
+  const childDecayed = "/tmp/omp-sessions/parent/Old.jsonl";
   const childUnwatched = "/tmp/omp-sessions/other/Late.jsonl";
   const claudeChild = "/tmp/claude-sessions/parent/Explore.jsonl";
   const rows: Array<{ handle: string; provider: string; estimate: boolean }> = [
     // Stale by mtime, LIVE by the watcher: the 可能活跃 chip must light up.
     { handle: childLive, provider: "omp", estimate: false },
-    // Fresh by mtime, quiet by the watcher (the subagent finished): the chip
-    // must go dark — replacing the estimate is the whole point.
+    // Fresh by mtime, quiet by the watcher's CACHED scan: the write landed
+    // after that scan, so the fresher estimate wins (B9-05: the chip stays lit).
     { handle: childQuiet, provider: "omp", estimate: true },
+    // Quiet by BOTH sources — the honest decay: the overlay applies and the
+    // chip goes dark (ruling A never blocks the decay's goes-dark path).
+    { handle: childDecayed, provider: "omp", estimate: false },
     // Under an UNOBSERVED parent (verdict null): the estimate stands.
     { handle: childUnwatched, provider: "omp", estimate: true },
     // No child layout outside omp: never consulted, estimate stands.
@@ -1643,6 +1662,7 @@ test("listImportableProviderSessions overlays the watcher's live verdict on obse
   const verdicts: Record<string, boolean | null> = {
     [childLive]: true,
     [childQuiet]: false,
+    [childDecayed]: false,
   };
   const listing = async () =>
     makeImportableSessionsResult(
@@ -1673,7 +1693,8 @@ test("listImportableProviderSessions overlays the watcher's live verdict on obse
   });
   const byHandle = new Map(overlaid.entries.map((entry) => [entry.providerHandleId, entry]));
   expect(byHandle.get(childLive)?.looksActive).toBe(true);
-  expect(byHandle.get(childQuiet)?.looksActive).toBe(false);
+  expect(byHandle.get(childQuiet)?.looksActive).toBe(true);
+  expect(byHandle.get(childDecayed)?.looksActive).toBe(false);
   expect(byHandle.get(childUnwatched)?.looksActive).toBe(true);
   expect(byHandle.get(claudeChild)?.looksActive).toBe(true);
 
@@ -1683,5 +1704,106 @@ test("listImportableProviderSessions overlays the watcher's live verdict on obse
     ...base,
     agentManager: { listAgents: () => [], listImportableSessions: listing },
   });
-  expect(estimated.entries.map((entry) => entry.looksActive)).toEqual([false, true, true, true]);
+  expect(estimated.entries.map((entry) => entry.looksActive)).toEqual([
+    false,
+    true,
+    false,
+    true,
+    true,
+  ]);
+});
+
+// B9-05 (REVIEW-B9-05, ruling A) at the real seam: a genuine watcher whose
+// last scan cached the child STALE, then the child wakes back up, then the
+// import list runs its own (fresher) scan. The cached negative verdict must
+// not darken the freshly-written row — pre-fix this exact shape showed a
+// running subagent as idle for up to a full scan interval.
+test("a watcher scan older than the list scan cannot darken a freshly-written child (B9-05)", async () => {
+  const work = mkdtempSync(path.join(tmpdir(), "import-overlay-scan-lag-"));
+  const transcript = path.join(work, "sessions", "parent.jsonl");
+  mkdirSync(path.dirname(transcript), { recursive: true });
+  writeFileSync(
+    transcript,
+    `${JSON.stringify({ type: "session", id: "sess-lag", cwd: work, timestamp: "2026-10-02T00:00:00.000Z" })}\n`,
+  );
+  const childDir = transcript.slice(0, -".jsonl".length);
+  mkdirSync(childDir, { recursive: true });
+  const child = path.join(childDir, "Explore.jsonl");
+  writeFileSync(child, '{"type":"session","id":"sess-child"}\n');
+  const stale = Date.now() - 10 * 60 * 1000;
+  utimesSync(child, new Date(stale), new Date(stale));
+  utimesSync(transcript, new Date(stale), new Date(stale));
+
+  const candidate: TranscriptWatchCandidate = {
+    agentId: "agent-lag",
+    provider: "omp",
+    persistence: { provider: "omp", sessionId: "sess-lag", nativeHandle: transcript },
+    cwd: work,
+    baselineBytes: null,
+    updatedAtMs: Date.now(),
+    lastWriterSelf: false,
+  };
+  const service = new TranscriptWatchService({
+    logger: createTestLogger(),
+    statPollIntervalMs: 60 * 60 * 1000,
+    maxWatchers: 0,
+    attachThrottleMs: 0,
+    chainFollowIntervalMs: 0,
+    listCandidates: async () => [candidate],
+    onChange: async () => {},
+  });
+  try {
+    // The first scan caches the child stale…
+    await service.attach(candidate);
+    expect(service.subagentLiveState(child)).toBe(false);
+
+    // …then the subagent wakes back up, and the list's own scan (which runs
+    // after the touch) estimates the row fresh.
+    const now = new Date();
+    utimesSync(child, now, now);
+    const session = makeImportableSession({
+      provider: "omp",
+      sessionId: child,
+      nativeHandle: child,
+      lastActivityAt: now.toISOString(),
+    });
+    session.looksActive = true;
+
+    const overlaid = await listImportableProviderSessions({
+      request: makeRequest({ limit: 10 }),
+      agentStorage: { list: async () => [] },
+      providerSnapshotManager: { getProviderLabel: (provider: string) => provider },
+      agentManager: {
+        listAgents: () => [],
+        listImportableSessions: async () => makeImportableSessionsResult([session]),
+        subagentLiveState: (transcriptPath: string) => service.subagentLiveState(transcriptPath),
+      },
+    });
+    expect(overlaid.entries[0]?.looksActive).toBe(true);
+
+    // The other direction still holds: with no new sweep the watcher's cache
+    // still says stale, and an estimate that agrees with it goes dark — the
+    // decay's goes-dark path is untouched by ruling A.
+    const relapsed = makeImportableSession({
+      provider: "omp",
+      sessionId: child,
+      nativeHandle: child,
+      lastActivityAt: new Date(stale).toISOString(),
+    });
+    relapsed.looksActive = false;
+    const dark = await listImportableProviderSessions({
+      request: makeRequest({ limit: 10 }),
+      agentStorage: { list: async () => [] },
+      providerSnapshotManager: { getProviderLabel: (provider: string) => provider },
+      agentManager: {
+        listAgents: () => [],
+        listImportableSessions: async () => makeImportableSessionsResult([relapsed]),
+        subagentLiveState: (transcriptPath: string) => service.subagentLiveState(transcriptPath),
+      },
+    });
+    expect(dark.entries[0]?.looksActive).toBe(false);
+  } finally {
+    service.stop();
+    rmSync(work, { recursive: true, force: true });
+  }
 });

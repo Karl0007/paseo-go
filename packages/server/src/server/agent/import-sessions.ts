@@ -233,15 +233,18 @@ export async function listImportableProviderSessions(
       // providers spell one directory several ways, so fold it here — the handle,
       // the claim keys and the dedup key above are deliberately untouched.
       payload.cwd = normalizeProviderSessionDisplayCwd(payload.cwd);
-      // B9-SUBACT (F31 B+, card §5): a child transcript of an OBSERVED agent
-      // answers with what the watcher saw, not with what mtime guessed — the
-      // import screen's 「可能活跃」 on 子行 becomes the live subagent truth (and
-      // goes dark on its decay). `null` = nobody watches this parent, or the
-      // child landed after the last scan: the scan's own estimate stands, since
-      // an unobserved session has no live answer to give.
+      // B9-SUBACT (F31 B+, card §5) + B9-05 (REVIEW-B9-05, ruling A): a child
+      // transcript of an OBSERVED agent answers with what the watcher saw — but
+      // the overlay is ONE-DIRECTIONAL. The watcher's `writes` cache is as-of
+      // its last scan; a child written AFTER that scan reads stale=false there
+      // while this list's own scan estimates fresh=true, and mtime is monotonic
+      // (watcher=true ⇒ estimate=true), so a negative verdict is the one answer
+      // never fresher than a positive estimate and must not override it. Decay
+      // still goes dark: with no new write both sources compute the same value
+      // from the same mtime.
       if (descriptor.provider === "omp" && payload.looksActive !== undefined) {
         const live = agentManager.subagentLiveState?.(descriptor.providerHandleId);
-        if (live !== null && live !== undefined) {
+        if (live === true || (live === false && payload.looksActive !== true)) {
           payload.looksActive = live;
         }
       }

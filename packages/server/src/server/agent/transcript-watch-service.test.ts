@@ -2,6 +2,7 @@ import {
   appendFileSync,
   mkdirSync,
   mkdtempSync,
+  renameSync,
   rmSync,
   statSync,
   utimesSync,
@@ -146,6 +147,14 @@ function createHarness(
      * with the production default.
      */
     chainFollowIntervalMs?: number;
+    /** B9-01: the candidate's last-writer fact; default false = discovery attach. */
+    lastWriterSelf?: boolean;
+    /** B9-02: the count the caller's projection carries into attach. */
+    activeSubagents?: number;
+    /** B9-04: a caller whose report handling throws, to pin the retry. */
+    onChange?: (change: TranscriptChange) => Promise<void>;
+    /** B9-15: stat budget for one child-tree scan. */
+    maxSubagentTreeStats?: number;
   } = {},
 ): Harness {
   const file = join(work, "sessions", "--proj--", "2026-09-30_uuid.jsonl");
@@ -165,6 +174,8 @@ function createHarness(
     cwd: work,
     baselineBytes: input.baselineBytes ?? null,
     updatedAtMs: Date.now(),
+    lastWriterSelf: input.lastWriterSelf ?? false,
+    ...(input.activeSubagents !== undefined ? { activeSubagents: input.activeSubagents } : {}),
   };
 
   const recorder = new ChangeRecorder();
@@ -177,8 +188,9 @@ function createHarness(
     // No inter-attach gap: these tests assert the batch, not the wall clock.
     attachThrottleMs: 0,
     chainFollowIntervalMs: input.chainFollowIntervalMs ?? 0,
+    maxSubagentTreeStats: input.maxSubagentTreeStats,
     listCandidates: input.candidates ?? (async () => [candidate]),
-    onChange: recorder.push,
+    onChange: input.onChange ?? recorder.push,
     onAttached: input.onAttached,
   });
   services.push(service);
@@ -380,6 +392,7 @@ describe("startup discovery batch (B6-OWN-HEAL)", () => {
       cwd: work,
       baselineBytes: null,
       updatedAtMs,
+      lastWriterSelf: false,
     };
   }
 
@@ -1104,5 +1117,213 @@ describe("subagent tree observation (B9-SUBACT)", () => {
     expect(migration.activeSubagents).toBe(1);
     expect(harness.service.subagentLiveState(join(newDir, "Worker.jsonl"))).toBe(true);
     expect(harness.service.subagentLiveState(join(oldDir, "Explore.jsonl"))).toBeNull();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// B9-REVIEW-G1 (batch-9 review, cards 01/02/04/15): the tree channel's attach
+// baseline, the cross-entry count seed, the pending-report debt, and the nested
+// level. The card shapes: a daemon that ran its own subagents must NOT be told
+// it hosts a stranger (01); a caller that said 3 must hear 3 → 0 (02); a move
+// observed under a failed leaf stat must still be delivered exactly once (04);
+// and `<parentStem>/<Child>/Grand.jsonl` must count, to a depth and stat budget
+// (15).
+// ---------------------------------------------------------------------------
+
+describe("subagent tree attach baseline, seed and pending reports (B9-01/02/04)", () => {
+  /** Where omp writes this session's children: `<parentStem>/`. */
+  function childDirOf(harness: Harness): string {
+    return harness.file.slice(0, -".jsonl".length);
+  }
+
+  function childTranscript(harness: Harness, name: string, mtimeMs?: number): string {
+    mkdirSync(childDirOf(harness), { recursive: true });
+    const file = join(childDirOf(harness), name);
+    writeFileSync(file, ompLine("assistant", `${name} work`, name));
+    if (mtimeMs !== undefined) {
+      utimesSync(file, new Date(mtimeMs), new Date(mtimeMs));
+    }
+    return file;
+  }
+
+  it("seeds a self-written session's fresh tree silently; only post-floor moves report (B9-01)", async () => {
+    const harness = createHarness({ maxWatchers: 0, lastWriterSelf: true });
+    // The turn this daemon just ran spawned this child: fresh at attach, the
+    // exact false-positive trigger of the card. The 2s-past mtime keeps it
+    // unambiguously under the attach floor whatever the clock granularity.
+    const own = childTranscript(harness, "Explore.jsonl", Date.now() - 2_000);
+    await harness.service.attach(harness.candidate);
+    expect(harness.recorder.changes).toEqual([]);
+    await harness.service.sweep();
+    expect(harness.recorder.changes).toEqual([]);
+
+    // Its decay is equally silent: it was never in the count.
+    const stale = Date.now() - LOOKS_ACTIVE_MTIME_WINDOW_MS - 60_000;
+    utimesSync(own, new Date(stale), new Date(stale));
+    await harness.service.sweep();
+    expect(harness.recorder.changes).toEqual([]);
+
+    // A stranger spawning AFTER the floor is foreign evidence. The utimes puts
+    // the write past the attach moment without sleeping on the wall clock.
+    const foreign = childTranscript(harness, "Worker.jsonl");
+    const past = new Date(Date.now() + 10_000);
+    utimesSync(foreign, past, past);
+    await harness.service.sweep();
+    const [change] = await harness.recorder.waitFor(1);
+    expect(change.items).toEqual([]);
+    expect(change.activeSubagents).toBe(1);
+    expect(change.externalLooksActive).toBe(true);
+  });
+
+  it("keeps a discovery attach's live-evidence posture for the same fresh tree (B9-01)", async () => {
+    // The restart case the card says must NOT regress: nobody this daemon knows
+    // wrote the transcript, so an active tree is somebody else running.
+    const harness = createHarness({ maxWatchers: 0 });
+    childTranscript(harness, "Explore.jsonl");
+    await harness.service.attach(harness.candidate);
+    const [change] = await harness.recorder.waitFor(1);
+    expect(change.activeSubagents).toBe(1);
+    expect(change.externalLooksActive).toBe(true);
+  });
+
+  it("seeds the caller's count so a decayed tree speaks 3 → 0 at attach (B9-02)", async () => {
+    const harness = createHarness({ maxWatchers: 0, activeSubagents: 3 });
+    const stale = Date.now() - LOOKS_ACTIVE_MTIME_WINDOW_MS - 60_000;
+    for (const name of ["A.jsonl", "B.jsonl", "C.jsonl"]) {
+      childTranscript(harness, name, stale);
+    }
+    // The parent equally stale: the decayed report's probe (freshness on POSIX,
+    // the handle answer on Windows) must settle idle on every platform.
+    utimesSync(harness.file, new Date(stale), new Date(stale));
+
+    await harness.service.attach(harness.candidate);
+    const [decay] = await harness.recorder.waitFor(1);
+    expect(decay.items).toEqual([]);
+    expect(decay.activeSubagents).toBe(0);
+    expect(decay.externalLooksActive).toBe(false);
+
+    // One report, not a per-sweep loop.
+    await harness.service.sweep();
+    await harness.service.sweep();
+    expect(harness.recorder.changes).toHaveLength(1);
+  });
+
+  it("stays silent when the seeded count still matches the live tree (B9-02)", async () => {
+    // The caller already projected 2; re-attaching onto the same live tree must
+    // not re-report it — that would double-speak across every entry churn.
+    const harness = createHarness({ maxWatchers: 0, activeSubagents: 2 });
+    childTranscript(harness, "A.jsonl");
+    childTranscript(harness, "B.jsonl");
+    await harness.service.attach(harness.candidate);
+    expect(harness.recorder.changes).toEqual([]);
+  });
+
+  it("keeps the zero-report posture for a legacy caller with a stale tree (B9-02)", async () => {
+    // No seed (a pre-B9 record) + a quiet tree: `undefined → 0` still says nothing.
+    const harness = createHarness({ maxWatchers: 0 });
+    const stale = Date.now() - LOOKS_ACTIVE_MTIME_WINDOW_MS - 60_000;
+    childTranscript(harness, "A.jsonl", stale);
+    await harness.service.attach(harness.candidate);
+    expect(harness.recorder.changes).toEqual([]);
+  });
+
+  it("pays a tree move swallowed by a leaf stat failure on the next tick, once (B9-04)", async () => {
+    const harness = createHarness({ maxWatchers: 0 });
+    await harness.service.attach(harness.candidate);
+    childTranscript(harness, "Explore.jsonl");
+    // The same tick loses the leaf: the scan already consumed its gate, and the
+    // pre-fix `return` dropped the move it had just computed.
+    renameSync(harness.file, `${harness.file}.gone`);
+    await harness.service.sweep();
+    expect(harness.recorder.changes).toEqual([]);
+
+    renameSync(`${harness.file}.gone`, harness.file);
+    await harness.service.sweep();
+    const changes = await harness.recorder.waitFor(1);
+    expect(changes).toHaveLength(1);
+    expect(changes[0]?.activeSubagents).toBe(1);
+    expect(changes[0]?.items).toEqual([]);
+
+    // Delivered, not double-delivered.
+    await harness.service.sweep();
+    await harness.service.sweep();
+    expect(harness.recorder.changes).toHaveLength(1);
+  });
+
+  it("retries a tree report the caller threw at, exactly once when it lands (B9-04)", async () => {
+    const delivered: TranscriptChange[] = [];
+    let rejectNext = true;
+    const harness = createHarness({
+      maxWatchers: 0,
+      onChange: async (change) => {
+        if (rejectNext) {
+          rejectNext = false;
+          throw new Error("caller storage down");
+        }
+        delivered.push(change);
+      },
+    });
+    await harness.service.attach(harness.candidate);
+    childTranscript(harness, "Explore.jsonl");
+    await harness.service.sweep();
+    expect(delivered).toEqual([]); // the throw swallowed nothing permanently
+    await harness.service.sweep();
+    expect(delivered).toHaveLength(1);
+    expect(delivered[0]?.activeSubagents).toBe(1);
+    await harness.service.sweep();
+    expect(delivered).toHaveLength(1);
+  });
+});
+
+describe("nested subagent tree (B9-15)", () => {
+  function childDirOf(harness: Harness): string {
+    return harness.file.slice(0, -".jsonl".length);
+  }
+
+  it("counts grandchildren one level down, capped at depth 2", async () => {
+    const harness = createHarness({ maxWatchers: 0 });
+    await harness.service.attach(harness.candidate);
+    // The spawn shape history-mapper.test.ts pins: <parentStem>/<Child>/Grand.jsonl.
+    const nested = join(childDirOf(harness), "Explore");
+    mkdirSync(join(nested, "Deeper"), { recursive: true });
+    writeFileSync(join(nested, "Nested.jsonl"), ompLine("assistant", "grandchild", "g1"));
+    writeFileSync(join(nested, "Deeper", "Deep.jsonl"), ompLine("assistant", "depth 3", "g2"));
+    await harness.service.sweep();
+
+    const changes = harness.recorder.changes;
+    expect(changes).toHaveLength(1);
+    // The grandchild counts; the depth-3 file under it does not — depth 2 is
+    // the cap, and deeper falls back to the import screen's mtime estimate.
+    expect(changes[0]?.activeSubagents).toBe(1);
+    expect(changes[0]?.externalLooksActive).toBe(true);
+    expect(harness.service.subagentLiveState(join(nested, "Nested.jsonl"))).toBe(true);
+    expect(harness.service.subagentLiveState(join(nested, "Deeper", "Deep.jsonl"))).toBeNull();
+  });
+
+  it("bounds one scan by the stat budget", async () => {
+    const harness = createHarness({ maxWatchers: 0, maxSubagentTreeStats: 4 });
+    await harness.service.attach(harness.candidate);
+    const dir = childDirOf(harness);
+    mkdirSync(dir, { recursive: true });
+    for (let index = 0; index < 10; index += 1) {
+      writeFileSync(
+        join(dir, `C${index}.jsonl`),
+        ompLine("assistant", `child ${index}`, `c${index}`),
+      );
+    }
+    await harness.service.sweep();
+
+    const changes = harness.recorder.changes;
+    expect(changes).toHaveLength(1);
+    // Every stat'd child is fresh, so the count is exactly the budget whatever
+    // order readdir returns — and the scan stopped there.
+    expect(changes[0]?.activeSubagents).toBe(4);
+    let answered = 0;
+    for (let index = 0; index < 10; index += 1) {
+      if (harness.service.subagentLiveState(join(dir, `C${index}.jsonl`)) !== null) {
+        answered += 1;
+      }
+    }
+    expect(answered).toBe(4);
   });
 });

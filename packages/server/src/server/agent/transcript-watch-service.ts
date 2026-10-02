@@ -1,6 +1,6 @@
 import { watch } from "node:fs";
 import { open, readdir, stat } from "node:fs/promises";
-import type { FSWatcher } from "node:fs";
+import type { Dirent, FSWatcher } from "node:fs";
 import path from "node:path";
 import type { Logger } from "pino";
 
@@ -118,6 +118,25 @@ export interface TranscriptWatchCandidate {
   baselineBytes: number | null;
   /** Record `updatedAt` in ms; drives {@link WATCH_RETENTION_MS}. */
   updatedAtMs: number;
+  /**
+   * B9-01 (REVIEW-B9-01): the last writer of this transcript is the CALLING
+   * daemon — a live-idle agent between turns, or a session this daemon just
+   * released. Attach then floors the child tree at the attach moment, the same
+   * silent baseline the byte cursor gets: children already fresh at the first
+   * scan are the daemon's own subagent work, and only writes past the floor
+   * are foreign evidence. False = discovery attach (a restart, or a release
+   * this daemon never wrote): the last writer is unknown, so an active tree
+   * stays live evidence.
+   */
+  lastWriterSelf: boolean;
+  /**
+   * B9-02 (REVIEW-B9-02): the tree count the caller last projected for this
+   * agent (the persisted record / the live badge). Attach seeds the entry with
+   * it, so the `undefined → 0` first-scan silence only holds when the caller
+   * never spoke either: a record that said 3 must hear 3 → 0 when its children
+   * all went stale while no entry existed.
+   */
+  activeSubagents?: number;
 }
 
 export interface TranscriptChange {
@@ -183,6 +202,13 @@ export interface TranscriptWatchServiceOptions {
    * every silent check (tests). See {@link DEFAULT_CHAIN_FOLLOW_INTERVAL_MS}.
    */
   chainFollowIntervalMs?: number;
+  /**
+   * B9-15 (REVIEW-B9-15): stat budget for ONE child-tree scan — first-level
+   * children plus one nested level. A scan that hits the cap stops counting
+   * children it never stat'd: they stay unknown (uncounted, and the import
+   * overlay answers null so the scan's own estimate stands).
+   */
+  maxSubagentTreeStats?: number;
 }
 
 interface WatchEntry {
@@ -240,6 +266,20 @@ interface WatchEntry {
    * landed after it, and the mtime estimate is the honest answer for that one.
    */
   subagentWrites: Map<string, number> | null;
+  /**
+   * B9-01 (REVIEW-B9-01): the self-write floor. Child mtimes at or below this
+   * line are the daemon's own subagent work (attach floored them because the
+   * candidate declared `lastWriterSelf`); 0 = discovery attach, no floor.
+   */
+  subagentFloorMs: number;
+  /**
+   * B9-04 (REVIEW-B9-04): a tree move was observed but no report carrying it
+   * has landed yet — a leaf stat failed, or `onChange` threw after the scan
+   * gate was already consumed. The next tick delivers it even when the gate
+   * skips the scan; every successful report clears it. Never twice, never
+   * swallowed.
+   */
+  pendingTreeReport: boolean;
 }
 
 export class TranscriptWatchService {
@@ -252,6 +292,8 @@ export class TranscriptWatchService {
   /** B8-WATCH (F28): see {@link DEFAULT_CHAIN_FOLLOW_INTERVAL_MS}. */
   private readonly chainFollowIntervalMs: number;
   private readonly chainFollowChaseIntervalMs: number;
+  /** B9-15 (REVIEW-B9-15): see {@link TranscriptWatchServiceOptions.maxSubagentTreeStats}. */
+  private readonly maxSubagentTreeStats: number;
   private readonly env: NodeJS.ProcessEnv;
   private readonly listCandidates: () => Promise<TranscriptWatchCandidate[]>;
   private readonly onChange: (change: TranscriptChange) => Promise<void>;
@@ -288,6 +330,7 @@ export class TranscriptWatchService {
       CHAIN_FOLLOW_CHASE_INTERVAL_MS,
       this.chainFollowIntervalMs,
     );
+    this.maxSubagentTreeStats = options.maxSubagentTreeStats ?? MAX_SUBAGENT_TREE_STATS;
     this.env = options.env ?? process.env;
     this.listCandidates = options.listCandidates;
     this.onChange = options.onChange;
@@ -385,13 +428,19 @@ export class TranscriptWatchService {
       // The walk above is this entry's first one.
       lastChainFollowMs: Date.now(),
       lastGrowthMs: 0,
-      // B9-SUBACT: cold tree state — the first `check` scans the child directory
-      // (an active subagent at attach time is live evidence worth reporting even
-      // when the main transcript needs only a silent baseline).
+      // B9-SUBACT + B9-01/B9-02: cold tree state. A discovery attach scans the
+      // child directory at full freshness (an active subagent at attach time is
+      // live evidence worth reporting even when the main transcript needs only
+      // a silent baseline); a session this daemon last wrote instead gets the
+      // SAME baseline the byte cursor has — the floor retires the daemon's own
+      // fresh children — and the caller's last reported count rides in as the
+      // seed the first scan diffs against.
       lastSubagentScanMs: 0,
-      subagentCount: undefined,
+      subagentCount: candidate.activeSubagents,
+      subagentFloorMs: candidate.lastWriterSelf ? Date.now() : 0,
       subagentDirKey: null,
       subagentWrites: null,
+      pendingTreeReport: false,
     };
     this.entries.set(candidate.agentId, entry);
     this.acquireWatcherSlot(entry);
@@ -673,7 +722,11 @@ export class TranscriptWatchService {
    * B9-SUBACT: the child-tree scan rides the same tick (its own two-tier gate
    * inside {@link observeSubagentTree}). A count move is observable on its own —
    * the caller escalates it exactly like foreign bytes — so a silent leaf with a
-   * changed tree reports instead of returning.
+   * changed tree reports instead of returning. B9-04 (REVIEW-B9-04): the move
+   * becomes ENTRY state the moment the scan observes it, and only a report that
+   * actually landed clears it — an early return (leaf stat failure) or a throwing
+   * `onChange` after the gate was consumed owes the caller one delivery, paid on
+   * the next tick even when the gate skips the scan.
    */
   private async check(agentId: string): Promise<void> {
     const entry = this.entries.get(agentId);
@@ -687,6 +740,9 @@ export class TranscriptWatchService {
       if (this.entries.get(agentId) !== entry) {
         return;
       }
+      if (subagent?.changed) {
+        entry.pendingTreeReport = true;
+      }
       let size = await statTranscriptBytes(entry.transcriptPath);
       if (size === null) {
         return;
@@ -694,9 +750,13 @@ export class TranscriptWatchService {
       if (entry.cursor === null) {
         entry.cursor = entry.chainBaseBytes + size;
         // First observation: the main rows are paseo's own history (silent
-        // baseline), but an ACTIVE child tree is live evidence either way.
-        if (subagent?.changed && subagent.count > 0) {
+        // baseline). The tree reports any OBSERVABLE move: fresh children under
+        // a session nobody wrote are live evidence, a self-written session's own
+        // children sit under the attach floor (B9-01), and a seeded count
+        // decaying to 0 (B9-02) says as much as a child appearing.
+        if (entry.pendingTreeReport) {
           await this.reportSubagentActivity(entry);
+          entry.pendingTreeReport = false;
         }
         return;
       }
@@ -718,8 +778,9 @@ export class TranscriptWatchService {
           }
         }
         if (entry.chainBaseBytes + size === entry.cursor) {
-          if (subagent?.changed) {
+          if (entry.pendingTreeReport) {
             await this.reportSubagentActivity(entry);
+            entry.pendingTreeReport = false;
           }
           return;
         }
@@ -736,6 +797,8 @@ export class TranscriptWatchService {
         externalLooksActive,
         ...(entry.subagentCount !== undefined ? { activeSubagents: entry.subagentCount } : {}),
       });
+      // The byte report carried the tree state with it — the debt is paid.
+      entry.pendingTreeReport = false;
     } catch (error) {
       this.logger.warn(
         { err: error, agentId, transcriptPath: entry.transcriptPath },
@@ -775,8 +838,17 @@ export class TranscriptWatchService {
    * B9-SUBACT: the ungated scan body — readdir the child directory and stat every
    * `*.jsonl` (the chain-tail discipline carried over: stats only, ZERO header
    * reads, so the flood B9-WATCH2 measured in production — 62 children under one
-   * session — costs 62 stats, not 62 parses). Updates the entry's tree state in
-   * place and reports whether the count moved observably.
+   * session — costs 62 stats, not 62 parses). B9-15 (REVIEW-B9-15): one nested
+   * level is scanned too — a child agent that spawns its own writes
+   * `<parentStem>/<Child>/Grand.jsonl` — and depth 2 is the cap: directories
+   * below that fall back to the import screen's mtime estimate. The whole scan
+   * is bounded by {@link TranscriptWatchServiceOptions.maxSubagentTreeStats}
+   * stats, first level before nested, so a budget can only ever trade
+   * grandchildren for observed children, never the reverse. A child counts as
+   * active when it is BOTH fresh and past the self-write floor (B9-01: children
+   * at or below the floor are the daemon's own turn's work — never foreign
+   * evidence, and their decay never moves the count). Updates the entry's tree
+   * state in place and reports whether the count moved observably.
    */
   private async refreshSubagentTree(
     entry: WatchEntry,
@@ -786,9 +858,9 @@ export class TranscriptWatchService {
       return null;
     }
     const dirKey = sessionPathKey(dir);
-    let names: string[];
+    let names: Dirent[];
     try {
-      names = await readdir(dir);
+      names = await readdir(dir, { withFileTypes: true });
     } catch (error) {
       // ENOENT/ENOTDIR = no child directory: this session never spawned — a
       // scanned-quiet tree, and an observed parent whose child rows the import
@@ -810,20 +882,66 @@ export class TranscriptWatchService {
     const now = Date.now();
     const writes = new Map<string, number>();
     let count = 0;
-    for (const name of names) {
-      if (!name.endsWith(".jsonl")) {
-        continue;
+    let stats = 0;
+    // One child transcript: stat it, remember its mtime for the import overlay
+    // (writer-agnostic: the overlay answers 「is this row live」, not 「who
+    // wrote it」), and count it only when it is foreign evidence. Returns false
+    // when the budget was already exhausted and the caller must stop.
+    const consider = async (file: string): Promise<boolean> => {
+      if (stats >= this.maxSubagentTreeStats) {
+        return false;
       }
-      const file = path.join(dir, name);
+      stats += 1;
       try {
         const info = await stat(file);
         writes.set(sessionPathKey(file), info.mtimeMs);
-        if (now - info.mtimeMs < LOOKS_ACTIVE_MTIME_WINDOW_MS) {
+        if (
+          now - info.mtimeMs < LOOKS_ACTIVE_MTIME_WINDOW_MS &&
+          info.mtimeMs - entry.subagentFloorMs > SELF_WRITE_FLOOR_SLACK_MS
+        ) {
           count += 1;
         }
       } catch {
         // Vanished between readdir and stat: not a live child, and not a tree
         // the import overlay should claim to have seen.
+      }
+      return true;
+    };
+    // `!isDirectory()` (not `isFile()`): a readdir whose entries carry no type
+    // information still gets its `.jsonl` rows stat'd, exactly as before B9-15.
+    for (const name of names) {
+      if (!name.isDirectory() && name.name.endsWith(".jsonl")) {
+        if (!(await consider(path.join(dir, name.name)))) {
+          break;
+        }
+      }
+    }
+    for (const name of names) {
+      if (!name.isDirectory()) {
+        continue;
+      }
+      if (stats >= this.maxSubagentTreeStats) {
+        break;
+      }
+      let nested: string[];
+      try {
+        nested = await readdir(path.join(dir, name.name));
+      } catch {
+        continue; // vanished, or not a spawn directory after all
+      }
+      let exhausted = false;
+      for (const grand of nested) {
+        // Depth 2 is the cap: directories inside `<Child>/` are never descended.
+        if (!grand.endsWith(".jsonl")) {
+          continue;
+        }
+        if (!(await consider(path.join(dir, name.name, grand)))) {
+          exhausted = true;
+          break;
+        }
+      }
+      if (exhausted) {
+        break;
       }
     }
     const previous = entry.subagentCount;
@@ -878,10 +996,13 @@ export class TranscriptWatchService {
    * B9-SUBACT (F31 B+, card §5): the watcher's live verdict for an omp CHILD
    * transcript, consumed by the import screen's descriptor overlay. `true`/`false`
    * = the child sits under an observed agent's directory and was (not) written
-   * inside the freshness window at the last scan — the scan's mtime estimate is
-   * replaced. `null` = nobody watches this child's parent, or it landed after the
-   * last scan, so the mtime estimate stands (an unobserved session has no live
-   * answer to give, and the overlay says so by staying out of it).
+   * inside the freshness window at the last scan — writer-agnostic (the self-write
+   * floor is a COUNT rule, not a freshness one), and as-of the last scan: the
+   * consumer applies it one-directionally, never letting this cached negative
+   * out-vote a fresher positive estimate (B9-05, ruling A). `null` = nobody
+   * watches this child's parent, or it landed after the last scan (or the stat
+   * budget never reached it), so the mtime estimate stands — an unobserved
+   * session has no live answer to give, and the overlay says so by staying out.
    */
   subagentLiveState(transcriptPath: string): boolean | null {
     const key = sessionPathKey(transcriptPath);
@@ -956,9 +1077,13 @@ export class TranscriptWatchService {
     // its subagents under the new session id, and the old tree is history. The
     // tree state is re-observed immediately (this path already paid for a
     // directory walk), so the change the caller emits for the migration carries
-    // the new tree's count, not the old leaf's.
+    // the new tree's count, not the old leaf's. B9-04: a move observed here is
+    // owed a report like any other — the byte report below usually pays it, but
+    // a stat failure on the new leaf must not swallow it.
     entry.lastSubagentScanMs = Date.now();
-    await this.refreshSubagentTree(entry);
+    if ((await this.refreshSubagentTree(entry))?.changed) {
+      entry.pendingTreeReport = true;
+    }
     if (entry.watcher) {
       // The fast path this entry already holds moves with it; no slot is taken
       // from or returned to another entry (R4-22 fairness is unaffected).
@@ -1083,10 +1208,28 @@ function subagentDirOf(transcriptPath: string): string | null {
 }
 
 /**
+ * B9-15 (REVIEW-B9-15): stat budget for ONE child-tree scan. The production
+ * flood B9-WATCH2 measured was 62 children under one session; 256 covers that
+ * with room for the nested level while keeping even a broken directory bounded
+ * on the chase cadence.
+ */
+const MAX_SUBAGENT_TREE_STATS = 256;
+
+/**
+ * B9-01 (REVIEW-B9-01): clock slack for the self-write floor. `Date.now()`
+ * truncates to the millisecond while mtimes keep sub-millisecond precision, so
+ * a child written in the SAME millisecond as the floor sits within slack of it
+ * — that is the daemon's own last write, not a stranger's first one.
+ */
+const SELF_WRITE_FLOOR_SLACK_MS = 1;
+
+/**
  * B9-SUBACT: a count move is observable when there is something it says: the
  * first scan of a quiet tree (undefined → 0) says nothing; a first scan that
  * finds live children says everything; and any later move — including the decay
- * back to 0 — says the badge must change.
+ * back to 0 — says the badge must change. B9-02: `previous` starts at the
+ * candidate's seeded count, so "undefined" means the CALLER never spoke either,
+ * not merely that no entry had scanned.
  */
 function subagentCountChanged(previous: number | undefined, count: number): boolean {
   return previous === undefined ? count > 0 : count !== previous;

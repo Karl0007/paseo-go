@@ -373,6 +373,13 @@ export interface AgentManagerOptions {
    * lost-event backstop.
    */
   transcriptStatPollIntervalMs?: number;
+  /**
+   * B9-REVIEW-G1 (test seam, same posture as `transcriptStatPollIntervalMs`):
+   * cadence for the watcher's resume-chain walk and child-tree scan. The
+   * production default (5min) is right for the daemon; manager-level tests of
+   * the tree channel must observe more than one scan per entry.
+   */
+  transcriptChainFollowIntervalMs?: number;
   logger: Logger;
 }
 
@@ -894,6 +901,7 @@ export class AgentManager {
       logger: this.logger,
       statPollIntervalMs:
         options.transcriptStatPollIntervalMs ?? DEFAULT_TRANSCRIPT_STAT_POLL_INTERVAL_MS,
+      chainFollowIntervalMs: options.transcriptChainFollowIntervalMs,
       listCandidates: () => this.listTranscriptWatchCandidates(),
       onChange: (change) => this.applyTranscriptChange(change),
       // R4-03: a discovery attach that establishes a baseline the record does
@@ -1719,6 +1727,10 @@ export class AgentManager {
         lastUsage: preservedLastUsage,
         lastError: preservedLastError,
         attention: preservedAttention,
+        // B9-11 (REVIEW-B9-11): the subagents do not stop running because the
+        // session was reloaded — carry the watcher's count into the new
+        // ManagedAgent (and its snapshot) instead of blinking the badge.
+        activeSubagents: existing.activeSubagents,
         restoring: true,
       });
     } catch (error) {
@@ -3608,6 +3620,12 @@ export class AgentManager {
       lastError?: string;
       attention?: AttentionState;
       /**
+       * B9-11 (REVIEW-B9-11): the watcher's last tree count, preserved across a
+       * reload — the subagents did not stop running because the session was
+       * refreshed, and the 「子任务×N」 badge must not blink out and back.
+       */
+      activeSubagents?: number;
+      /**
        * Bringing a known agent back, rather than starting a new one. Its timestamps and
        * attention come from what was already recorded, and installing the session is not
        * activity in it.
@@ -3837,6 +3855,8 @@ export class AgentManager {
           persistence?: AgentPersistenceHandle;
           workspaceId?: string;
           owner?: AgentOwner;
+          /** B9-11 (REVIEW-B9-11): preserved tree count; see registerSession. */
+          activeSubagents?: number;
         }
       | undefined;
   }): ActiveManagedAgent {
@@ -3882,6 +3902,10 @@ export class AgentManager {
       attention: resolveInitialAttention(options?.attention),
       internal: config.internal ?? false,
       labels: options?.labels ?? {},
+      // B9-11 (REVIEW-B9-11): the tree badge survives a reload — a refresh does
+      // not stop the subagents, and a blink to no-count would lie about them.
+      // `undefined` (every non-reload register) is the never-observed absence.
+      activeSubagents: options?.activeSubagents,
     } as ActiveManagedAgent;
   }
 
@@ -3992,6 +4016,12 @@ export class AgentManager {
         cwd: agent.cwd,
         baselineBytes: agent.ownership.baselineBytes,
         updatedAtMs: agent.updatedAt.getTime(),
+        // B9-01 (REVIEW-B9-01): this daemon just stopped writing — the tree's
+        // fresh set is its own turn's work, silent-seeded by the attach floor.
+        lastWriterSelf: true,
+        // B9-02 (REVIEW-B9-02): the badge the closed agent still carries is the
+        // seed the first scan diffs against.
+        ...(agent.activeSubagents !== undefined ? { activeSubagents: agent.activeSubagents } : {}),
       });
       if (attached === null) {
         // R4-27: a failed attach is not evidence that the provider has no
@@ -4077,6 +4107,9 @@ export class AgentManager {
           ? record.persistence.nativeHandle
           : undefined;
       const parsedUpdatedAt = Date.parse(record.updatedAt);
+      const seededActiveSubagents = live
+        ? live.activeSubagents
+        : (record.activeSubagents ?? undefined);
       candidates.push({
         agentId: record.id,
         provider: record.provider,
@@ -4092,6 +4125,16 @@ export class AgentManager {
           : (record.ownershipBaselineBytes ?? null),
         // An unparseable date must not silently disable observation forever.
         updatedAtMs: Number.isNaN(parsedUpdatedAt) ? Date.now() : parsedUpdatedAt,
+        // B9-01 (REVIEW-B9-01): a live agent is held by THIS daemon — its fresh
+        // children are the turn it just ran, so attach floors the tree. A
+        // released record is discovery: whoever wrote it last is not this
+        // process, and an active tree stays live evidence.
+        lastWriterSelf: live !== undefined,
+        // B9-02 (REVIEW-B9-02): the count the caller's projection still carries
+        // (the live badge, or the persisted record — `null` normalizes to "never
+        // reported") — the seed the first scan diffs against so a decay across
+        // the entry gap still speaks once.
+        ...(seededActiveSubagents !== undefined ? { activeSubagents: seededActiveSubagents } : {}),
       });
     }
     return candidates;
@@ -5269,6 +5312,11 @@ export class AgentManager {
     // bytes back and attribute them to a foreign writer.
     this.transcriptWatch.detach(agent.id);
     agent.ownership = ownershipOnAcquire(agent.ownership);
+    // B9-01 (REVIEW-B9-01): the watcher's count died with the entry; the
+    // projection dies with it, or a badge from before the acquire freezes at
+    // its last value — the re-attach's first scan only speaks on a move
+    // against the seed, and the seed is this field.
+    agent.activeSubagents = undefined;
     this.emitState(agent);
   }
 
@@ -5377,6 +5425,8 @@ export class AgentManager {
     // (or its provider process) is the writer from here on.
     this.transcriptWatch.detach(agent.id);
     agent.ownership = ownershipOnAcquire(agent.ownership);
+    // B9-01: same acquire-time badge clearing as turn_started.
+    agent.activeSubagents = undefined;
     this.recordAndDispatchTimelineItem(agent.id, item, agent.provider, options?.turnId, options);
   }
 
