@@ -26,7 +26,21 @@
 
 修复方向候选（拍板时选）：a) 导入屏加「已导入/已归档」**计数以服务端全量 claim 索引为准**（不依赖窗）+徽标仍只标窗内行；b) 分页/游标扩窗；c) 导入屏顶部加「共 N 个会话已是你的 agent」说明行消歧。
 
-## 拍板（待补）
+## 拍板（冻结 2026-10-02，用户「这波先修这些吧」）
+
+| #   | 裁定                                                                                              | 卡         |
+| --- | ------------------------------------------------------------------------------------------------- | ---------- |
+| F21 | 时间贴行右缘（微信右上灰字），pill 紧随标题，长标题截断不挤时间                                   | B8-ROWPILL |
+| F22 | pill 三态浅染色：原生=success 系/外部=warning 系/未知=中性石板，主题 token 双套禁硬编码 hex       | B8-ROWPILL |
+| F23 | 导入行版式对齐壳会话行；徽标优先级 已归档>已导入                                                  | B8-IMPORT  |
+| F24 | 方向 a+c：服务端响应加可选 claimedTotal（全量 claim 计数）+导入屏顶部消歧说明行；徽标仍只标窗内行 | B8-COUNT   |
+| F25 | replica-cache 白名单补两轴三键，round-trip 无损                                                   | B8-CACHE   |
+| F26 | 横滑线性环 [进行中→已归档→工作区→我的→循环]，前进=切右边页签手势，带动画（用户确认方向）          | B8-SWIPE   |
+| F27 | 全部堆叠页全宽手指右滑=返回；横向可滚内容豁免；左缘带兜底                                         | B8-SWIPE   |
+| F28 | watcher 顺 resume 链正向迁移（跟到新叶子文件），基线语义不回退                                    | B8-WATCH   |
+
+波次：W1 并行 ROWPILL/CACHE/WATCH（设备道序 ROWPILL>CACHE>WATCH）→ W2 IMPORT→COUNT → W3 SWIPE 独占 → review 轮 → 终态门禁 → **release go.11 + 生产切换**（F24/F28 涉服务端）。
+文件域核实：行=shell/components/chat-list-row.tsx；pill=shell/components/ownership-badge.tsx；导入屏=app/(detail)/import.tsx+shell/import/rows.ts；服务端=server/agent/import-sessions.ts、server/agent/transcript-watch-service.ts；手势=shell/chats/filter-swipe.ts、shell/session-header/edge-swipe.ts。
 
 - **F21 拍板方向**：行版式=标题(截断)+pill 紧随，**时间贴行右缘**（微信右上灰字范式），副标题行不动。
 - **F22 拍板方向**：三态=语义色浅染底+同系深字（原生绿/外部琥珀/未知石板灰），明暗主题双套，禁高饱和大块。
