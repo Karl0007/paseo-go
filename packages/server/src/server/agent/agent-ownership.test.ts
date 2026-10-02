@@ -1,6 +1,6 @@
 import { appendFileSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { describe, expect, it } from "vitest";
 
 import type { AgentSnapshotPayload } from "@getpaseo/protocol/messages";
@@ -1080,6 +1080,75 @@ describe("AgentManager live-idle transcript watching (B9-WATCH2, F33)", () => {
       expect(live?.ownership.externalLooksActive).toBe(false);
     } finally {
       if (agentId) await harness.manager.closeAgent(agentId).catch(() => undefined);
+      harness.cleanup();
+    }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// B9-SUBACT (F31 ruling B+): the tree contagion at the manager surface. An
+// active child directory must flip a released omp agent to `external`·running
+// and persist the badge count — without bumping `updatedAt` (a derived
+// observation never reorders the time-ordered list) — and the import overlay's
+// live answer must reach callers through the manager.
+// ---------------------------------------------------------------------------
+
+describe("AgentManager subagent-tree contagion (B9-SUBACT)", () => {
+  it("flips a released omp agent on an active child tree and persists the count", async () => {
+    const work = mkdtempSync(join(tmpdir(), "agent-ownership-subagent-tree-"));
+    const harness = createHarness(work);
+    try {
+      const transcript = join(work, "sessions", "parent.jsonl");
+      mkdirSync(dirname(transcript), { recursive: true });
+      writeFileSync(
+        transcript,
+        `${JSON.stringify({
+          type: "session",
+          id: "sess-sub",
+          cwd: work,
+          timestamp: "2026-10-02T00:00:00.000Z",
+        })}\n`,
+      );
+      const record: StoredAgentRecord = {
+        id: "agent-sub",
+        provider: "omp",
+        cwd: work,
+        createdAt: "2026-10-02T00:00:00.000Z",
+        updatedAt: "2026-10-02T00:00:00.000Z",
+        labels: {},
+        lastStatus: "closed",
+        config: null,
+        persistence: { provider: "omp", sessionId: "sess-sub", nativeHandle: transcript },
+      };
+      await harness.storage.upsert(record);
+
+      // omp's child layout: a directory named after the parent stem.
+      const childDir = transcript.slice(0, -".jsonl".length);
+      mkdirSync(childDir, { recursive: true });
+      const child = join(childDir, "Explore.jsonl");
+      writeFileSync(child, `${JSON.stringify({ type: "session", id: "sess-child", cwd: work })}\n`);
+
+      await harness.manager.sweepTranscriptWatch();
+      await harness.manager.flush();
+
+      const stored = await harness.storage.get("agent-sub");
+      expect(stored).not.toBeNull();
+      // Contagion (card §2): daemon writes nothing, the subtree grows → the pill
+      // answers 外部·运行中, and the count rides the record for the badge.
+      expect(stored?.ownership).toBe("external");
+      expect(stored?.externalLooksActive).toBe(true);
+      expect(stored?.activeSubagents).toBe(1);
+      // A derived observation must never reorder the time-ordered chat list.
+      expect(stored?.updatedAt).toBe(record.updatedAt);
+
+      // The badge input reaches the wire payload the shell reads.
+      expect(buildStoredAgentPayload(stored!, ["omp"]).activeSubagents).toBe(1);
+
+      // The import overlay answers live for the observed child, and stays out
+      // of everything else (the parent row keeps its own scan estimate).
+      expect(harness.manager.subagentLiveState(child)).toBe(true);
+      expect(harness.manager.subagentLiveState(transcript)).toBeNull();
+    } finally {
       harness.cleanup();
     }
   });

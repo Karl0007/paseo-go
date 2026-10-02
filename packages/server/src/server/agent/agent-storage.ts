@@ -92,6 +92,12 @@ const STORED_AGENT_SCHEMA = z.object({
   ownership: z.enum(["paseo", "external", "none"]).nullable().optional(),
   externalLooksActive: z.boolean().nullable().optional(),
   ownershipBaselineBytes: z.number().int().nonnegative().nullable().optional(),
+  // COMPAT(subagentActivity): added 2026-10-02 (Paseo Go B9-SUBACT, F31 B+). The
+  // watcher's live child-tree count for this agent, same derived-observation
+  // posture as the ownership trio above: persisted so a released agent's stored
+  // payload keeps its 「子任务×N」 badge between sweeps, absent for every record
+  // written before the build (and re-derived from the tree on the next scan).
+  activeSubagents: z.number().int().nonnegative().nullable().optional(),
   owner: AgentOwnerSchema.optional(),
 });
 

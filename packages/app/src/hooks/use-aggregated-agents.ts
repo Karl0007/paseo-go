@@ -110,6 +110,10 @@ export function useAggregatedAgents(options?: {
           // answer to the pill — the host never reported a birth — and this memo is
           // already at the complexity ceiling.
           origin: agent.origin,
+          // COMPAT(subagentActivity): Paseo Go B9-SUBACT — the row's 「子任务×N」
+          // badge reads this; as-is like `origin` (`undefined`/`null`/0 all mean
+          // "no badge", and `equal` keeps identity churn out of the memo).
+          activeSubagents: agent.activeSubagents,
         };
         const cacheKey = `${serverId}:${agent.id}`;
         const prev = prevAgentsRef.current.get(cacheKey);

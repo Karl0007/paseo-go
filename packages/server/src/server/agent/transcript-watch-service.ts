@@ -1,6 +1,7 @@
 import { watch } from "node:fs";
-import { open } from "node:fs/promises";
+import { open, readdir, stat } from "node:fs/promises";
 import type { FSWatcher } from "node:fs";
+import path from "node:path";
 import type { Logger } from "pino";
 
 import type {
@@ -15,7 +16,7 @@ import {
   statTranscriptBytes,
 } from "./provider-transcript.js";
 import { probeExternalTranscriptActivity } from "./transcript-activity-probe.js";
-import { resolveOmpResumeLeafChain } from "./providers/omp/session-descriptor.js";
+import { resolveOmpResumeLeafChain, sessionPathKey } from "./providers/omp/session-descriptor.js";
 
 /**
  * Paseo Go B4-OWNERSHIP (batch-4 F8, R3 + R2-lite): the transcript watcher.
@@ -46,6 +47,16 @@ import { resolveOmpResumeLeafChain } from "./providers/omp/session-descriptor.js
  * watcher therefore observes a CHAIN (the handle's file plus every descendant it has
  * followed), tails its leaf, and counts bytes cumulatively across it, so crossing
  * into the new file neither loses the writes there nor resets the ownership baseline.
+ *
+ * B9-SUBACT (F31 ruling B+): an omp session's SUBAGENTS are a second tree — their
+ * transcripts spawn into a directory named after the parent session
+ * (`<parentStem>/<agentName>.jsonl`), which the chain cursor can never see. The
+ * watch entry therefore also stats that directory on the same two-tier chase
+ * cadence as the resume walk (stats only, zero header reads): children written
+ * inside the freshness window are foreign work running under this session, which
+ * rides out as `activeSubagents` on every change and — with no main-transcript
+ * movement of its own — as a subagent-only change the caller escalates exactly
+ * like F33's live-idle foreign bytes.
  */
 
 /** Debounce window collapsing a burst of watcher events into one tail read. */
@@ -119,6 +130,14 @@ export interface TranscriptChange {
   baselineBytes: number;
   /** R4 signal: does the external writer still look alive? */
   externalLooksActive: boolean;
+  /**
+   * B9-SUBACT (F31 B+): child transcripts written inside the freshness window at
+   * the last tree scan. Absent = the provider has no child-transcript layout (or
+   * the tree has never been scanned); 0 = scanned and quiet. Subagent-only changes
+   * carry it with `items: []` — the count decaying to 0 is as observable as a
+   * child appearing, and the caller's badge must be able to clear.
+   */
+  activeSubagents?: number;
 }
 
 /** What `attach` learned: the transcript it now tails and the cursor it starts from. */
@@ -202,6 +221,25 @@ interface WatchEntry {
   lastChainFollowMs: number;
   /** Last byte of foreign work observed (decides the chase vs periodic cadence). */
   lastGrowthMs: number;
+  /**
+   * B9-SUBACT: last child-tree scan of this entry (drives the same two-tier cost
+   * gate as {@link lastChainFollowMs}; a scan is a readdir plus per-file stats,
+   * never a header read).
+   */
+  lastSubagentScanMs: number;
+  /**
+   * B9-SUBACT: children written inside the freshness window at the last scan.
+   * `undefined` = never scanned (the change omits the field); 0 = scanned quiet.
+   */
+  subagentCount: number | undefined;
+  /** B9-SUBACT: `sessionPathKey` of the scanned child directory, null before it. */
+  subagentDirKey: string | null;
+  /**
+   * B9-SUBACT: last scan's `sessionPathKey → mtimeMs` for every child transcript,
+   * the import screen's live-overlay answer (card §5) — a child the scan never saw
+   * landed after it, and the mtime estimate is the honest answer for that one.
+   */
+  subagentWrites: Map<string, number> | null;
 }
 
 export class TranscriptWatchService {
@@ -347,6 +385,13 @@ export class TranscriptWatchService {
       // The walk above is this entry's first one.
       lastChainFollowMs: Date.now(),
       lastGrowthMs: 0,
+      // B9-SUBACT: cold tree state — the first `check` scans the child directory
+      // (an active subagent at attach time is live evidence worth reporting even
+      // when the main transcript needs only a silent baseline).
+      lastSubagentScanMs: 0,
+      subagentCount: undefined,
+      subagentDirKey: null,
+      subagentWrites: null,
     };
     this.entries.set(candidate.agentId, entry);
     this.acquireWatcherSlot(entry);
@@ -624,6 +669,11 @@ export class TranscriptWatchService {
    * appended rows. A shrink (omp/pi self-repair their journal by truncating torn
    * lines) re-reads from byte 0: the writer rewrote the file, so everything it now
    * contains is evidence of an external writer.
+   *
+   * B9-SUBACT: the child-tree scan rides the same tick (its own two-tier gate
+   * inside {@link observeSubagentTree}). A count move is observable on its own —
+   * the caller escalates it exactly like foreign bytes — so a silent leaf with a
+   * changed tree reports instead of returning.
    */
   private async check(agentId: string): Promise<void> {
     const entry = this.entries.get(agentId);
@@ -633,12 +683,21 @@ export class TranscriptWatchService {
     entry.checking = true;
     entry.lastActiveMs = Date.now();
     try {
+      const subagent = await this.observeSubagentTree(entry);
+      if (this.entries.get(agentId) !== entry) {
+        return;
+      }
       let size = await statTranscriptBytes(entry.transcriptPath);
       if (size === null) {
         return;
       }
       if (entry.cursor === null) {
         entry.cursor = entry.chainBaseBytes + size;
+        // First observation: the main rows are paseo's own history (silent
+        // baseline), but an ACTIVE child tree is live evidence either way.
+        if (subagent?.changed && subagent.count > 0) {
+          await this.reportSubagentActivity(entry);
+        }
         return;
       }
       if (entry.chainBaseBytes + size === entry.cursor) {
@@ -659,24 +718,23 @@ export class TranscriptWatchService {
           }
         }
         if (entry.chainBaseBytes + size === entry.cursor) {
+          if (subagent?.changed) {
+            await this.reportSubagentActivity(entry);
+          }
           return;
         }
       }
       const appended = await this.readAppended(entry, size);
       entry.cursor = entry.chainBaseBytes + appended.cursor;
       entry.lastGrowthMs = Date.now();
-      const externalLooksActive = await probeExternalTranscriptActivity({
-        provider: entry.candidate.provider,
-        transcriptPath: entry.transcriptPath,
-        sessionId: entry.candidate.persistence?.sessionId ?? "",
-        env: this.env,
-      });
+      const externalLooksActive = await this.entryLooksActive(entry);
       await this.onChange({
         agentId,
         transcriptPath: entry.transcriptPath,
         items: appended.items,
         baselineBytes: entry.cursor,
         externalLooksActive,
+        ...(entry.subagentCount !== undefined ? { activeSubagents: entry.subagentCount } : {}),
       });
     } catch (error) {
       this.logger.warn(
@@ -686,6 +744,163 @@ export class TranscriptWatchService {
     } finally {
       entry.checking = false;
     }
+  }
+
+  /**
+   * B9-SUBACT: gated tree observation riding the entry's tick. The SAME two-tier
+   * cost gate as the resume walk decides (an active child tree keeps the entry
+   * "fresh", so while children run the scan stays on the chase cadence); when the
+   * gate holds, returns null and the entry's last known count stands. omp only —
+   * no other provider spawns children into a per-session directory.
+   */
+  private async observeSubagentTree(
+    entry: WatchEntry,
+  ): Promise<{ count: number; changed: boolean } | null> {
+    if (entry.candidate.provider !== "omp") {
+      return null;
+    }
+    const now = Date.now();
+    const cadenceMs =
+      now - entry.lastGrowthMs < LOOKS_ACTIVE_MTIME_WINDOW_MS
+        ? this.chainFollowChaseIntervalMs
+        : this.chainFollowIntervalMs;
+    if (now - entry.lastSubagentScanMs < cadenceMs) {
+      return null;
+    }
+    entry.lastSubagentScanMs = now;
+    return this.refreshSubagentTree(entry);
+  }
+
+  /**
+   * B9-SUBACT: the ungated scan body — readdir the child directory and stat every
+   * `*.jsonl` (the chain-tail discipline carried over: stats only, ZERO header
+   * reads, so the flood B9-WATCH2 measured in production — 62 children under one
+   * session — costs 62 stats, not 62 parses). Updates the entry's tree state in
+   * place and reports whether the count moved observably.
+   */
+  private async refreshSubagentTree(
+    entry: WatchEntry,
+  ): Promise<{ count: number; changed: boolean } | null> {
+    const dir = subagentDirOf(entry.transcriptPath);
+    if (dir === null) {
+      return null;
+    }
+    const dirKey = sessionPathKey(dir);
+    let names: string[];
+    try {
+      names = await readdir(dir);
+    } catch (error) {
+      // ENOENT/ENOTDIR = no child directory: this session never spawned — a
+      // scanned-quiet tree, and an observed parent whose child rows the import
+      // screen may authoritatively answer idle for.
+      const code = (error as NodeJS.ErrnoException).code;
+      if (code === "ENOENT" || code === "ENOTDIR") {
+        const previous = entry.subagentCount;
+        entry.subagentCount = 0;
+        entry.subagentDirKey = dirKey;
+        entry.subagentWrites = new Map();
+        return { count: 0, changed: subagentCountChanged(previous, 0) };
+      }
+      this.logger.debug(
+        { err: error, agentId: entry.candidate.agentId, dir },
+        "Subagent tree scan failed; keeping the last observed count",
+      );
+      return null;
+    }
+    const now = Date.now();
+    const writes = new Map<string, number>();
+    let count = 0;
+    for (const name of names) {
+      if (!name.endsWith(".jsonl")) {
+        continue;
+      }
+      const file = path.join(dir, name);
+      try {
+        const info = await stat(file);
+        writes.set(sessionPathKey(file), info.mtimeMs);
+        if (now - info.mtimeMs < LOOKS_ACTIVE_MTIME_WINDOW_MS) {
+          count += 1;
+        }
+      } catch {
+        // Vanished between readdir and stat: not a live child, and not a tree
+        // the import overlay should claim to have seen.
+      }
+    }
+    const previous = entry.subagentCount;
+    entry.subagentCount = count;
+    entry.subagentDirKey = dirKey;
+    entry.subagentWrites = writes;
+    if (count > 0) {
+      // A live tree IS foreign activity: it keeps both this scan and the resume
+      // walk on the chase cadence while the subagents run.
+      entry.lastGrowthMs = now;
+    }
+    return { count, changed: subagentCountChanged(previous, count) };
+  }
+
+  /**
+   * R4 signal for this entry: does the external writer look alive? B9-SUBACT:
+   * a live child tree IS a live external writer even when the main transcript's
+   * own probe answers idle — the F31 contagion ruling, one rule for both the
+   * byte-change report and the subagent-only report.
+   */
+  private async entryLooksActive(entry: WatchEntry): Promise<boolean> {
+    return (
+      (entry.subagentCount ?? 0) > 0 ||
+      (await probeExternalTranscriptActivity({
+        provider: entry.candidate.provider,
+        transcriptPath: entry.transcriptPath,
+        sessionId: entry.candidate.persistence?.sessionId ?? "",
+        env: this.env,
+      }))
+    );
+  }
+
+  /**
+   * B9-SUBACT: the tree moved while the leaf did not. `items: []` is the R4-04
+   * posture — a change with no visible row is foreign evidence, not a no-op — so
+   * the caller escalates ownership on it exactly like foreign bytes (card §2:
+   * daemon not writing while the subtree grows = external, running), and the
+   * decay to 0 rides the same channel to disarm the badge and the 运行中 flag.
+   */
+  private async reportSubagentActivity(entry: WatchEntry): Promise<void> {
+    await this.onChange({
+      agentId: entry.candidate.agentId,
+      transcriptPath: entry.transcriptPath,
+      items: [],
+      baselineBytes: entry.cursor ?? entry.chainBaseBytes,
+      externalLooksActive: await this.entryLooksActive(entry),
+      activeSubagents: entry.subagentCount ?? 0,
+    });
+  }
+
+  /**
+   * B9-SUBACT (F31 B+, card §5): the watcher's live verdict for an omp CHILD
+   * transcript, consumed by the import screen's descriptor overlay. `true`/`false`
+   * = the child sits under an observed agent's directory and was (not) written
+   * inside the freshness window at the last scan — the scan's mtime estimate is
+   * replaced. `null` = nobody watches this child's parent, or it landed after the
+   * last scan, so the mtime estimate stands (an unobserved session has no live
+   * answer to give, and the overlay says so by staying out of it).
+   */
+  subagentLiveState(transcriptPath: string): boolean | null {
+    const key = sessionPathKey(transcriptPath);
+    for (const entry of this.entries.values()) {
+      const dirKey = entry.subagentDirKey;
+      const writes = entry.subagentWrites;
+      if (dirKey === null || writes === null) {
+        continue;
+      }
+      if (!key.startsWith(`${dirKey}${path.sep}`)) {
+        continue;
+      }
+      const mtimeMs = writes.get(key);
+      if (mtimeMs === undefined) {
+        return null;
+      }
+      return Date.now() - mtimeMs < LOOKS_ACTIVE_MTIME_WINDOW_MS;
+    }
+    return null;
   }
 
   /**
@@ -737,6 +952,13 @@ export class TranscriptWatchService {
     entry.chain = [...entry.chain.slice(0, -1), ...tail];
     entry.transcriptPath = leaf;
     entry.lastActiveMs = now;
+    // B9-SUBACT: the child directory follows the LEAF — a resumed session spawns
+    // its subagents under the new session id, and the old tree is history. The
+    // tree state is re-observed immediately (this path already paid for a
+    // directory walk), so the change the caller emits for the migration carries
+    // the new tree's count, not the old leaf's.
+    entry.lastSubagentScanMs = Date.now();
+    await this.refreshSubagentTree(entry);
     if (entry.watcher) {
       // The fast path this entry already holds moves with it; no slot is taken
       // from or returned to another entry (R4-22 fairness is unaffected).
@@ -848,6 +1070,26 @@ async function readTranscriptRange(
 async function statBytesSum(filePaths: readonly string[]): Promise<number> {
   const sizes = await Promise.all(filePaths.map((filePath) => statTranscriptBytes(filePath)));
   return sizes.reduce<number>((total, size) => total + (size ?? 0), 0);
+}
+
+/**
+ * B9-SUBACT: the directory omp spawns this transcript's subagents into —
+ * `<parentStem>/` next to `<parentStem>.jsonl` (the production shape B9-WATCH2
+ * measured: dozens of `<AgentName>.jsonl` children under it). Null for a path
+ * that is not a provider transcript file.
+ */
+function subagentDirOf(transcriptPath: string): string | null {
+  return transcriptPath.endsWith(".jsonl") ? transcriptPath.slice(0, -".jsonl".length) : null;
+}
+
+/**
+ * B9-SUBACT: a count move is observable when there is something it says: the
+ * first scan of a quiet tree (undefined → 0) says nothing; a first scan that
+ * finds live children says everything; and any later move — including the decay
+ * back to 0 — says the badge must change.
+ */
+function subagentCountChanged(previous: number | undefined, count: number): boolean {
+  return previous === undefined ? count > 0 : count !== previous;
 }
 
 /** B6-OWN-HEAL: the discovery batch's inter-attach gap (unref'd: a pending gap must

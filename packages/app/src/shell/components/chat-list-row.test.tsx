@@ -19,7 +19,8 @@ vi.mock("react-i18next", () => ({
   // locale key, and pinning it by key is exactly as strong as pinning a word.
   // `i18n` feeds the row's clock formatter (useWechatTimeLabel reads the locale).
   useTranslation: () => ({
-    t: (key: string) => key,
+    t: (key: string, options?: { n?: number }) =>
+      options?.n !== undefined ? `${key}:${options.n}` : key,
     i18n: { language: "zh-CN", resolvedLanguage: "zh-CN" },
   }),
   // Pulled in by the app's i18n bootstrap, which the row's transitive imports load.
@@ -303,6 +304,68 @@ describe("ChatListRow right-edge unread slot (F32)", () => {
     expect(dot.style.flexShrink).toBe("0");
     expect(screen.getByTestId(`shell-chat-title-${KEY}`).style.flexShrink).toBe("1");
     expect(trailing.lastElementChild).toBe(dot);
+  });
+});
+
+// B9-SUBACT (F31 ruling B+, 用户拍板): 「子任务×N」 joins the right-edge slot
+// family AFTER the unread marker — the card's same-screen order is
+// spinner → time → unread → 子任务, and `0`/absent never renders a badge.
+describe("ChatListRow 子任务×N badge (B9-SUBACT)", () => {
+  it("renders the count right of the unread dot — the line's last pixel", () => {
+    renderRow({ ...agentFixture({ activeSubagents: 2 }), bucket: "attention" }, { unread: true });
+    const time = screen.getByTestId(`shell-chat-time-${KEY}`);
+    const dot = screen.getByTestId(`shell-chat-unread-${KEY}`);
+    const badge = screen.getByTestId(`shell-chat-subagents-${KEY}`);
+    const trailing = time.parentElement as HTMLElement;
+    const kids = Array.from(trailing.children);
+    expect(kids.indexOf(time)).toBe(0);
+    expect(kids.indexOf(dot)).toBe(1);
+    expect(kids.indexOf(badge)).toBe(2);
+    expect(trailing.lastElementChild).toBe(badge);
+    expect(badge.textContent).toBe("chats.subagents.badge:2");
+  });
+
+  it("keeps the full group order spinner → time → count pill → 子任务 badge", () => {
+    renderRow({
+      ...agentFixture({ pendingPermissionCount: 1, activeSubagents: 3 }),
+      bucket: "running",
+    });
+    const time = screen.getByTestId(`shell-chat-time-${KEY}`);
+    const spinner = screen.getByTestId(`shell-chat-running-${KEY}`);
+    const pill = screen.getByTestId(`shell-chat-count-${KEY}`);
+    const badge = screen.getByTestId(`shell-chat-subagents-${KEY}`);
+    const kids = Array.from((time.parentElement as HTMLElement).children);
+    expect(kids.indexOf(spinner)).toBe(0);
+    expect(kids.indexOf(time)).toBe(1);
+    expect(kids.indexOf(pill)).toBe(2);
+    expect(kids.indexOf(badge)).toBe(3);
+  });
+
+  it("renders nothing for 0 or an absent count (COMPAT(subagentActivity))", () => {
+    cleanup();
+    renderRow(agentFixture({ activeSubagents: 0 }));
+    expect(screen.queryByTestId(`shell-chat-subagents-${KEY}`)).toBeNull();
+    cleanup();
+    renderRow(agentFixture({ activeSubagents: null }));
+    expect(screen.queryByTestId(`shell-chat-subagents-${KEY}`)).toBeNull();
+  });
+
+  it("speaks the badge in the row label (accessibilityLabel replaces child text)", () => {
+    renderRow(agentFixture({ activeSubagents: 4 }));
+    expect(screen.getByTestId(`shell-chat-row-${KEY}`).getAttribute("aria-label")).toContain(
+      "chats.subagents.badge:4",
+    );
+  });
+
+  it("shrinks the long title, never the badge — and the badge stays the last pixel", () => {
+    usePaseoGoPinsStore.setState({ aliases: { [KEY]: "长".repeat(80) } });
+    renderRow(agentFixture({ activeSubagents: 2 }));
+    const badge = screen.getByTestId(`shell-chat-subagents-${KEY}`);
+    const trailing = screen.getByTestId(`shell-chat-time-${KEY}`).parentElement as HTMLElement;
+    expect(badge.style.flexShrink).toBe("0");
+    expect(trailing.style.flexShrink).toBe("0");
+    expect(trailing.lastElementChild).toBe(badge);
+    expect(screen.getByTestId(`shell-chat-title-${KEY}`).style.flexShrink).toBe("1");
   });
 });
 

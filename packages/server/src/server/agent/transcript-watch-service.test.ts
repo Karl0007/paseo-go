@@ -13,7 +13,10 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { createTestLogger } from "../../test-utils/test-logger.js";
 import type { AgentPersistenceHandle, AgentProvider } from "./agent-sdk-types.js";
-import type { ProviderTranscriptInput } from "./provider-transcript.js";
+import {
+  LOOKS_ACTIVE_MTIME_WINDOW_MS,
+  type ProviderTranscriptInput,
+} from "./provider-transcript.js";
 import {
   TranscriptWatchService,
   type TranscriptAttachment,
@@ -928,5 +931,178 @@ describe("resume chain chase in a flooded directory (B9-WATCH3)", () => {
     expect(changes.at(-1)?.items).toEqual([
       { type: "assistant_message", text: "third link", messageId: "a11" },
     ]);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// B9-SUBACT (F31 ruling B+): tree observation. omp spawns its subagents'
+// transcripts into a DIRECTORY named after the parent session
+// (`<parentStem>/<AgentName>.jsonl`) — bytes the chain cursor can never see. The
+// entry stats that tree on the chase cadence: a child appearing is foreign work
+// running under the session (contagion: `activeSubagents` + an alive signal with
+// the cursor frozen), the window passing must decay the count back to 0, and
+// NOTHING outside the child directory may move it — not the parent's own rows,
+// not the flooded neighbours B9-WATCH2 measured in production.
+// ---------------------------------------------------------------------------
+
+describe("subagent tree observation (B9-SUBACT)", () => {
+  /** Where omp writes this session's children: `<parentStem>/`. */
+  function childDirOf(harness: Harness): string {
+    return harness.file.slice(0, -".jsonl".length);
+  }
+
+  function childTranscript(harness: Harness, name: string, mtimeMs?: number): string {
+    mkdirSync(childDirOf(harness), { recursive: true });
+    const file = join(childDirOf(harness), name);
+    writeFileSync(file, ompLine("assistant", `${name} work`, name));
+    if (mtimeMs !== undefined) {
+      utimesSync(file, new Date(mtimeMs), new Date(mtimeMs));
+    }
+    return file;
+  }
+
+  it("reports fresh children as a live tree without moving the cursor", async () => {
+    const harness = createHarness({ maxWatchers: 0 });
+    const attached = await harness.service.attach(harness.candidate);
+    // A session that never spawned: the attach-time scan sees no directory and
+    // says nothing (undefined → 0 is not an observable move).
+    expect(harness.recorder.changes).toEqual([]);
+
+    childTranscript(harness, "Explore.jsonl");
+    childTranscript(harness, "Worker.jsonl");
+    await harness.service.sweep();
+
+    const [change] = await harness.recorder.waitFor(1);
+    expect(change.agentId).toBe("agent-1");
+    // Children are not the parent's rows: the report carries no items and the
+    // byte cursor stays exactly where attach baselined it.
+    expect(change.items).toEqual([]);
+    expect(change.baselineBytes).toBe(attached?.baselineBytes);
+    expect(change.activeSubagents).toBe(2);
+    // Contagion (card §2): daemon not writing, subtree growing = external, running.
+    expect(change.externalLooksActive).toBe(true);
+  });
+
+  it("decays the count to 0 once the window passes, exactly once", async () => {
+    const harness = createHarness({ maxWatchers: 0 });
+    await harness.service.attach(harness.candidate);
+    const child = childTranscript(harness, "Explore.jsonl");
+    await harness.service.sweep();
+    await harness.recorder.waitFor(1);
+
+    // The subagent finished; the parent transcript is equally old, so the
+    // decayed report's probe (freshness on POSIX, the handle answer on Windows)
+    // settles to idle on every platform.
+    const stale = Date.now() - LOOKS_ACTIVE_MTIME_WINDOW_MS - 60_000;
+    utimesSync(child, new Date(stale), new Date(stale));
+    utimesSync(harness.file, new Date(stale), new Date(stale));
+    await harness.service.sweep();
+
+    const decay = harness.recorder.changes.at(-1);
+    expect(decay?.activeSubagents).toBe(0);
+    expect(decay?.externalLooksActive).toBe(false);
+    expect(decay?.items).toEqual([]);
+
+    // A quiet tree stays quiet: the decay is one report, not a per-sweep loop.
+    const settled = harness.recorder.changes.length;
+    await harness.service.sweep();
+    await harness.service.sweep();
+    expect(harness.recorder.changes).toHaveLength(settled);
+  });
+
+  it("counts only the child directory — never the parent's rows or its neighbours", async () => {
+    const harness = createHarness({ maxWatchers: 0 });
+    await harness.service.attach(harness.candidate);
+
+    // The production flood shape: fresh transcripts NEXT TO the parent are other
+    // sessions, not this one's subagents; and the parent growing on its own is
+    // the ordinary F28 observation, which must carry the (zero) tree count
+    // instead of producing a second, subagent-only change.
+    writeFileSync(join(harness.dir, "neighbour.jsonl"), ompLine("user", "other session", "n1"));
+    appendFileSync(harness.file, ompLine("assistant", "parent grew", "a5"));
+    await harness.service.sweep();
+
+    await harness.recorder.waitFor(1);
+    expect(harness.recorder.changes).toHaveLength(1);
+    const [observation] = harness.recorder.changes;
+    expect(observation.items).toEqual([
+      { type: "assistant_message", text: "parent grew", messageId: "a5" },
+    ]);
+    expect(observation.activeSubagents).toBe(0);
+
+    // The real child moves the count — and only it does.
+    childTranscript(harness, "Explore.jsonl");
+    await harness.service.sweep();
+    const changes = await harness.recorder.waitFor(2);
+    expect(changes.at(-1)?.activeSubagents).toBe(1);
+    expect(changes.at(-1)?.items).toEqual([]);
+  });
+
+  it("keeps the axis absent for a provider without the child layout", async () => {
+    // pi shares omp's transcript resolution but spawns nothing: the same
+    // on-disk shape must not read as a tree.
+    const harness = createHarness({ maxWatchers: 0, provider: "pi" });
+    await harness.service.attach(harness.candidate);
+    const dir = harness.file.slice(0, -".jsonl".length);
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(join(dir, "Explore.jsonl"), ompLine("assistant", "not a pi child", "c1"));
+    await harness.service.sweep();
+
+    expect(harness.recorder.changes).toEqual([]);
+    expect(harness.service.subagentLiveState(join(dir, "Explore.jsonl"))).toBeNull();
+  });
+
+  it("answers the import overlay for scanned children of observed agents only", async () => {
+    const harness = createHarness({ maxWatchers: 0 });
+    await harness.service.attach(harness.candidate);
+    const live = childTranscript(harness, "Explore.jsonl");
+    const quiet = childTranscript(
+      harness,
+      "Old.jsonl",
+      Date.now() - LOOKS_ACTIVE_MTIME_WINDOW_MS - 60_000,
+    );
+    await harness.service.sweep();
+
+    expect(harness.service.subagentLiveState(live)).toBe(true);
+    expect(harness.service.subagentLiveState(quiet)).toBe(false);
+    // Outside any observed child directory: no live answer, the scan's mtime
+    // estimate stands (card §5's unobserved posture).
+    expect(harness.service.subagentLiveState(join(harness.dir, "neighbour.jsonl"))).toBeNull();
+    // Landed after the last scan: the scan has not seen it, so it cannot answer.
+    const late = childTranscript(harness, "Late.jsonl");
+    expect(harness.service.subagentLiveState(late)).toBeNull();
+  });
+
+  it("follows the tree onto the resume child's directory when the chain migrates", async () => {
+    // The F28 migration moves the OBSERVATION unit — and omp spawns the resumed
+    // session's children under the NEW id. Children of the old leaf are history;
+    // the change emitted for the migration must carry the new tree's count.
+    const harness = createHarness({ maxWatchers: 0, transcript: PARENT });
+    await harness.service.attach(harness.candidate);
+    const oldDir = harness.file.slice(0, -".jsonl".length);
+    // 2 children under the OLD id, 1 under the new — the migration's count can
+    // only be 1 if the tree was re-observed on the new leaf, not carried over.
+    mkdirSync(oldDir, { recursive: true });
+    writeFileSync(join(oldDir, "Explore.jsonl"), ompLine("assistant", "old child", "o1"));
+    writeFileSync(join(oldDir, "Extra.jsonl"), ompLine("assistant", "old child 2", "o2"));
+
+    const child = resumeChild(
+      harness,
+      "2026-10-01_child.jsonl",
+      harness.file,
+      ompLine("user", "continued", "u12"),
+    );
+    const newDir = child.slice(0, -".jsonl".length);
+    mkdirSync(newDir, { recursive: true });
+    writeFileSync(join(newDir, "Worker.jsonl"), ompLine("assistant", "new child", "w1"));
+    await harness.service.sweep();
+
+    const [migration] = await harness.recorder.waitFor(1);
+    expect(migration.transcriptPath).toBe(child);
+    // The new leaf holds exactly one child — the old tree's two are not carried
+    // across, and the new tree's is counted from the migration itself.
+    expect(migration.activeSubagents).toBe(1);
+    expect(harness.service.subagentLiveState(join(newDir, "Worker.jsonl"))).toBe(true);
+    expect(harness.service.subagentLiveState(join(oldDir, "Explore.jsonl"))).toBeNull();
   });
 });

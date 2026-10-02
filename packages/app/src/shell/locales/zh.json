@@ -76,6 +76,9 @@
       "pinned": "置顶",
       "recent": "最近"
     },
+    "subagents": {
+      "badge": "子任务×{{n}}"
+    },
     "activity": {
       "running": "运行中",
       "failed": "出错"

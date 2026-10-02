@@ -490,6 +490,13 @@ interface ManagedAgentBase {
   // on a submitted prompt, released when the provider process is let go, escalated
   // by the transcript watcher; see agent-ownership.ts for the rules.
   ownership: AgentOwnershipState;
+  // COMPAT(subagentActivity): Paseo Go B9-SUBACT (F31 B+). The transcript
+  // watcher's live count of this agent's child transcripts written inside the
+  // freshness window — foreign subagent work running under the session. Owned by
+  // the watcher's change application (applyTranscriptChange), persisted on the
+  // record, projected onto the payload for the chat row's 「子任务×N」 badge.
+  // `undefined` = never observed; 0 = observed, quiet.
+  activeSubagents?: number;
   activeTurnId: string | null;
   activeTurnStartedAt: Date | null;
   lastUsage?: AgentUsage;
@@ -602,6 +609,25 @@ function limitAgentStreamEventContent(event: AgentStreamEvent): AgentStreamEvent
   return event.type === "timeline"
     ? { ...event, item: limitAgentTimelineItemContent(event.item) }
     : event;
+}
+
+/**
+ * B9-SUBACT (F31 B+): the record patch for the watcher's tree count. A change
+ * carrying no count (a provider with no child layout) leaves the persisted
+ * answer alone; `null` on the record (schema-nullable) normalizes to "never
+ * reported". Returns null when nothing moved — the caller's no-observable-change
+ * test trusts it, because 3→0 (the badge clearing) IS an observable change.
+ */
+function resolveActiveSubagentsPatch(
+  change: TranscriptChange,
+  record: StoredAgentRecord,
+): { activeSubagents: number } | null {
+  const persisted = record.activeSubagents ?? undefined;
+  const next = change.activeSubagents ?? persisted;
+  if (next === undefined || next === persisted) {
+    return null;
+  }
+  return { activeSubagents: next };
 }
 
 interface WriteLabelsResult {
@@ -2024,6 +2050,11 @@ export class AgentManager {
           externalLooksActive: record.externalLooksActive,
           baselineBytes: record.ownershipBaselineBytes,
         }),
+        // COMPAT(subagentActivity): B9-SUBACT — the badge input rides the same
+        // dispatch as the ownership trio; `null` (schema-nullable) = no badge.
+        ...(typeof record.activeSubagents === "number"
+          ? { activeSubagents: record.activeSubagents }
+          : {}),
         lastUsage: undefined,
         lastError: record.lastError ?? undefined,
         attention,
@@ -3998,6 +4029,17 @@ export class AgentManager {
   }
 
   /**
+   * B9-SUBACT (F31 B+, card §5): the transcript watcher's live verdict for an omp
+   * CHILD transcript — `true`/`false` replaces the import scan's mtime estimate
+   * for children of an OBSERVED agent, `null` means nobody watches the parent (or
+   * the child landed after its last scan) and the estimate stands. Read by
+   * `listImportableProviderSessions` for the import screen's 子行实况.
+   */
+  subagentLiveState(transcriptPath: string): boolean | null {
+    return this.transcriptWatch.subagentLiveState(transcriptPath);
+  }
+
+  /**
    * Sweep candidates: released (or process-failed), non-internal, non-archived
    * agents with a persistence handle — plus, since B9-WATCH2 (F33), LIVE agents
    * the daemon is not currently writing (`idle` with no turn in flight). A live
@@ -4152,9 +4194,21 @@ export class AgentManager {
         : ownershipOnExternalChange(live.ownership, { baselineBytes: change.baselineBytes }),
       change.externalLooksActive,
     );
-    const settled = foreign.length === 0 && pending.value === live.ownership.value;
+    // B9-SUBACT: the count is part of the projected payload, so a move of it has
+    // to reach subscribers like the ownership pair does. And `settled` has to
+    // honour `externalLooksActive`: the decay of a child tree (external·running →
+    // external) changes no value, and pre-B9 that emit never fired for it.
+    const countMoved =
+      change.activeSubagents !== undefined && change.activeSubagents !== live.activeSubagents;
+    if (change.activeSubagents !== undefined) {
+      live.activeSubagents = change.activeSubagents;
+    }
+    const settled =
+      foreign.length === 0 &&
+      pending.value === live.ownership.value &&
+      pending.externalLooksActive === live.ownership.externalLooksActive;
     live.ownership = pending;
-    if (!settled) {
+    if (!settled || countMoved) {
       this.emitState(live);
     }
   }
@@ -4213,6 +4267,10 @@ export class AgentManager {
         : ownershipOnExternalChange(restored, { baselineBytes: change.baselineBytes }),
       change.externalLooksActive,
     );
+    // B9-SUBACT: the tree count is part of the observable set — 3→0 (badge
+    // clears) must commit, and a change carrying no count (a provider with no
+    // child layout) leaves the persisted answer alone.
+    const activeSubagentsPatch = resolveActiveSubagentsPatch(change, record);
     // Nothing observable changed (a torn line, a control row, a repeated sweep
     // over the same bytes): writing anyway would bump `updatedAt` and float the
     // row to the top of the time-ordered chat list on every poll.
@@ -4220,7 +4278,8 @@ export class AgentManager {
       foreign.length === 0 &&
       record.ownership === escalated.value &&
       record.externalLooksActive === escalated.externalLooksActive &&
-      record.ownershipBaselineBytes === escalated.baselineBytes
+      record.ownershipBaselineBytes === escalated.baselineBytes &&
+      activeSubagentsPatch === null
     ) {
       return;
     }
@@ -4229,6 +4288,7 @@ export class AgentManager {
       ownership: escalated.value,
       externalLooksActive: escalated.externalLooksActive,
       ownershipBaselineBytes: escalated.baselineBytes,
+      ...activeSubagentsPatch,
       lastMessagePreview: track.preview,
       lastMessageRole: track.role,
       // A newly synced message IS activity: the chat list sorts by this, and the

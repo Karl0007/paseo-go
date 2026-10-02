@@ -77,7 +77,14 @@ export class ImportSessionsRequestError extends Error {
 
 export interface ListImportableProviderSessionsInput {
   request: FetchRecentProviderSessionsRequestMessage;
-  agentManager: Pick<AgentManager, "listAgents" | "listImportableSessions">;
+  /**
+   * `subagentLiveState` is PARTIAL by design (B9-SUBACT, F31 B+): it is the
+   * transcript watcher's live-answer channel, and a caller without a watcher
+   * (or a session nobody observes) has none to give — the descriptors then keep
+   * the scan's mtime estimate, which is exactly the card's unobserved posture.
+   */
+  agentManager: Pick<AgentManager, "listAgents" | "listImportableSessions"> &
+    Partial<Pick<AgentManager, "subagentLiveState">>;
   agentStorage: Pick<AgentStorage, "list">;
   providerSnapshotManager: Pick<ProviderSnapshotManager, "getProviderLabel">;
   /** Optional: the resume-chain walk warns when its depth cap truncates a live chain. */
@@ -226,6 +233,18 @@ export async function listImportableProviderSessions(
       // providers spell one directory several ways, so fold it here — the handle,
       // the claim keys and the dedup key above are deliberately untouched.
       payload.cwd = normalizeProviderSessionDisplayCwd(payload.cwd);
+      // B9-SUBACT (F31 B+, card §5): a child transcript of an OBSERVED agent
+      // answers with what the watcher saw, not with what mtime guessed — the
+      // import screen's 「可能活跃」 on 子行 becomes the live subagent truth (and
+      // goes dark on its decay). `null` = nobody watches this parent, or the
+      // child landed after the last scan: the scan's own estimate stands, since
+      // an unobserved session has no live answer to give.
+      if (descriptor.provider === "omp" && payload.looksActive !== undefined) {
+        const live = agentManager.subagentLiveState?.(descriptor.providerHandleId);
+        if (live !== null && live !== undefined) {
+          payload.looksActive = live;
+        }
+      }
       if (includeExisting) {
         const facts = findExistingAgentFacts(
           importedIndex,

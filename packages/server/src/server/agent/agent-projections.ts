@@ -89,6 +89,10 @@ export function toStoredAgentRecord(
     ownership: agent.ownership.value,
     externalLooksActive: agent.ownership.externalLooksActive,
     ownershipBaselineBytes: agent.ownership.baselineBytes,
+    // COMPAT(subagentActivity): Paseo Go B9-SUBACT — the watcher's last tree
+    // count rides the record so a released agent's payload keeps its badge.
+    // `!== undefined`: 0 is a real (decayed) state; absence = never observed.
+    ...(agent.activeSubagents !== undefined ? { activeSubagents: agent.activeSubagents } : {}),
     title: options?.title ?? null,
     labels: agent.labels,
     lastStatus: agent.lifecycle,
@@ -147,6 +151,11 @@ export function toAgentPayload(
     // whenever no watcher has evidence; this answers the user's actual question —
     // 原生还是非原生 — for an idle session with no live writer in evidence.
     origin: deriveAgentOrigin(agent),
+    // COMPAT(subagentActivity): Paseo Go B9-SUBACT (F31 B+). The watcher's live
+    // child-tree count; only ever present once the transcript watch has scanned
+    // this agent's omp child directory. Consumers read `undefined`/`null`/`0` as
+    // "no 「子任务×N」 badge".
+    ...(agent.activeSubagents !== undefined ? { activeSubagents: agent.activeSubagents } : {}),
     status: agent.lifecycle,
     activeTurn: agent.activeTurnId
       ? {
@@ -232,6 +241,18 @@ function projectStoredOwnership(
   };
 }
 
+/**
+ * COMPAT(subagentActivity): Paseo Go B9-SUBACT (F31 B+). `null` (schema-nullable)
+ * reads as "no badge" exactly like absence, so only a real number rides the wire.
+ */
+function projectStoredActiveSubagents(
+  record: StoredAgentRecord,
+): Pick<AgentSnapshotPayload, "activeSubagents"> {
+  return typeof record.activeSubagents === "number"
+    ? { activeSubagents: record.activeSubagents }
+    : {};
+}
+
 export function buildStoredAgentPayload(
   record: StoredAgentRecord,
   validProviders: Iterable<AgentProvider>,
@@ -280,6 +301,9 @@ export function buildStoredAgentPayload(
     ...projectStoredOwnership(record),
     // COMPAT(agentOrigin): Paseo Go B6-OWN-HEAL birth axis — see toAgentPayload.
     origin: deriveAgentOrigin(record),
+    // COMPAT(subagentActivity): Paseo Go B9-SUBACT — the watcher's last tree
+    // count persisted on the record (see projectStoredActiveSubagents).
+    ...projectStoredActiveSubagents(record),
     currentModeId: record.lastModeId ?? null,
     availableModes: [],
     pendingPermissions: [],

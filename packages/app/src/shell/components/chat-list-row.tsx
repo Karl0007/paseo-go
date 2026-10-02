@@ -140,6 +140,35 @@ function ChatBadge({
   return null;
 }
 
+// B9-SUBACT (F31 ruling B+): 「子任务×N」 — the watcher saw N of this agent's omp
+// child transcripts written inside the freshness window: foreign subagent work is
+// running under this session. The right-edge slot family's third member, wearing
+// the same geometry as its siblings (circular `borderRadius.full` chip, the 18dp
+// small-tier height, shrink-0, theme tokens only — the neutral status pair, the
+// pill's quietest grade) and sitting AFTER the unread marker: the marker keeps its
+// F32 slot right of the clock, the tree badge is the line's last pixel — the
+// same-screen order is spinner → clock → unread → 子任务. `0`/absent never renders
+// (COMPAT(subagentActivity)): the count decaying to 0 is the badge's off switch.
+function SubagentBadge({
+  count,
+  label,
+  rowKey,
+}: {
+  count: number;
+  /** The row-derived `t("chats.subagents.badge", { n })`; null = render nothing. */
+  label: string | null;
+  rowKey: string;
+}) {
+  if (!(count > 0) || label === null) {
+    return null;
+  }
+  return (
+    <View style={styles.subagentBadge} testID={`shell-chat-subagents-${rowKey}`}>
+      <Text style={styles.subagentBadgeText}>{label}</Text>
+    </View>
+  );
+}
+
 // Ruling 3: the tile is the PROJECT, not the provider. The fill table lives in
 // `shell/chats/project-avatar` (REVIEW-B8-05) — the import row imports the SAME
 // object, so a palette edit moves both screens in one commit and the
@@ -478,6 +507,11 @@ function ChatRowInner({
   });
   // The spinner is invisible to TalkBack, so 运行中 stays a spoken word even though
   // ruling 8 took it off the screen.
+  // B9-SUBACT: the badge's spoken word AND its pixels read one derived string —
+  // `accessibilityLabel` replaces every child text, so a 「子任务×N」 the eye sees
+  // but the label does not say is simply unsaid to TalkBack.
+  const subagentCount = agent.agent.activeSubagents ?? 0;
+  const subagentLabel = subagentCount > 0 ? t("chats.subagents.badge", { n: subagentCount }) : null;
   const rowLabel = [
     displayTitle,
     // R4-13: the subtitle line — 「[草稿] …」/「[需要回复] …」/「我: …」. `accessibilityLabel`
@@ -488,6 +522,7 @@ function ChatRowInner({
     activityLabelKey ? t(activityLabelKey) : null,
     agent.bucket === "running" ? t("chats.activity.running") : null,
     t(ownershipView.labelKey),
+    subagentLabel,
     dimmed ? t("chats.hostStatus.offline") : null,
   ]
     .filter(Boolean)
@@ -547,12 +582,14 @@ function ChatRowInner({
               origin={agent.agent.origin}
               testID={`shell-chat-ownership-${agent.key}`}
             />
-            {/* F21 + F32: the right-edge group — spinner (ruling 8: still left of
-                the time), the clock, then the unread slot as the row's last pixel.
-                F32 (B9-BADGE) moved the marker out from between spinner and clock:
-                the unread indicator is the line's rightmost thing, one marker per
-                row. The group eats the leftover width, so the title truncates
-                first and neither the clock nor the marker gets squeezed. */}
+            {/* F21 + F32 + B9-SUBACT: the right-edge group — spinner (ruling 8:
+                still left of the time), the clock, then the unread slot, then the
+                「子任务×N」 badge as the line's last pixel. F32 (B9-BADGE) moved the
+                marker out from between spinner and clock: one unread marker per row,
+                right of the clock. B9-SUBACT's tree badge joins the family AFTER it
+                (F31 ruling: same-screen order spinner → time → unread → 子任务). The
+                group eats the leftover width, so the title truncates first and
+                neither the clock nor either marker gets squeezed. */}
             <View style={styles.titleTrailing}>
               {showSpinner ? (
                 <RunningSpinner
@@ -571,6 +608,7 @@ function ChatRowInner({
                 unread={unread}
                 rowKey={agent.key}
               />
+              <SubagentBadge count={subagentCount} label={subagentLabel} rowKey={agent.key} />
             </View>
           </View>
           <ChatSubtitle segments={subtitleSegments} />
@@ -710,6 +748,25 @@ const styles = StyleSheet.create((theme) => ({
     fontSize: theme.fontSize.sm,
     fontWeight: theme.fontWeight.semibold,
     color: theme.colors.accentForeground,
+  },
+  // B9-SUBACT: the 「子任务×N」 chip — same 18dp circular geometry as the unread
+  // family's count pill (F32 discipline: circular, one size, shrink-0), and the
+  // pill's quietest grade for color (REVIEW-B8-10 D6: the tint fill + full-depth
+  // word of one hue; surface2+foregroundMuted sits under AA and is banned here).
+  subagentBadge: {
+    minWidth: 18,
+    height: 18,
+    borderRadius: theme.borderRadius.full,
+    paddingHorizontal: theme.spacing[1.5],
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: theme.colors.statusNeutralTint,
+    flexShrink: 0,
+  },
+  subagentBadgeText: {
+    fontSize: theme.fontSize.sm,
+    fontWeight: theme.fontWeight.medium,
+    color: theme.colors.statusNeutral,
   },
   subtitle: {
     fontSize: theme.fontSize.sm,

@@ -118,6 +118,12 @@ export interface Agent {
   // falls back to when `ownership` carries no live evidence. `undefined` = daemon
   // predates the field, and the consumer keeps 未知 for exactly that case.
   origin?: "launch" | "import" | null;
+  // COMPAT(subagentActivity): Paseo Go B9-SUBACT protocol pure-add (see protocol
+  // messages.ts). The transcript watcher's live count of this agent's child
+  // transcripts written inside the freshness window — the chat row's 「子任务×N」
+  // badge input. `undefined`/`null`/`0` all read as "no badge"; only the watcher
+  // (omp child trees) ever reports a number.
+  activeSubagents?: number | null;
 }
 
 export interface WorkspaceDescriptor {

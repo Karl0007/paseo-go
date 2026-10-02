@@ -258,6 +258,13 @@ const StoredAgentSnapshotSchema = z.strictObject({
   ownership: z.enum(["paseo", "external", "none"]).nullable().optional(),
   externalLooksActive: z.boolean().nullable().optional(),
   origin: z.enum(["launch", "import"]).nullable().optional(),
+  // COMPAT(subagentActivity): Paseo Go B9-SUBACT (F31 B+). The 「子任务×N」 badge
+  // input rides the cache on the same posture as the pill's axes above: the
+  // directory checkpoint's entry projection carries the field, so WITHOUT it here
+  // a cold restore strips the store's copy, the checkpoint sees no difference,
+  // the catch-up sends no upsert — and the badge stays dead until the tree
+  // changes again. A pre-B9 row simply misses the key → absent → no badge.
+  activeSubagents: z.number().int().nonnegative().nullable().optional(),
 });
 
 const StoredAgentSchema = z.strictObject({
@@ -611,13 +618,21 @@ function serializeProjectPlacement(agent: Agent): StoredAgent["projectPlacement"
 // key-missing check as a live "the host never reported it" signal.
 function serializeAgentAxes(
   agent: Agent,
-): Pick<StoredAgent["snapshot"], "ownership" | "externalLooksActive" | "origin"> {
+): Pick<
+  StoredAgent["snapshot"],
+  "ownership" | "externalLooksActive" | "origin" | "activeSubagents"
+> {
   return {
     ...(agent.ownership !== undefined ? { ownership: agent.ownership } : {}),
     ...(agent.externalLooksActive !== undefined
       ? { externalLooksActive: agent.externalLooksActive }
       : {}),
     ...(agent.origin !== undefined ? { origin: agent.origin } : {}),
+    // COMPAT(subagentActivity): B9-SUBACT — the 「子任务×N」 badge input rides the
+    // row on the same posture; without it the checkpoint (whose entry projection
+    // carries the field) suppresses the catch-up upsert and the badge dies until
+    // the tree changes again.
+    ...(agent.activeSubagents !== undefined ? { activeSubagents: agent.activeSubagents } : {}),
   };
 }
 

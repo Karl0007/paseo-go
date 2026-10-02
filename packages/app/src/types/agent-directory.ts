@@ -29,6 +29,9 @@ export type AgentDirectoryEntry = Pick<
   // COMPAT(agentOrigin): Paseo Go B6-OWN-HEAL — the same badge reads the birth axis
   // off the entry when the ownership pair says nothing.
   | "origin"
+  // COMPAT(subagentActivity): Paseo Go B9-SUBACT — the row's 「子任务×N」 badge
+  // reads the watcher's live child-tree count off the entry.
+  | "activeSubagents"
 > & {
   pendingPermissionCount?: number;
 };

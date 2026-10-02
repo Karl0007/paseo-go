@@ -1618,3 +1618,70 @@ test("importProviderSession requires cwd from the selected provider row", async 
     "Import requires cwd from the selected provider session",
   );
 });
+
+// B9-SUBACT (F31 ruling B+, card §5): the import screen's 子行实况. A child
+// transcript of an OBSERVED agent answers from the transcript watcher — replacing
+// the scan's mtime estimate in BOTH directions — while everything the watcher has
+// no verdict for (unobserved parents, post-scan arrivals, other providers, and a
+// manager without the channel at all) keeps the estimate.
+test("listImportableProviderSessions overlays the watcher's live verdict on observed omp children", async () => {
+  const childLive = "/tmp/omp-sessions/parent/Explore.jsonl";
+  const childQuiet = "/tmp/omp-sessions/parent/Worker.jsonl";
+  const childUnwatched = "/tmp/omp-sessions/other/Late.jsonl";
+  const claudeChild = "/tmp/claude-sessions/parent/Explore.jsonl";
+  const rows: Array<{ handle: string; provider: string; estimate: boolean }> = [
+    // Stale by mtime, LIVE by the watcher: the 可能活跃 chip must light up.
+    { handle: childLive, provider: "omp", estimate: false },
+    // Fresh by mtime, quiet by the watcher (the subagent finished): the chip
+    // must go dark — replacing the estimate is the whole point.
+    { handle: childQuiet, provider: "omp", estimate: true },
+    // Under an UNOBSERVED parent (verdict null): the estimate stands.
+    { handle: childUnwatched, provider: "omp", estimate: true },
+    // No child layout outside omp: never consulted, estimate stands.
+    { handle: claudeChild, provider: "claude", estimate: true },
+  ];
+  const verdicts: Record<string, boolean | null> = {
+    [childLive]: true,
+    [childQuiet]: false,
+  };
+  const listing = async () =>
+    makeImportableSessionsResult(
+      rows.map((row) => {
+        const session = makeImportableSession({
+          provider: row.provider,
+          sessionId: row.handle,
+          nativeHandle: row.handle,
+          lastActivityAt: "2026-04-30T12:00:00.000Z",
+        });
+        session.looksActive = row.estimate;
+        return session;
+      }),
+    );
+  const base = {
+    request: makeRequest({ limit: 10 }),
+    agentStorage: { list: async () => [] },
+    providerSnapshotManager: { getProviderLabel: (provider: string) => provider },
+  };
+
+  const overlaid = await listImportableProviderSessions({
+    ...base,
+    agentManager: {
+      listAgents: () => [],
+      listImportableSessions: listing,
+      subagentLiveState: (transcriptPath: string) => verdicts[transcriptPath] ?? null,
+    },
+  });
+  const byHandle = new Map(overlaid.entries.map((entry) => [entry.providerHandleId, entry]));
+  expect(byHandle.get(childLive)?.looksActive).toBe(true);
+  expect(byHandle.get(childQuiet)?.looksActive).toBe(false);
+  expect(byHandle.get(childUnwatched)?.looksActive).toBe(true);
+  expect(byHandle.get(claudeChild)?.looksActive).toBe(true);
+
+  // A manager without the live channel (every pre-B9 caller, and the type's
+  // Partial) is indistinguishable from "nobody watches": estimates all stand.
+  const estimated = await listImportableProviderSessions({
+    ...base,
+    agentManager: { listAgents: () => [], listImportableSessions: listing },
+  });
+  expect(estimated.entries.map((entry) => entry.looksActive)).toEqual([false, true, true, true]);
+});

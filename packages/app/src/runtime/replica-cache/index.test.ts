@@ -511,6 +511,39 @@ describe("ReplicaCache", () => {
     expect(legacy?.title).toBe("Cached agent");
   });
 
+  it("keeps the activeSubagents badge input across a cache round-trip", async () => {
+    // B9-SUBACT (F31 B+): the checkpoint's entry projection carries the field, so
+    // a cache that strips it lets the catch-up skip the upsert and the 「子任务×N」
+    // badge dies across a cold start. Same F25 posture as the axes test above.
+    const storage = new MemoryStorage();
+    const writer = createCache(storage);
+    const live = agent("badge-live");
+    live.activeSubagents = 2;
+    const quiet = agent("badge-quiet");
+    quiet.activeSubagents = 0;
+    writer.commitDirectoryMutations(SERVER_ID, [
+      { kind: "agent", type: "upsert", id: live.id, value: live },
+      { kind: "agent", type: "upsert", id: quiet.id, value: quiet },
+    ]);
+    await writer.flush();
+
+    const restored = await createCache(storage).readDirectory(SERVER_ID);
+    expect(restored.agents.get("badge-live")?.activeSubagents).toBe(2);
+    // 0 is a real (decayed) state and must survive as 0, not vanish.
+    expect(restored.agents.get("badge-quiet")?.activeSubagents).toBe(0);
+
+    // A pre-B9 row simply misses the key → restores as "no badge", never corrupt.
+    const key = `${SERVER_ID}:agent:badge-live`;
+    const row = storage.rows.get(key);
+    if (!row) throw new Error("agent row was not written");
+    const payload = JSON.parse(row.payload) as { snapshot: Record<string, unknown> };
+    delete payload.snapshot.activeSubagents;
+    storage.rows.set(key, { ...row, payload: JSON.stringify(payload) });
+    const legacy = await createCache(storage).readDirectory(SERVER_ID);
+    expect(legacy.agents.get("badge-live")?.activeSubagents).toBeNull();
+    expect(legacy.agents.get("badge-live")?.title).toBe("Cached agent");
+  });
+
   it("coalesces timeline values before serialization", async () => {
     const storage = new MemoryStorage();
     const cache = createCache(storage);

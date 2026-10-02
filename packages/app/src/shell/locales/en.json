@@ -76,6 +76,9 @@
       "pinned": "Pinned",
       "recent": "Recent"
     },
+    "subagents": {
+      "badge": "subagents×{{n}}"
+    },
     "activity": {
       "running": "Running",
       "failed": "Failed"

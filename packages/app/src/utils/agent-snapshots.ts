@@ -91,6 +91,14 @@ export function projectAgentSnapshot(agent: Agent): AgentSnapshotPayload {
       ? { externalLooksActive: agent.externalLooksActive }
       : {}),
     ...(agent.origin !== undefined ? { origin: agent.origin } : {}),
+    // COMPAT(subagentActivity): Paseo Go B9-SUBACT — projected back out so the
+    // directory replica's local entry matches the daemon's snapshot (fetch_agents
+    // entries carry the full AgentSnapshotPayload), and carried through the
+    // replica cache's StoredAgentSnapshotSchema on the B8-CACHE posture: the
+    // checkpoint consumes THIS projection, so a cache that stripped the field
+    // while the checkpoint kept it would suppress the catch-up upsert and the
+    // 「子任务×N」 badge would die across every cold start.
+    ...(agent.activeSubagents !== undefined ? { activeSubagents: agent.activeSubagents } : {}),
     requiresAttention: agent.requiresAttention ?? false,
     attentionReason: agent.attentionReason ?? null,
     attentionTimestamp: agent.attentionTimestamp?.toISOString() ?? null,
@@ -164,5 +172,12 @@ export function normalizeAgentSnapshot(snapshot: AgentSnapshotPayload, serverId:
     // than the build omits it and the pill keeps its 未知 state. Cache-preserved on the
     // same posture as the ownership pair above.
     origin: snapshot.origin ?? null,
+    // COMPAT(subagentActivity): Paseo Go B9-SUBACT pure-add badge input; a daemon
+    // older than the build (or an agent the watcher never scanned) omits it and
+    // the row shows no badge. Cache-preserved like the axes above: the directory
+    // checkpoint consumes projectAgentSnapshot, so a cache that stripped this key
+    // while the checkpoint carried it would suppress the catch-up upsert and keep
+    // the badge dead across cold starts (B8-CACHE F25 posture).
+    activeSubagents: snapshot.activeSubagents ?? null,
   };
 }

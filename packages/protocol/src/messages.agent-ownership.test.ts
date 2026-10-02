@@ -116,3 +116,40 @@ describe("agent ownership fields (B4-OWNERSHIP)", () => {
     expect(parsed.externalLooksActive).toBe(false);
   });
 });
+
+// B9-SUBACT (F31 ruling B+): the live subagent-count axis the chat row's
+// 「子任务×N」 badge reads. Snapshot-only by design — MCP list_agents consumers do
+// not need it, and the row reads it off the agent_state payload anyway.
+describe("agent activeSubagents field (B9-SUBACT)", () => {
+  it("parses snapshots that omit it (pre-B9 daemons) — absent means no badge", () => {
+    expect(AgentSnapshotPayloadSchema.parse(snapshotPayload())).not.toHaveProperty(
+      "activeSubagents",
+    );
+  });
+
+  it("accepts a nonnegative integer count, 0 included (the decay-to-zero report)", () => {
+    for (const count of [0, 1, 62]) {
+      expect(
+        AgentSnapshotPayloadSchema.parse(snapshotPayload({ activeSubagents: count }))
+          .activeSubagents,
+      ).toBe(count);
+    }
+  });
+
+  it("rejects negative, fractional and non-numeric counts", () => {
+    for (const bad of [-1, 1.5, "2"]) {
+      expect(
+        AgentSnapshotPayloadSchema.safeParse(snapshotPayload({ activeSubagents: bad })).success,
+      ).toBe(false);
+    }
+  });
+
+  it("does not leak onto the MCP list_agents entry", () => {
+    // The list schema has no such key: a producer that pastes the snapshot field
+    // in gets it STRIPPED, so MCP consumers never see a half-carried axis.
+    const parsed = AgentListItemPayloadSchema.parse(
+      listItemPayload({ activeSubagents: 3 } as Record<string, unknown>),
+    );
+    expect(parsed).not.toHaveProperty("activeSubagents");
+  });
+});

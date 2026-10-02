@@ -894,6 +894,14 @@ export const AgentSnapshotPayloadSchema = z.object({
   // support those hosts — consumers MUST read `undefined`/`null` as "birth not
   // reported" and keep their own unknown state for it. Official clients ignore it.
   origin: z.enum(["launch", "import"]).nullable().optional(),
+  // COMPAT(subagentActivity): added 2026-10-02 (Paseo Go B9-SUBACT, F31 ruling B+).
+  // Pure-add live-visibility axis: how many of this agent's CHILD transcripts (omp
+  // spawns them into `<parentStem>/<agentName>.jsonl`) were written inside the
+  // watcher's freshness window — i.e. foreign subagent work running under this
+  // session right now. Only the transcript watcher can answer, so daemons that
+  // never observed the agent omit the field, and consumers MUST read
+  // `undefined`/`null`/`0` as "no badge". The chat row renders 「子任务×N」 with it.
+  activeSubagents: z.number().int().nonnegative().nullable().optional(),
 });
 
 export type AgentSnapshotPayload = z.infer<typeof AgentSnapshotPayloadSchema>;
