@@ -145,3 +145,8 @@
 - use-agent-history（前轮高载超时）本轮全量绿。
 - **判定：失败集⊆环境基线，零批次九回归 → PASS**。
 - 过程账：G1 探针 worktree `--force` 递归删 junction 连坐主树 node_modules/.bin（npm install 修复+scoped 2599 复绿+pre-commit 全绿；**教训入册：探针树禁 node_modules junction，用 NODE_PATH**）；npm 元数据 edgesOut 残留待服务空闲窗 `npm install` 幂等清（不阻塞运行时）。
+
+## F34 mount 噪音行：resume 全同行毒化 tail-dedup→外部会话误判原生+preview 污染（2026-10-03 02:4x）
+
+- 根因链静态实锤（dropTimelineTailDuplicates 内容比对吞外来 mount 行；agent-manager.ts:4209+）。卡=B10-MOUNTNOISE（行身份化去重/重放窗限定 + mapper 层 meta 化降噪），排 go.12 之后。
+- 与 F33 关系：F33 修的是「根本没在看」，F34 是「看了但被回声带子吞了」——同一用户症状（终端在跑显原生）的第二条根因。
