@@ -1,4 +1,12 @@
-import { appendFileSync, mkdirSync, mkdtempSync, rmSync, statSync, writeFileSync } from "node:fs";
+import {
+  appendFileSync,
+  mkdirSync,
+  mkdtempSync,
+  rmSync,
+  statSync,
+  utimesSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -633,16 +641,16 @@ describe("tail read bound (R4-23)", () => {
 // user was actively continuing looking dead: no 「外部」, no preview movement.
 // ---------------------------------------------------------------------------
 
+/** A resume child, written where omp writes it: next to its parent. */
+function resumeChild(harness: Harness, name: string, parent: string, rows: string): string {
+  const file = join(harness.dir, name);
+  writeFileSync(file, `${ompHeader(name, work, parent)}${rows}`);
+  return file;
+}
+
+const PARENT = `${ompHeader("2026-09-30_uuid.jsonl", work)}${ompLine("user", "from paseo", "p1")}`;
+
 describe("resume chain migration (B8-WATCH, F28)", () => {
-  /** A resume child, written where omp writes it: next to its parent. */
-  function resumeChild(harness: Harness, name: string, parent: string, rows: string): string {
-    const file = join(harness.dir, name);
-    writeFileSync(file, `${ompHeader(name, work, parent)}${rows}`);
-    return file;
-  }
-
-  const PARENT = `${ompHeader("2026-09-30_uuid.jsonl", work)}${ompLine("user", "from paseo", "p1")}`;
-
   it("follows an external resume into the child transcript and reports its rows", async () => {
     const harness = createHarness({ maxWatchers: 0, transcript: PARENT });
     await harness.service.attach(harness.candidate);
@@ -848,5 +856,77 @@ describe("resume chain migration (B8-WATCH, F28)", () => {
     } finally {
       vi.useRealTimers();
     }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// B9-WATCH3 (F28-KI1 follow-up): the chase must survive a FLOODED transcript
+// directory. The production shape: the user resumes the session, then dozens of
+// subagent / new-session transcripts land next to it, all NEWER than the resumed
+// child. With the 24-header window the child sat outside every chase tick and the
+// observation stayed on the corpse. Fix: the window is 200 with stop-on-hit, and
+// the entry's tailed path doubles as the chain-tail memory — once a hit lands,
+// the next chase considers only siblings newer than the remembered tail, so the
+// flood growing further cannot drop the chain.
+// ---------------------------------------------------------------------------
+
+describe("resume chain chase in a flooded directory (B9-WATCH3)", () => {
+  /** An unrelated session in the same directory: pure window pressure. */
+  function floodTranscript(harness: Harness, index: number, mtimeMs: number): string {
+    const name = `2026-10-01_flood-${String(index).padStart(3, "0")}.jsonl`;
+    const file = join(harness.dir, name);
+    writeFileSync(
+      file,
+      `${ompHeader(name, work)}${ompLine("user", "different session", `f${index}`)}`,
+    );
+    utimesSync(file, new Date(mtimeMs), new Date(mtimeMs));
+    return file;
+  }
+
+  it("follows the real child through 30 newer unrelated transcripts, then keeps following the chain", async () => {
+    const harness = createHarness({ maxWatchers: 0, transcript: PARENT });
+    await harness.service.attach(harness.candidate);
+
+    // Deterministic mtime order: parent < child < flood #1 < grandchild < flood #2.
+    const base = Date.now() - 60 * 60_000;
+    utimesSync(harness.file, new Date(base), new Date(base));
+    const child = resumeChild(
+      harness,
+      "2026-10-01_child.jsonl",
+      harness.file,
+      ompLine("user", "continued", "u11"),
+    );
+    utimesSync(child, new Date(base + 60_000), new Date(base + 60_000));
+    for (let index = 0; index < 30; index += 1) {
+      floodTranscript(harness, index, base + 120_000 + index * 1_000);
+    }
+
+    await harness.service.sweep();
+    const [migration] = await harness.recorder.waitFor(1);
+    expect(migration.transcriptPath).toBe(child);
+    expect(migration.items).toEqual([
+      { type: "user_message", text: "continued", messageId: "u11" },
+    ]);
+
+    // The entry now remembers `child` as the chain tail. The flood keeps growing
+    // and a grandchild resumes from the child — the chase follows to the
+    // grandchild instead of dropping off the chain.
+    const grand = resumeChild(
+      harness,
+      "2026-10-01_grand.jsonl",
+      child,
+      ompLine("assistant", "third link", "a11"),
+    );
+    utimesSync(grand, new Date(base + 30 * 60_000), new Date(base + 30 * 60_000));
+    for (let index = 30; index < 60; index += 1) {
+      floodTranscript(harness, index, base + 40 * 60_000 + index * 1_000);
+    }
+
+    await harness.service.sweep();
+    const changes = await harness.recorder.waitFor(2);
+    expect(changes.at(-1)?.transcriptPath).toBe(grand);
+    expect(changes.at(-1)?.items).toEqual([
+      { type: "assistant_message", text: "third link", messageId: "a11" },
+    ]);
   });
 });

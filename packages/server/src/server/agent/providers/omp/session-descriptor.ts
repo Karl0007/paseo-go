@@ -404,9 +404,18 @@ async function readOmpParentSessionPath(
  * and in a directory big enough for that to matter it only looks at transcripts
  * touched at or after the parent's own last write: a file resumed FROM the parent
  * cannot predate the parent's last write.
+ *
+ * B9-WATCH3 (F28-KI1): the cap is a stop-on-hit CEILING, not a budget — the
+ * candidates are read newest-first and the step returns at the first header
+ * naming the parent, so widening 24 → 200 only costs in directories where no
+ * transcript resumes from the parent at all, and buys the flooded-directory
+ * case (dozens of subagent/new-session files newer than the real child used to
+ * push it out of the window and the chase lost the chain for good). What keeps
+ * the recurring chase cheap is the caller's chain-tail memory (`knownTail`),
+ * not a small window.
  */
 const RESUME_CHILD_HEAD_BYTES = 16 * 1024;
-const MAX_RESUME_CHILD_HEAD_READS = 24;
+const MAX_RESUME_CHILD_HEAD_READS = 200;
 /** Directories at or under this many transcripts are scanned without the filter. */
 const RESUME_CHILD_MTIME_FILTER_MIN = 64;
 /** Timestamp slop: a coarse mtime must not hide a same-second resume. */
@@ -417,6 +426,17 @@ const RESUME_LEAF_CHAIN_MAX_DEPTH = 8;
 export interface OmpResumeLeafChainOptions {
   maxDepth?: number;
   logger?: Logger;
+  /**
+   * B9-WATCH3 (chain-tail memory): the caller asserts `sessionFile` is the
+   * newest link of the chain it observed last time (a watch entry's tailed
+   * path). A child of it cannot predate its last write, so every step applies
+   * the mtime floor UNCONDITIONALLY — the chase stats the tail's newer
+   * siblings and reads headers of nothing else. A tick where no sibling is
+   * newer than the tail costs one readdir + stats and ZERO header reads,
+   * however many older transcripts share the directory. A tail that cannot be
+   * statted (deleted mid-watch) falls back to the cold scan.
+   */
+  knownTail?: boolean;
 }
 
 /**
@@ -442,8 +462,11 @@ export async function resolveOmpResumeLeafChain(
   const chain = [sessionFile];
   const visited = new Set<string>([sessionPathKey(sessionFile)]);
   let current = sessionFile;
+  const knownTail = options.knownTail === true;
   for (let depth = 0; depth < maxDepth; depth += 1) {
-    const child = await findOmpResumeChild(current, visited);
+    // Every step of a known-tail walk is itself a known tail: the hit below
+    // becomes the remembered leaf for the next one.
+    const child = await findOmpResumeChild(current, visited, knownTail);
     if (!child) {
       return chain;
     }
@@ -462,6 +485,7 @@ export async function resolveOmpResumeLeafChain(
 async function findOmpResumeChild(
   parentFile: string,
   visited: Set<string>,
+  knownTail: boolean,
 ): Promise<string | null> {
   const directory = path.dirname(parentFile);
   let entries: Dirent[];
@@ -484,7 +508,11 @@ async function findOmpResumeChild(
   }
   const ranked = await rankSiblingFilesByMtime(siblings);
   let pool = ranked;
-  if (ranked.length > RESUME_CHILD_MTIME_FILTER_MIN) {
+  // B9-WATCH3: for a remembered tail the mtime floor is unconditional — the
+  // chase considers only the tail's newer siblings. A cold walk pays it only
+  // once the directory is big enough for the window to matter. A tail whose
+  // stat fails keeps the unfiltered (cold) pool.
+  if (knownTail || ranked.length > RESUME_CHILD_MTIME_FILTER_MIN) {
     const parentMtime = await readFileMtime(parentFile);
     if (parentMtime) {
       const floor = parentMtime.getTime() - RESUME_CHILD_MTIME_SLOP_MS;
@@ -492,6 +520,8 @@ async function findOmpResumeChild(
     }
   }
   for (const entry of pool.slice(0, MAX_RESUME_CHILD_HEAD_READS)) {
+    // Stop on hit (B9-WATCH3): newest-first, the first header naming the
+    // parent IS the child; the cap bounds the worst case, not the typical read.
     const parent = await readOmpParentSessionPath(entry.file, RESUME_CHILD_HEAD_BYTES);
     if (parent && sessionPathKey(parent) === parentKey) {
       return entry.file;

@@ -170,7 +170,9 @@ interface WatchEntry {
   candidate: TranscriptWatchCandidate;
   /**
    * The transcript currently tailed: the observed provider file, or the newest
-   * resume child of it (B8-WATCH, F28).
+   * resume child of it (B8-WATCH, F28). B9-WATCH3: this is also the chain-tail
+   * memory — attach seeds it with the cold walk and every chase hit moves it,
+   * so the next chase only has to consider siblings NEWER than it.
    */
   transcriptPath: string;
   /**
@@ -698,6 +700,13 @@ export class TranscriptWatchService {
    * `chainFollowIntervalMs`, which still picks up a session resumed while no daemon
    * was watching.
    *
+   * B9-WATCH3: the walk is a known-tail chase. `entry.transcriptPath` is the
+   * newest link this service has observed, so the walk considers only siblings
+   * newer than it — a tick where the fork has not landed costs a readdir and
+   * zero header reads instead of re-reading the whole candidate window, and a
+   * flooded directory finds the real child inside the widened (200, stop-on-hit)
+   * window.
+   *
    * The cursor is chain-cumulative, which is what keeps the ownership baseline
    * continuous: the prefix moves past the old leaf (and past any intermediate file
    * the same walk crossed), the cursor stays where it is, so the new leaf is read
@@ -716,7 +725,9 @@ export class TranscriptWatchService {
       return false;
     }
     entry.lastChainFollowMs = now;
-    const tail = await this.resolveResumeChain(entry.candidate.provider, entry.transcriptPath);
+    const tail = await this.resolveResumeChain(entry.candidate.provider, entry.transcriptPath, {
+      knownTail: true,
+    });
     const leaf = tail[tail.length - 1];
     if (tail.length < 2 || leaf === entry.transcriptPath) {
       return false;
@@ -746,13 +757,25 @@ export class TranscriptWatchService {
    * resume chain for omp. A failed walk degrades to the file itself — losing an
    * existing observation to a directory scan that threw would be worse than
    * tailing the older transcript until the next sweep.
+   *
+   * `knownTail` (B9-WATCH3) asserts `filePath` is the leaf the caller already
+   * observed: the walk then stats the tail's newer siblings instead of reading
+   * the whole window's headers. Only the chase in {@link followResumeChain}
+   * may claim this; attach starts cold.
    */
-  private async resolveResumeChain(provider: AgentProvider, filePath: string): Promise<string[]> {
+  private async resolveResumeChain(
+    provider: AgentProvider,
+    filePath: string,
+    options: { knownTail?: boolean } = {},
+  ): Promise<string[]> {
     if (provider !== "omp") {
       return [filePath];
     }
     try {
-      return await resolveOmpResumeLeafChain(filePath, { logger: this.logger });
+      return await resolveOmpResumeLeafChain(filePath, {
+        logger: this.logger,
+        knownTail: options.knownTail,
+      });
     } catch (error) {
       this.logger.debug(
         { err: error, filePath },

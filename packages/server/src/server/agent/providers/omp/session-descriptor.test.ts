@@ -1,4 +1,5 @@
-import { mkdtemp, mkdir, utimes, writeFile } from "node:fs/promises";
+import { mkdtemp, mkdir, unlink, utimes, writeFile } from "node:fs/promises";
+import type * as fsPromises from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { describe, expect, test, vi } from "vitest";
@@ -10,6 +11,21 @@ import {
   resolveOmpResumeAncestorPaths,
   resolveOmpResumeLeafChain,
 } from "./session-descriptor.js";
+
+// B9-WATCH3: the cost of a forward chase IS the transcript headers it opens —
+// the walk stats via `stat` and lists via `readdir`, so a passthrough wrapper on
+// `open` makes the header window countable without touching behaviour (the
+// session.test.ts pattern).
+const { headReads } = vi.hoisted(() => ({ headReads: [] as string[] }));
+
+vi.mock("node:fs/promises", async (importOriginal) => {
+  const actual = await importOriginal<typeof fsPromises>();
+  const open: typeof actual.open = async (...args) => {
+    headReads.push(String(args[0]));
+    return actual.open(...args);
+  };
+  return { ...actual, open };
+});
 
 async function writeSession(root: string, relativePath: string, lines: unknown[]): Promise<string> {
   const filePath = path.join(root, "sessions", relativePath);
@@ -615,5 +631,104 @@ describe("resolveOmpResumeLeafChain", () => {
       }),
     ).resolves.toEqual(chain);
     expect(quiet).not.toHaveBeenCalled();
+  });
+});
+
+// B9-WATCH3（F28-KI1 后续）：chase 的调用方知道起点就是它上次观察到的链尾
+// （`knownTail`）。比链尾更旧的兄弟不可能是它的孩子——空档必须零读头，而不是
+// 每档重读整个窗口。
+describe("resolveOmpResumeLeafChain known-tail chase (B9-WATCH3)", () => {
+  test("reads only headers newer than the remembered tail", async () => {
+    const root = await mkdtemp(path.join(tmpdir(), "paseo-omp-leaf-tail-"));
+    const parent = await writeSession(root, "project/parent.jsonl", [
+      { type: "session", id: "parent", timestamp: "2026-06-01T00:00:00.000Z", cwd: root },
+    ]);
+    await utimes(parent, new Date("2026-06-01"), new Date("2026-06-01"));
+    // A SMALL directory — under the cold-scan mtime-filter threshold — so a cold
+    // walk pays a header read for every one of these siblings.
+    for (let index = 0; index < 40; index += 1) {
+      const unrelated = await writeSession(root, `project/unrelated-${index}.jsonl`, [
+        {
+          type: "session",
+          id: `unrelated-${index}`,
+          timestamp: "2026-06-01T12:00:00.000Z",
+          cwd: root,
+        },
+      ]);
+      await utimes(unrelated, new Date("2026-06-01T12:00:00"), new Date("2026-06-01T12:00:00"));
+    }
+    const child = await writeSession(root, "project/child.jsonl", [
+      {
+        type: "session",
+        id: "child",
+        timestamp: "2026-06-02T00:00:00.000Z",
+        cwd: root,
+        parentSession: parent,
+      },
+    ]);
+    await utimes(child, new Date("2026-06-02"), new Date("2026-06-02"));
+
+    // The cold walk still lands on the child (stop-on-hit inside the window).
+    headReads.length = 0;
+    await expect(resolveOmpResumeLeafChain(parent)).resolves.toEqual([parent, child]);
+    expect(headReads.length).toBeGreaterThan(0);
+
+    // Chase from the remembered tail: every sibling is older than it, so the
+    // answer costs ZERO header reads. Pre-B9-WATCH3 this re-read the window.
+    headReads.length = 0;
+    await expect(resolveOmpResumeLeafChain(child, { knownTail: true })).resolves.toEqual([child]);
+    expect(headReads).toEqual([]);
+
+    // A grandchild lands: the chase reads exactly its header, nothing else.
+    const grand = await writeSession(root, "project/grand.jsonl", [
+      {
+        type: "session",
+        id: "grand",
+        timestamp: "2026-06-03T00:00:00.000Z",
+        cwd: root,
+        parentSession: child,
+      },
+    ]);
+    await utimes(grand, new Date("2026-06-03"), new Date("2026-06-03"));
+    headReads.length = 0;
+    await expect(resolveOmpResumeLeafChain(child, { knownTail: true })).resolves.toEqual([
+      child,
+      grand,
+    ]);
+    expect(headReads).toEqual([grand]);
+  });
+
+  test("a deleted remembered tail falls back to the cold scan, not a lost chain", async () => {
+    // The mtime floor needs the tail's stat; when the tail itself is gone the
+    // walk must degrade to the unfiltered scan instead of trusting a floor it
+    // cannot compute and reporting「no child」for a chain that has one.
+    const root = await mkdtemp(path.join(tmpdir(), "paseo-omp-leaf-tail-gone-"));
+    const parent = await writeSession(root, "project/parent.jsonl", [
+      { type: "session", id: "parent", timestamp: "2026-06-01T00:00:00.000Z", cwd: root },
+    ]);
+    const tail = await writeSession(root, "project/tail.jsonl", [
+      {
+        type: "session",
+        id: "tail",
+        timestamp: "2026-06-02T00:00:00.000Z",
+        cwd: root,
+        parentSession: parent,
+      },
+    ]);
+    const grand = await writeSession(root, "project/grand.jsonl", [
+      {
+        type: "session",
+        id: "grand",
+        timestamp: "2026-06-03T00:00:00.000Z",
+        cwd: root,
+        parentSession: tail,
+      },
+    ]);
+    await unlink(tail);
+
+    await expect(resolveOmpResumeLeafChain(tail, { knownTail: true })).resolves.toEqual([
+      tail,
+      grand,
+    ]);
   });
 });
