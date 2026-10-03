@@ -160,3 +160,11 @@
 - 根因实测定案见卡（journal mount 行=assistant 消息逐字节同；流 id=randomUUID≠journal id → provenance 方案）。实现=journalRowIds 有界登记（只 transcript 来源）+窗口行按 provenance 选身份/内容比对；R4-01 吞回声语义保真。
 - 门禁：ownership 46/46（新测修复前红实证）+watch/last-message/manager 266/266+server typecheck 0+oxlint 0/0；全量⊆W1 基线（勘误段）。
 - 遗留转上游：mount 行 preview 污染=omp 通知应写非 message 行型（paseo mapper 天然跳过未知类型）；paseo 侧拒绝内容特判。
+
+## F35 冻结时间戳（2026-10-03 19:3x，go.14 线）
+
+- 用户实证：pill 外部对了（B10/F33 生效），但会话在终端持续跑、行时间冻在 04:18、小字却是新的。
+- 取证链：记录 mtime=18:59（每分钟在写）内容却冻结；baseline=20,391,192=04:18 打开屏 resume 时 EOF（live 持有）；journal 此后 58 条可见行未推进记录。
+- 根因=投影半边缺：**applyLiveTranscriptChange（live-idle 观察）写时间线+升归属，但不 touchUpdatedAt**——流事件路径有 touch（2531），观察路径没有。app 打开过的会话由 daemon 持有 live，外来活动只进时间线不进列表时间。
+- 修复=观察路径对**可见外来行**补 touchUpdatedAt（emitState/persist 既有 !settled 分支自动带）；meta-only 行不动时间（对照测）。F35 测修复前必红（同毫秒相等断言戳破）。门禁：ownership 47/47+watch 族 266/266+typecheck 0+lint 0/0。
+- 附带观察（未修，无害记录）：journal 被 omp 压缩变小（20,391,192→20,301,286）时 shrink-reload 从 0 重放，重启后时间线空的首次重放会把旧行当外来上报一遍再逐 4MB 窗收敛——内容终局正确，仅预览短暂回跳；live 持有场景被 priming 身份去重完全吞住（B10 登记生效）。

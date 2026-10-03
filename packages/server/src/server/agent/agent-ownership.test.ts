@@ -1080,6 +1080,50 @@ describe("AgentManager live-idle transcript watching (B9-WATCH2, F33)", () => {
     }
   });
 
+  it("advances the row timestamp when the terminal writes visible rows into a held session (F35)", async () => {
+    const work = mkdtempSync(join(tmpdir(), "agent-ownership-live-idle-time-"));
+    const harness = createHarness(work);
+    let agentId: string | null = null;
+    try {
+      const agent = await harness.manager.createAgent(
+        { provider: "claude", cwd: work },
+        undefined,
+        { workspaceId: undefined },
+      );
+      agentId = agent.id;
+      await harness.manager.flush();
+      const sessionId = agent.persistence?.sessionId ?? "";
+      const transcript = join(harness.projectDir, `${sessionId}.jsonl`);
+      writeFileSync(transcript, claudeLine("user", "from the phone", "u1"));
+      await harness.manager.sweepTranscriptWatch();
+      const before = harness.manager.getAgent(agent.id)!.updatedAt.getTime();
+      expect((await harness.storage.get(agent.id))?.updatedAt).toBeDefined();
+
+      // A visible assistant row lands from the terminal: the live projection,
+      // the in-memory snapshot, and the persisted record must all move past
+      // the last daemon-owned moment. Pre-fix the record froze at `before`
+      // while only the pill escalated — the F35 frozen timestamp.
+      // (touchUpdatedAt is strictly monotonic even inside one millisecond.)
+      appendFileSync(transcript, claudeLine("assistant", "answered at the desk", "a2"));
+      await harness.manager.sweepTranscriptWatch();
+      await harness.manager.flush();
+      const after = harness.manager.getAgent(agent.id)!.updatedAt.getTime();
+      expect(after).toBeGreaterThan(before);
+      expect(Date.parse((await harness.storage.get(agent.id))!.updatedAt)).toBeGreaterThan(before);
+
+      // Control: an invisible meta row is still foreign evidence for the pill,
+      // but it is not conversation — the timestamp stands.
+      const metaAt = harness.manager.getAgent(agent.id)!.updatedAt.getTime();
+      appendFileSync(transcript, `${JSON.stringify({ type: "queue-operation", id: "q1" })}\n`);
+      await harness.manager.sweepTranscriptWatch();
+      await harness.manager.flush();
+      expect(harness.manager.getAgent(agent.id)!.updatedAt.getTime()).toBe(metaAt);
+    } finally {
+      if (agentId) await harness.manager.closeAgent(agentId).catch(() => undefined);
+      harness.cleanup();
+    }
+  });
+
   it("never attributes the daemon's own bytes: busy is set before the first write (race 1)", async () => {
     const work = mkdtempSync(join(tmpdir(), "agent-ownership-live-idle-busy-"));
     const harness = createHarness(work);

@@ -4241,6 +4241,15 @@ export class AgentManager {
       this.recordTimeline(live.id, item);
     }
     this.rememberJournalRowIds(live.id, foreign);
+    // F35: foreign VISIBLE rows are conversation activity — the list row's
+    // time must follow them. The stream path touches on every timeline event
+    // (2531); the live-idle observation path records rows and escalates
+    // ownership but historically left `updatedAt` alone, so a session the app
+    // holds open showed a fresh preview (live projection rides the timeline)
+    // beside a timestamp frozen at the last daemon-owned moment.
+    if (foreign.length > 0) {
+      this.touchUpdatedAt(live);
+    }
     // R4-33: rows the dedup belt swallowed WHOLE are paseo's own bytes echoing
     // back (death-flush of an already-recorded turn), not a foreign message —
     // the observation advances the cursor but must not arm the sticky external
