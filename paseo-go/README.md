@@ -1,7 +1,7 @@
 # Paseo Go — 接手入口（先读这页）
 
-> 手机优先的 Paseo 壳 app。当前状态：**已交付 v0.10.2-go.12**（批次九：导入行标题对齐/子任务可见性/角标右缘/live-idle 根修+review 15 卡；生产 daemon=go.12）——批次六：——列表标题=项目(worktree) 默认+备注只认壳重命名、所有权 pill 出生轴+活写者自愈（重启后全「未知」数秒清零）、导入页=resume 全量+已导入/已归档徽标、小字恒显、置顶往返不丢项、长按拖动不误触刷新；批次四微信化对话栏/单行顶栏与 M1-M4 发布链全就绪。分支 `paseo-go/v0.1.0`。
-> 发布物：Releases `v0.10.2-go.12` = 22 资产（APK sha256=`e43b5a55…c1a1`+CLI win32=`8a19617b…`/linux+desktop win/linux+全 sha256 表+latest 指针）。生产 daemon=`0.10.2-go.12`（升级/回滚仪式+清洁房部署=DEPLOY.md；**切机脚本必含版本断言闸**，回滚件 go.11 tgz sha 在 release/RELEASE.md）。
+> 手机优先的 Paseo 壳 app。当前状态：**已交付 v0.10.2-go.13**（B10 热修：外来 resume 的 mount 同文行不再骗过去重，外部 pill 正确；生产 daemon=go.13）——批次六：——列表标题=项目(worktree) 默认+备注只认壳重命名、所有权 pill 出生轴+活写者自愈（重启后全「未知」数秒清零）、导入页=resume 全量+已导入/已归档徽标、小字恒显、置顶往返不丢项、长按拖动不误触刷新；批次四微信化对话栏/单行顶栏与 M1-M4 发布链全就绪。分支 `paseo-go/v0.1.0`。
+> 发布物：Releases `v0.10.2-go.13` = 22 资产（APK sha256=`7235d798…5915`+CLI win32/linux+desktop win/linux+全 sha256 表+latest 指针）。生产 daemon=`0.10.2-go.13`（升级/回滚仪式+清洁房部署=DEPLOY.md；**切机脚本必含版本断言闸**，回滚件 go.12 tgz sha 在 release/RELEASE.md）。
 > 公开镜像：`github.com/Karl0007/paseo-go`（单向重放，无证据历史；同步工具 `release/make-public-mirror.sh`）。
 > 开放项：①置顶拖拽真人手指复验（ACCEPTANCE §5 首行，自动化 26 样本已全绿）；②语音端到端待用户部署 STT/TTS 端点（VOICE-DEPLOY.md）；③Q10 平板设计事后审（预授权落地，留档待审）。
 

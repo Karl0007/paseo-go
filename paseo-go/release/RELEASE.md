@@ -1,3 +1,13 @@
+# Paseo Go v0.10.2-go.13 落档（B10 热修线，2026-10-03）
+
+- 内容=**B10-MOUNTNOISE**（server-only）：tail-dedup 按 journal provenance 判身份——外来 resume 的逐字节同 mount 行不再被吞，外部 pill 正确翻转；真重放（同 id）照吞，流式行（ACP randomUUID≠journal id）保留内容兜底，R4-01 语义保真。回归测修复前必红+对照重放例；ownership 46/46+watcher 族 266/266+typecheck/lint 零错。
+- 版本链：B10 fix=`c529d193e`；VERSION=`7e137124f`；tag `v0.10.2-go.13`（镜像 9259360，树对账 5400≡5400 EMPTY，无二进制误入）。
+- 本机 APK sha256=`7235d79855210686893e0254df333ab74727c8ccf84118d4687f468273145915`（105,833,284 B，hbc go.13×1/go.12×0/919c737c×1，packagename/scheme 核）；装机帧 evidence/B13-RELEASE/01-04（stamp 实拍+a11y）。
+- CI run=`37084206406`（APK job 驱逐九连=预期红，其余全绿）；assemble=`37086007183` 绿；22 资产。
+- 生产 go.12→go.13：go13-cutover.ps1（三闸继承：npm 退出码→自动回滚、装后版本断言、自检 VERSION 门、装前 cache verify）一次成功，**DONE OK 且 VERSION=go.13 双证一致**；回滚件 go.12 tgz（8a19617b…cd0ac）在位。编排者对账：paseo --version=go.13、health ok。
+- 过程小坑：go13build 首跑 metro-cache EPERM（metro9d 停机残锁）→删 %TEMP%/metro-cache 重跑即愈；Release13 agent 收尾失联，落档/服务恢复/stayon 复位由编排者接管完成。
+- 现场：metro9e/devd13 ready；设备 stayon=0、app=go.13。
+
 # Paseo Go v0.10.2-go.12 落档（批次九发布，2026-10-03）
 
 - 内容=批次九：F30 导入行标题/小字=会话同款（别名优先/子行=子代理名/碰撞追加短 id）｜F31-B 子任务运行可见性（树观察+live-idle 传染+右缘「图标+数字」徽标+导入子行实况）｜F32 未读角标统一右缘唯一槽｜F33 live-idle 观察盲区根修｜review 轮 15 卡全闭（3×P1 含帧证溢出）+G3 排后。
