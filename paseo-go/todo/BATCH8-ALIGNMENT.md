@@ -150,3 +150,13 @@
 
 - 根因链静态实锤（dropTimelineTailDuplicates 内容比对吞外来 mount 行；agent-manager.ts:4209+）。卡=B10-MOUNTNOISE（行身份化去重/重放窗限定 + mapper 层 meta 化降噪），排 go.12 之后。
 - 与 F33 关系：F33 修的是「根本没在看」，F34 是「看了但被回声带子吞了」——同一用户症状（终端在跑显原生）的第二条根因。
+
+## 门禁口径坑（B10 轮发现，2026-10-03）
+
+`npx vitest run --reporter=junit --outputFile=...` 会**绕过默认配置的 e2e 排除**（server：7→567 个 e2e 用例入跑，170 失败=EPERM 临时目录锁/60s attention_required 超时/real-provider 依赖；**基线 stash 对照同红=与改动无关的既存环境项**）。标准门禁=plain `npx vitest run`；要 junit 就确认口径或用 `--project` 显式限定。另：vitest outputFile 的 MSYS 路径会写到 `C:/c/...`，用 Windows 盘符路径。
+
+## B10-MOUNTNOISE 修复落地（2026-10-03 05:0x，server-only）
+
+- 根因实测定案见卡（journal mount 行=assistant 消息逐字节同；流 id=randomUUID≠journal id → provenance 方案）。实现=journalRowIds 有界登记（只 transcript 来源）+窗口行按 provenance 选身份/内容比对；R4-01 吞回声语义保真。
+- 门禁：ownership 46/46（新测修复前红实证）+watch/last-message/manager 266/266+server typecheck 0+oxlint 0/0；全量⊆W1 基线（勘误段）。
+- 遗留转上游：mount 行 preview 污染=omp 通知应写非 message 行型（paseo mapper 天然跳过未知类型）；paseo 侧拒绝内容特判。

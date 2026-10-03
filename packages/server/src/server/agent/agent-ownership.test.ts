@@ -353,6 +353,75 @@ function claudeLine(role: "user" | "assistant", text: string, uuid: string): str
 }
 
 describe("AgentManager ownership accounting", () => {
+  it("escalates when a foreign resume re-emits a byte-identical notification row (B10-MOUNTNOISE)", async () => {
+    const work = mkdtempSync(join(tmpdir(), "agent-ownership-mount-"));
+    const configDir = join(work, "claude-config");
+    const previousConfigDir = process.env.CLAUDE_CONFIG_DIR;
+    process.env.CLAUDE_CONFIG_DIR = configDir;
+    const logger = createTestLogger();
+    const storage = new AgentStorage(join(work, "agents"), logger);
+    const manager = new AgentManager({
+      clients: { claude: createTestAgentClient("claude") },
+      registry: storage,
+      transcriptStatPollIntervalMs: 60 * 60 * 1000,
+      logger,
+    });
+    const unsubscribe = manager.subscribe(() => {});
+    // The harness notification row: same text on EVERY resume, new journal id.
+    const mount = "xd://: mounted mcp__demo_cancel_job, mcp__demo_generate_image";
+
+    try {
+      const agent = await manager.createAgent({ provider: "claude", cwd: work }, undefined, {
+        workspaceId: undefined,
+      });
+      const sessionId = agent.persistence?.sessionId ?? "";
+      const projectDir = claudeProjectDirSync(work, { configDir });
+      mkdirSync(projectDir, { recursive: true });
+      const transcript = join(projectDir, `${sessionId}.jsonl`);
+      writeFileSync(transcript, "");
+      await manager.flush();
+      // First sweep attaches and baselines the live-idle session (B9-WATCH2).
+      await manager.sweepTranscriptWatch();
+
+      // The daemon's own process writes its mount copy (m1). Live-idle watch
+      // observes it: recorded, remembered — the timeline tail holds the text.
+      appendFileSync(transcript, claudeLine("assistant", mount, "m1"));
+      await manager.sweepTranscriptWatch();
+      await manager.flush();
+      expect(manager.getAgent(agent.id)?.ownership.value).toBe("external");
+
+      // The user resumes in their own terminal: the harness re-emits the SAME
+      // notification text under a new journal id (m2). Pre-fix the tail-dedup
+      // belt matched on text, swallowed the foreign row as an echo of paseo's
+      // own copy — the pill stayed pinned to native.
+      appendFileSync(transcript, claudeLine("assistant", mount, "m2"));
+      await manager.sweepTranscriptWatch();
+      await manager.flush();
+      const mountRows = manager
+        .getTimeline(agent.id)
+        .filter((item) => item.type === "assistant_message" && item.text === mount);
+      expect(mountRows).toHaveLength(2);
+
+      // Control: a true replay (same journal id re-read) is still swallowed.
+      appendFileSync(transcript, claudeLine("assistant", mount, "m2"));
+      await manager.sweepTranscriptWatch();
+      await manager.flush();
+      expect(
+        manager
+          .getTimeline(agent.id)
+          .filter((item) => item.type === "assistant_message" && item.text === mount),
+      ).toHaveLength(2);
+    } finally {
+      unsubscribe();
+      manager.stopTranscriptWatch();
+      if (previousConfigDir === undefined) {
+        delete process.env.CLAUDE_CONFIG_DIR;
+      } else {
+        process.env.CLAUDE_CONFIG_DIR = previousConfigDir;
+      }
+    }
+  });
+
   it("releases to none, escalates to external on a foreign write, and re-acquires on resume", async () => {
     const work = mkdtempSync(join(tmpdir(), "agent-ownership-"));
     const configDir = join(work, "claude-config");

@@ -824,6 +824,15 @@ export class AgentManager {
   private readonly providerSubagents = new ProviderSubagentStore();
   private readonly agentsAwaitingInitialSnapshotPersist = new Set<string>();
   private readonly sessionEventTails = new Map<string, Promise<void>>();
+  /**
+   * Message ids of rows recorded from the provider transcript itself (watcher
+   * observations, resume priming) — B10-MOUNTNOISE provenance for
+   * `dropTimelineTailDuplicates`. The ACP adapter streams a runtime
+   * `crypto.randomUUID()` per live message that never matches the journal
+   * row's id, so only transcript-sourced rows may be identity-matched;
+   * streamed rows keep the content fallback. Bounded FIFO per agent.
+   */
+  private readonly journalRowIds = new Map<string, Set<string>>();
   private readonly steerEventBarriers = new Map<string, SteerEventBarrier>();
   private readonly foregroundMutationTails = new Map<string, Promise<void>>();
   private readonly runs = new AgentRunState();
@@ -1709,6 +1718,7 @@ export class AgentManager {
         // Wipe the in-memory timeline so registerSession mints a new epoch and
         // hydrateTimelineFromProvider re-streams the freshly read provider history.
         this.timelineStore.delete(agentId);
+        this.journalRowIds.delete(agentId);
         for (const event of this.providerSubagents.deleteParent(agentId)) {
           this.dispatch({ type: "provider_subagent", event });
         }
@@ -3695,6 +3705,10 @@ export class AgentManager {
           for (const entry of session.initialTimeline) {
             this.recordTimeline(managed.id, entry.item, { timestamp: entry.timestamp });
           }
+          this.rememberJournalRowIds(
+            managed.id,
+            session.initialTimeline.map((entry) => entry.item),
+          );
         }
         this.refreshSessionPersistence(managed);
       }
@@ -3967,6 +3981,7 @@ export class AgentManager {
   private discardRetainedAgentState(agentId: string): void {
     this.transcriptWatch.detach(agentId);
     this.timelineStore.delete(agentId);
+    this.journalRowIds.delete(agentId);
     this.paseoToolPolicies.delete(agentId);
     for (const event of this.providerSubagents.deleteParent(agentId)) {
       this.dispatch({ type: "provider_subagent", event });
@@ -4225,6 +4240,7 @@ export class AgentManager {
     for (const item of foreign) {
       this.recordTimeline(live.id, item);
     }
+    this.rememberJournalRowIds(live.id, foreign);
     // R4-33: rows the dedup belt swallowed WHOLE are paseo's own bytes echoing
     // back (death-flush of an already-recorded turn), not a foreign message —
     // the observation advances the cursor but must not arm the sticky external
@@ -4277,6 +4293,7 @@ export class AgentManager {
     // R4-01 belt: same tail-alignment as the live path — replayed rows are not
     // new foreign messages.
     const foreign = this.dropTimelineTailDuplicates(change.agentId, change.items);
+    this.rememberJournalRowIds(change.agentId, foreign);
     for (const [index, item] of foreign.entries()) {
       const row = resident ? this.recordTimeline(change.agentId, item) : null;
       const advanced = advanceAgentLastMessage(track, item, row?.seq ?? index + 1);
@@ -4445,7 +4462,56 @@ export class AgentManager {
     }
     const existing = this.timelineStore.getItems(agentId);
     const window = existing.slice(-(items.length + TIMELINE_DEDUP_TRAILING_ROWS));
-    return items.filter((item) => !window.some((row) => sameTranscriptRow(row, item)));
+    const seen = this.journalRowIds.get(agentId);
+    return items.filter(
+      (item) =>
+        !window.some((row) => {
+          // B10-MOUNTNOISE: a transcript-sourced timeline row and the observed
+          // row share the journal's id space — identity is the id. The harness
+          // re-emits byte-identical notification rows (MCP mount lines) on
+          // every resume; content-only matching read a foreign resume's copy
+          // as an echo of the daemon's own and pinned the session to `native`.
+          const rowId = transcriptMessageId(row);
+          return rowId && seen?.has(rowId)
+            ? transcriptMessageId(item) === rowId
+            : sameTranscriptRow(row, item);
+        }),
+    );
+  }
+
+  /**
+   * Remember the journal ids of rows recorded from a transcript observation
+   * (bounded FIFO; ids are only ever added by transcript-sourced paths — see
+   * `journalRowIds`).
+   */
+  private rememberJournalRowIds(agentId: string, items: readonly AgentTimelineItem[]): void {
+    let ids = this.journalRowIds.get(agentId);
+    for (const item of items) {
+      if (item.type !== "user_message" && item.type !== "assistant_message") {
+        continue;
+      }
+      const id = transcriptMessageId(item);
+      if (!id) {
+        continue;
+      }
+      ids ??= this.openJournalIdSet(agentId);
+      if (!ids.has(id)) {
+        ids.add(id);
+        if (ids.size > JOURNAL_ID_MEMORY) {
+          const oldest = ids.values().next();
+          if (!oldest.done) ids.delete(oldest.value);
+        }
+      }
+    }
+  }
+
+  private openJournalIdSet(agentId: string): Set<string> {
+    let ids = this.journalRowIds.get(agentId);
+    if (!ids) {
+      ids = new Set<string>();
+      this.journalRowIds.set(agentId, ids);
+    }
+    return ids;
   }
 
   private subscribeToSession(agent: ActiveManagedAgent): void {
@@ -4721,6 +4787,7 @@ export class AgentManager {
     this.agentStreamCoalescer.flushAndDiscard(agent.id);
     await this.deleteCommittedTimeline(agent.id);
     this.timelineStore.delete(agent.id);
+    this.journalRowIds.delete(agent.id);
     this.timelineStore.initialize(agent.id, { timestamp: new Date().toISOString() });
     agent.historyPrimed = true;
 
@@ -6115,11 +6182,24 @@ export function commandMayHaveChangedExternalState(command: string): boolean {
 /** Rows a failed turn synthesizes between the provider's tail and a read-back. */
 const TIMELINE_DEDUP_TRAILING_ROWS = 2;
 
+/** Per-agent FIFO bound for the transcript-id provenance set. */
+const JOURNAL_ID_MEMORY = 1024;
+
+/** The provider id of a chat-message row; other timeline item kinds have none. */
+function transcriptMessageId(item: AgentTimelineItem): string | undefined {
+  return item.type === "user_message" || item.type === "assistant_message"
+    ? item.messageId
+    : undefined;
+}
+
 /**
  * Identity of a transcript-mapped message row against a resident timeline row
  * (R4-01 belt for `dropTimelineTailDuplicates`). Non-message rows never match:
  * the transcript mapper only emits message rows, and a false duplicate drop
- * would lose real content.
+ * would lose real content. Journal-provenance rows are compared by id in
+ * `dropTimelineTailDuplicates` before reaching here (B10-MOUNTNOISE); this is
+ * the content fallback for rows whose journal id is unknown (streamed rows,
+ * id-less providers).
  */
 function sameTranscriptRow(a: AgentTimelineItem, b: AgentTimelineItem): boolean {
   if (a.type !== b.type) {

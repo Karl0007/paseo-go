@@ -1,19 +1,23 @@
-# B10-MOUNTNOISE mount 噪音行毒化去重与预览（F34）
+# B10-MOUNTNOISE mount 噪音行毒化去重→外部会话误判原生（F34）
 
-## 症状（用户截图 02:3x，生产 go.11）
+## 症状（用户截图 02:3x / 04:18，生产）
 
-每次 resume（含终端外部）transcript 落一条全同噪音「xd://: mounted mcp\__genmedia_\*…」（MCP 工具挂载通知，工具表不变则逐字节同）。后果①终端续写的会话 pill 停「原生」（外来证据被吞）；②该行成为 preview 污染对话列表小字。
+每次 resume transcript 落一条「xd://: mounted mcp\__genmedia_\*…」（MCP 挂载通知；工具表不变则逐字节同，journal id 每次新）。终端续写的会话 pill 停「原生」；该行还成为列表 preview。
 
-## 根因（静态读链实锤，卡内补运行时复现）
+## 实测定案（推翻卡初稿两处假设）
 
-`agent-manager.ts:4209+` R4-01 belt `dropTimelineTailDuplicates` 按**渲染后内容**与时间线尾部对齐：终端 resume 写的 mount 行与 daemon 早前 app-resume 写过的同名行内容全等→被判「paseo 自己字节回声」→`settledObservation=true` 不升外部。同行为消息进 `advanceAgentLastMessage`→preview。
+1. **mount 行在 journal 里是 `role:"assistant"` 消息行**（本机会话 journal 15 条实证）→ 被 mapper 映射为 assistant_message → tail-dedup **按内容**比对命中时间线里早前那份（app 打开会话时 daemon 自己 resume 写的 m1）→ 外来 m2 被当「自己字节回声」吞 → 不升外部。d6484fa 的 journal 零 mount 行（其 03:24 帧=go.11 的 F33 盲区，04:18 帧=app 打开屏 daemon 自己 resume 的瞬间，原生属实）——**两种根因同症状，F33 修「没在看」，B10 修「看了但吞了」**。
+2. **流侧 id 与 journal id 不同空间**（omp.exe 二进制实锤：`liveMessageId = crypto.randomUUID()`，journal 行 id 是 8-hex）→ 朴素的「双方有 id 就比 id」会破坏 R4-01 death-flush 吞回声（fake-client 测无 id 不报，生产炸）——**已否决**。
 
-## 修复方向（卡内按复现选，根因级禁特判）
+## 实现（provenance 方案）
 
-1. **身份化去重**：omp transcript 行若带原生 id/timestamp 字段，tail-dedup 改按 (内容+行身份) 或 raw 行比对——只有真·同一次写入的回声才吞；不同进程的同行文本不再误判。若行无身份字段，退而求其次：dedup 只在**已知重放窗**内生效（death-flush/release-baseline/journal-shrink 触发标记），平时外来行不吞。
-2. **预览/时间线降噪**：mount/挂载类系统通知行映射为 meta（不进 preview、不占「我:/末条」位），provider mapper 层解决，导入屏与会话行同时受益。
-3. 运行时复现钉死：app 开一次会话（timeline 有 mount 行）→终端 append 同 mount 行+一行真外来消息→断言先翻外部（或 mount 行不吞+第二行翻），修复前停原生。
+`agent-manager.ts`：manager 维护 `journalRowIds`（每 agent 有界 FIFO 1024，只登记**从 transcript 观察/replay priming 进入时间线**的行 id；流式行不登记）。`dropTimelineTailDuplicates`：窗口行 id ∈ 登记集 → 身份=比 id（外来同文新 id 不再被吞；真重放同行同 id 照吞）；否则旧内容兜底（流式行 death-flush 场景原语义不动）。三处登记点=live/stored 观察路径+initialTimeline priming；三处随 timelineStore.delete 清理。
 
-## 验收
+## 验收（已达成）
 
-复现测修复前必红；「真回声被吞」（R4-01 原场景：death-flush 重放）不回归；preview 不再出现 mount 行（测+真机帧）；终端纯 mount 行 resume（还没聊）时的 pill 语义在卡内定案（行身份方案=外部·静默；重放窗方案=保持原生直到真消息——选其一并写明理由）。
+- 回归测 `B10-MOUNTNOISE`（agent-ownership.test.ts）：m1 观察入册 → 外来同文 m2 **必成第二行**（修复前红=1 行实证，stash 复跑）；同 id 重放照吞（对照组恒绿）。
+- R4-01/03/04 全族 + watcher 套 94/94 绿；server 全量门禁见下。
+
+## 遗留（不在本卡）
+
+- **preview 污染**：mount 行是合法 assistant 消息（harness 写死），paseo 侧无结构特征可辨、拒绝内容特判。根治=omp 侧把通知写成非 message 行型（mapper 按设计跳过未知类型）→ 转上游需求（omp 仓）。旧 journal 里的历史噪音行留在原地（无害）。
