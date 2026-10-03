@@ -4256,12 +4256,17 @@ export class AgentManager {
     // pending. A change with no visible rows at all (items=[], meta/control
     // rows) IS foreign evidence (R4-04 posture); only full dedup settles.
     const settledObservation = change.items.length > 0 && foreign.length === 0;
-    const pending = ownershipWithExternalActivity(
-      settledObservation
-        ? ownershipWithTranscriptVisibility(live.ownership, true, change.baselineBytes)
-        : ownershipOnExternalChange(live.ownership, { baselineBytes: change.baselineBytes }),
-      change.externalLooksActive,
-    );
+    // F36: a tree-only report on a session this daemon HOLDS is its own
+    // children working between the parent's turns — not a foreign writer.
+    // The ownership pair stands (an already-escalated value still decays
+    // through the activity bit below); only byte movement may escalate.
+    const base =
+      change.treeOnly && !change.items.length
+        ? live.ownership
+        : settledObservation
+          ? ownershipWithTranscriptVisibility(live.ownership, true, change.baselineBytes)
+          : ownershipOnExternalChange(live.ownership, { baselineBytes: change.baselineBytes });
+    const pending = ownershipWithExternalActivity(base, change.externalLooksActive);
     // B9-SUBACT: the count is part of the projected payload, so a move of it has
     // to reach subscribers like the ownership pair does. And `settled` has to
     // honour `externalLooksActive`: the decay of a child tree (external·running →

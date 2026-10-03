@@ -137,6 +137,13 @@ export interface TranscriptWatchCandidate {
    * all went stale while no entry existed.
    */
   activeSubagents?: number;
+  /**
+   * F36: the report carries ONLY child-tree movement (no main-transcript bytes
+   * moved). A session THIS daemon holds live spawns its own children — their
+   * activity between the parent's turns is self activity, never foreign
+   * evidence; the caller keeps the ownership pair untouched for these.
+   */
+  treeOnly?: boolean;
 }
 
 export interface TranscriptChange {
@@ -157,6 +164,13 @@ export interface TranscriptChange {
    * child appearing, and the caller's badge must be able to clear.
    */
   activeSubagents?: number;
+  /**
+   * F36: the report carries ONLY child-tree movement (no main-transcript bytes
+   * moved). A session THIS daemon holds live spawns its own children — their
+   * activity between the parent's turns is self activity, never foreign
+   * evidence; the caller keeps the ownership pair untouched for these.
+   */
+  treeOnly?: boolean;
 }
 
 /** What `attach` learned: the transcript it now tails and the cursor it starts from. */
@@ -989,6 +1003,7 @@ export class TranscriptWatchService {
       baselineBytes: entry.cursor ?? entry.chainBaseBytes,
       externalLooksActive: await this.entryLooksActive(entry),
       activeSubagents: entry.subagentCount ?? 0,
+      treeOnly: true,
     });
   }
 

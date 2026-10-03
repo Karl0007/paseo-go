@@ -1439,6 +1439,50 @@ describe("AgentManager self-written tree baseline (B9-01)", () => {
   });
 });
 
+describe("AgentManager live self-child (F36)", () => {
+  it("keeps a live-idle agent's own child writing AFTER the attach floor silent too (F36)", async () => {
+    const work = mkdtempSync(join(tmpdir(), "agent-ownership-live-child-"));
+    const transcript = join(work, "sessions", "2026-10-03_running.jsonl");
+    mkdirSync(dirname(transcript), { recursive: true });
+    writeFileSync(transcript, ompSessionHeader(work));
+    const harness = createOmpHarness(work, transcript);
+    let agentId: string | null = null;
+    try {
+      const agent = await harness.manager.createAgent({ provider: "omp", cwd: work }, undefined, {
+        workspaceId: undefined,
+      });
+      agentId = agent.id;
+      await harness.manager.flush();
+      // Attach happens on this sweep — the floor lands here.
+      await harness.manager.sweepTranscriptWatch();
+      await harness.manager.flush();
+
+      // The daemon's own subagent keeps working between the parent's turns:
+      // its child journal is written AFTER the floor, so mtime can never
+      // distinguish it from a foreign writer's child. Pre-fix the tree-only
+      // report escalated the held session — the user watched their own chat
+      // row flip to 外部 while their assistant ran its own tasks. The badge
+      // must still light: the count is honest, only the escalation is wrong.
+      const childDir = transcript.slice(0, -".jsonl".length);
+      mkdirSync(childDir, { recursive: true });
+      writeFileSync(join(childDir, "Release.jsonl"), ompSessionHeader(childDir));
+
+      await harness.manager.sweepTranscriptWatch();
+      await harness.manager.flush();
+
+      const live = harness.manager.getAgent(agent.id);
+      expect(live?.ownership.value).toBe("paseo");
+      expect(live?.activeSubagents).toBe(1);
+      const record = await harness.storage.get(agent.id);
+      expect(record?.ownership).toBe("paseo");
+      expect(record?.activeSubagents).toBe(1);
+    } finally {
+      if (agentId) await harness.manager.closeAgent(agentId).catch(() => undefined);
+      harness.cleanup();
+    }
+  });
+});
+
 describe("AgentManager cross-entry count decay (B9-02)", () => {
   function decayRecord(input: {
     transcript: string;
@@ -1611,6 +1655,16 @@ describe("AgentManager subagent count decay commit and emit (B9-06)", () => {
       );
       await harness.manager.sweepTranscriptWatch(); // attach; the floor is now
 
+      // F36: a held session's tree alone no longer escalates (own children are
+      // self activity). Reach `external` the honest way first — a foreign row
+      // in the MAIN transcript — then let the stranger-shaped children carry
+      // the count, so the decay still exercises external·running → external.
+      appendFileSync(transcript, `${JSON.stringify({
+        type: "message",
+        id: "f-1",
+        message: { role: "assistant", content: [{ type: "text", text: "written elsewhere" }] },
+      })}\n`);
+
       // A stranger's children under the held-open session, written past the
       // floor (the utimes stands in for the sweep gap without sleeping).
       const childDir = transcript.slice(0, -".jsonl".length);
@@ -1625,6 +1679,7 @@ describe("AgentManager subagent count decay commit and emit (B9-06)", () => {
       await harness.manager.sweepTranscriptWatch();
       await harness.manager.flush();
       expect(harness.manager.getAgent(agent.id)?.activeSubagents).toBe(2);
+      expect(harness.manager.getAgent(agent.id)?.ownership.value).toBe("external");
 
       // The subagents finish: external·running → external changes no ownership
       // VALUE — the emit must ride the count move anyway.

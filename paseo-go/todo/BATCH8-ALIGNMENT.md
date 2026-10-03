@@ -168,3 +168,10 @@
 - 根因=投影半边缺：**applyLiveTranscriptChange（live-idle 观察）写时间线+升归属，但不 touchUpdatedAt**——流事件路径有 touch（2531），观察路径没有。app 打开过的会话由 daemon 持有 live，外来活动只进时间线不进列表时间。
 - 修复=观察路径对**可见外来行**补 touchUpdatedAt（emitState/persist 既有 !settled 分支自动带）；meta-only 行不动时间（对照测）。F35 测修复前必红（同毫秒相等断言戳破）。门禁：ownership 47/47+watch 族 266/266+typecheck 0+lint 0/0。
 - 附带观察（未修，无害记录）：journal 被 omp 压缩变小（20,391,192→20,301,286）时 shrink-reload 从 0 重放，重启后时间线空的首次重放会把旧行当外来上报一遍再逐 4MB 窗收敛——内容终局正确，仅预览短暂回跳；live 持有场景被 priming 身份去重完全吞住（B10 登记生效）。
+
+## F36 自己的子代理把自己的行打成外部（2026-10-03 19:4x，go.15 线）
+
+- 用户实证+猜测命中：与我的会话行变「外部」——正是我派发的子代理（Release14.jsonl 实写中，挂在我会话链 01a0ffef 下）。
+- 根因：live-idle 会话的**纯树报告（items=[]）按 R4-04 姿态被当外来证据**升级内存快照；但持有态会话的子进程就是 daemon 自己生的——attach 地板只能退休「attach 前」的孩子，**跨轮次持续写作的自家孩子 mtime 永远新鲜**，地板机制天然覆盖不了。盘上记录仍 paseo（手机看的是 live 快照）。
+- 修复=TranscriptChange 加 `treeOnly`（reportSubagentActivity 置位）；live 路径 treeOnly 且无可见行 → **归属对不动**（已外部者的 running 位照常衰减、徽标计数照常流动）；stored 路径不变（F31-B 终端场景=树即外来，B9-SUBACT 释放态测原样绿）。B9-06 衰减测按新语义重写前提（外来主行升外部→树衰减）。
+- 新测 F36（attach 后自家孩子续写→paseo+徽标=1；修复前红=external 实证）；ownership 48/48+watch 族 266/266+typecheck 0。
