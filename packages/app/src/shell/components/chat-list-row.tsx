@@ -499,8 +499,19 @@ function ChatRowInner({
       key: agent.key,
       serverId: agent.serverId,
       agentId: agent.agent.id,
+      // F37-v2: 刷新 grades these before resuming (the send guard's table).
+      ownership: agent.agent.ownership,
+      externalLooksActive: agent.agent.externalLooksActive,
+      provider: agent.agent.provider,
     }),
-    [agent.key, agent.serverId, agent.agent.id],
+    [
+      agent.key,
+      agent.serverId,
+      agent.agent.id,
+      agent.agent.ownership,
+      agent.agent.externalLooksActive,
+      agent.agent.provider,
+    ],
   );
   // D21 (B6-TITLE / batch-6 F18): the row's 备注 is the shell rename and nothing
   // else. `agent.title` is NOT fed in — the daemon stamps it at birth with the

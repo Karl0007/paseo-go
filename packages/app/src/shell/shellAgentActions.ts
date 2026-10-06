@@ -17,6 +17,8 @@ import { SHELL_I18N_NAMESPACE } from "@/shell/i18n";
 import { useToast } from "@/contexts/toast-context";
 import { usePaseoGoArchiveStore } from "@/shell/stores/archive";
 import { usePaseoGoPinsStore } from "@/shell/stores/pins";
+import { OWNERSHIP_SEND_BODY_KEY, decideOwnershipSendWarning } from "@/shell/chats/ownership";
+import { OWNERSHIP_SEND_DIALOG_KEYS } from "@/shell/composer/ownership-send-guard";
 import { usePaseoGoReadStateStore } from "@/shell/stores/readState";
 import { usePaseoGoStickyPreviewStore } from "@/shell/stores/stickyPreview";
 
@@ -25,6 +27,16 @@ export interface ShellChatTarget {
   key: string;
   serverId: string;
   agentId: string;
+  /**
+   * F37-v2: the ownership facts the 刷新 action grades before resuming.
+   * refreshAgent is a RESUME (the daemon spawns the provider on the source
+   * transcript) — against a live external writer that is the fork, so the
+   * action asks with the SAME graded table as the composer send guard.
+   * Absent facts (older callers, missing row) grade as `pass` (COMPAT).
+   */
+  ownership?: string | null;
+  externalLooksActive?: boolean | null;
+  provider?: string;
 }
 
 /** The daemon surface the action layer needs; `Pick` keeps test doubles honest. */
@@ -146,6 +158,22 @@ export function createShellAgentActions(deps: ShellAgentActionDeps): ShellAgentA
     },
     refresh: async (target) => {
       if (refreshing.has(target.key)) return;
+      // F37-v2: 刷新 = resume = 潜在分叉 — grade with the send guard's table and
+      // confirm before spawning anything. Cancel = silent no-op (nothing ran).
+      const decision = decideOwnershipSendWarning({
+        ownership: target.ownership,
+        externalLooksActive: target.externalLooksActive,
+        provider: target.provider ?? "",
+      });
+      if (decision !== "pass") {
+        const proceed = await confirm({
+          title: t(OWNERSHIP_SEND_DIALOG_KEYS.title),
+          message: t(OWNERSHIP_SEND_BODY_KEY[decision]),
+          confirmLabel: t("chats.ownership.refreshConfirm"),
+          cancelLabel: t(OWNERSHIP_SEND_DIALOG_KEYS.cancel),
+        });
+        if (!proceed) return;
+      }
       haptic();
       const client = getClient(target.serverId);
       if (!client) {

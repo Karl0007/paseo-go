@@ -101,7 +101,8 @@
       "sendBodyCodex": "This session may be running in an external terminal. Nothing is lost, but the other side won't see this message.",
       "sendConfirm": "Send anyway",
       "sendCancel": "Cancel",
-      "sendCancelled": "Send cancelled"
+      "sendCancelled": "Send cancelled",
+      "refreshConfirm": "Refresh anyway"
     },
     "time": {
       "yesterday": "Yesterday"

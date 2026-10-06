@@ -66,8 +66,23 @@ export function WorkspaceSessionRow({
 
   const handlePress = useCallback(() => onOpen(session), [onOpen, session]);
   const target = useMemo<ShellChatTarget>(
-    () => ({ key: session.key, serverId: agent.serverId, agentId: agent.id }),
-    [session.key, agent.serverId, agent.id],
+    () => ({
+      key: session.key,
+      serverId: agent.serverId,
+      agentId: agent.id,
+      // F37-v2: 刷新 grades these before resuming (the send guard's table).
+      ownership: agent.ownership,
+      externalLooksActive: agent.externalLooksActive,
+      provider: agent.provider,
+    }),
+    [
+      session.key,
+      agent.serverId,
+      agent.id,
+      agent.ownership,
+      agent.externalLooksActive,
+      agent.provider,
+    ],
   );
   const displayTitle = alias ?? agent.title ?? t("chats.untitled");
   // C33: 重命名 pushes the rename screen through the menu's injected opener.

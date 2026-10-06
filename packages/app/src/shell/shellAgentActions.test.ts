@@ -199,6 +199,37 @@ describe("daemon actions", () => {
     expect(deps.notify).not.toHaveBeenCalled();
   });
 
+  it("F37-v2: refresh on an external·running row asks with the send guard's table first", async () => {
+    const client = makeClient();
+    const { deps } = makeDeps(client);
+    const confirm = deps.confirm;
+    // 取消 = 静默 no-op：不 resume、不 toast。
+    confirm.mockResolvedValueOnce(false);
+    await createShellAgentActions(deps).refresh({
+      ...target,
+      ownership: "external",
+      externalLooksActive: true,
+      provider: "omp",
+    });
+    expect(confirm).toHaveBeenCalledWith(
+      expect.objectContaining({
+        title: "chats.ownership.sendTitle",
+        message: "chats.ownership.sendBody",
+        confirmLabel: "chats.ownership.refreshConfirm",
+      }),
+    );
+    expect(client.refreshAgent).not.toHaveBeenCalled();
+    // 确认 = 照常刷新。
+    confirm.mockResolvedValueOnce(true);
+    await createShellAgentActions(deps).refresh({
+      ...target,
+      ownership: "external",
+      externalLooksActive: true,
+      provider: "omp",
+    });
+    expect(client.refreshAgent).toHaveBeenCalledWith("a1");
+  });
+
   it("refresh rehydrates the imported chat on the host and toasts", async () => {
     const client = makeClient();
     const { deps } = makeDeps(client);

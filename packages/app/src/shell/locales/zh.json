@@ -101,7 +101,8 @@
       "sendBodyCodex": "该会话可能正在外部终端运行。消息不会丢失，但对方将看不到你这条。",
       "sendConfirm": "仍要发送",
       "sendCancel": "取消",
-      "sendCancelled": "已取消发送"
+      "sendCancelled": "已取消发送",
+      "refreshConfirm": "仍要刷新"
     },
     "time": {
       "yesterday": "昨天"

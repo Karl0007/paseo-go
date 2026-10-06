@@ -30,3 +30,13 @@
 - 服务器测：首次拒+二次放行+非外部直过+live/stored 两态；manager 语义单测。
 - 壳测：fork 门拆除后打开路径回归；警示条可见性判据；refresh-once 守卫（同焦不重复刷）。
 - 真机：导入运行中会话 → 打开无弹窗、直接见最新；pill 外部·运行中时顶栏下警示条在；发一条→聊天流出现拒发提示；再发→成功且源会话分叉（如实）；警示条在源静默后消失。
+
+## v2 现场修正（Release15 装机取证，P1，2026-10-06 22:31）
+
+**「打开只读永不分叉」被现场证伪——但证伪的是我 v1 的实现，不是命题本身**：v1 的「聚焦即静默 refreshAgent」效应里，`refreshAgent`=服务端 resume（实测：refresh_agent_request 2.7s → daemon 派生 `omp.exe --mode rpc-ui --session <源journal>`，与用户活着的终端进程=双写者；journal 落 session_exit dispose；记录翻 paseo）。C24 当年拦的正是这个。**v1 效应已删**：打开=官方屏自身的只读历史 hydration（d6484fa 04:18 无刷新也见终端最新=既有实证），零 resume。
+
+**顺带收口历史遗留风险**：C24 手动「刷新」菜单项=同一个 resume 触发点，自批次 C 起无确认直发。v2=对 external·running 行按发送守卫同表弹分叉确认（确认文案「仍要刷新」，取消=静默 no-op）；三处 target（列表行/工作区行/胶囊）带上归属事实。
+
+**发布处置**：go.15 整条作废（tag/资产/本机包全拆，生产 go.14 未动，证据=evidence/B15-RELEASE/P1-resume-on-open.md）；v2 随 **go.16** 全链，装机帧加双证=打开导入会话时 daemon 日志无 refresh_agent_request、无 omp 派生。
+
+v2 门禁：shell 全套 972/974（2=已知 memo 计时 flaky 单跑绿）+app typecheck 0+oxlint 0；refresh 守卫测（取消不 resume/确认照常）在 shellAgentActions.test。

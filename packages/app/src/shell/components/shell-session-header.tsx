@@ -46,7 +46,7 @@
 // box-none, rendered after the navigator in AppContainer) floats above every
 // screen in-window: touches outside the bar pass through to the session, and
 // system back/gesture pop it untouched.
-import { useCallback, useEffect, useMemo, useRef } from "react";
+import { useCallback, useMemo } from "react";
 import { Pressable, Text, View } from "react-native";
 import { router } from "expo-router";
 import { Portal } from "@gorhom/portal";
@@ -73,7 +73,6 @@ import { DEFAULT_FLOATING_PANEL_PORTAL_HOST } from "@/components/ui/floating-pan
 import { MenuSubTrigger, type MenuPageDefinition } from "@/components/ui/menu";
 import { useAggregatedAgents, type AggregatedAgent } from "@/hooks/use-aggregated-agents";
 import { useSessionStore } from "@/stores/session-store";
-import { getHostRuntimeStore } from "@/runtime/host-runtime";
 import { useWorkspace } from "@/stores/session-store-hooks";
 import { deriveSidebarStateBucket, type SidebarStateBucket } from "@/utils/sidebar-agent-state";
 import { isImportedProviderSession } from "@getpaseo/protocol/agent-labels";
@@ -189,22 +188,12 @@ export function ShellSessionHeaderOverlay() {
     );
   }, [agents, serverId, focusedAgentId]);
 
-  // F37: opening an imported chat should show the PC's LATEST work — the open
-  // itself is read-only (never resumes), so the daemon copy is rehydrated once
-  // per focus from the source transcript (the manual 刷新 menu action, run
-  // silently; a failure leaves the readable snapshot and the menu for retry).
-  const importedNow = agent !== null && isImportedProviderSession(agent);
-  const lastRefreshRef = useRef<string | null>(null);
-  useEffect(() => {
-    if (!serverId || !focusedAgentId || !importedNow) return;
-    const key = `${serverId}:${focusedAgentId}`;
-    if (lastRefreshRef.current === key) return;
-    lastRefreshRef.current = key;
-    void getHostRuntimeStore()
-      .getClient(serverId)
-      ?.refreshAgent(focusedAgentId)
-      .catch(() => undefined);
-  }, [serverId, focusedAgentId, importedNow]);
+  // F37-v2 (Release15 现场证伪): NO refresh-on-focus here. refreshAgent is a
+  // RESUME — the daemon spawns the provider process on the source transcript
+  // (measured: refresh_agent_request -> omp.exe --session <journal> while the
+  // user's terminal process was alive = the fork the C24 dialog guarded). The
+  // pane's own read-only history hydration already lands on the newest content
+  // without it; the manual 刷新 action now carries the fork confirmation.
 
   if (!workspace || !agent) return null;
   return (
@@ -306,8 +295,16 @@ function CapsuleInner({
   );
 
   const target = useMemo<ShellChatTarget>(
-    () => ({ key, serverId: workspace.serverId, agentId: agent.id }),
-    [key, workspace.serverId, agent.id],
+    () => ({
+      key,
+      serverId: workspace.serverId,
+      agentId: agent.id,
+      // F37-v2: 刷新 grades these before resuming (the send guard's table).
+      ownership: agent.ownership,
+      externalLooksActive: agent.externalLooksActive,
+      provider: agent.provider,
+    }),
+    [key, workspace.serverId, agent.id, agent.ownership, agent.externalLooksActive, agent.provider],
   );
 
   // C21 menu inputs: the descriptor is the same live source the official header
