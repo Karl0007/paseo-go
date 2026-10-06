@@ -4,10 +4,9 @@
 // read (device stamp above all host stamps) or permanently unread. markRead timing:
 // entry stamp, return stamp, no-op cases. Navigation itself is the official
 // navigateToAgent's job; the opener is judged on "called exactly once, with the
-// target's ids". C24 adds the fork guard: an imported chat's first open awaits the
-// injected confirmation BEFORE any stamp or navigation; confirming acks once.
-// B4-R4OPEN (裁定 18) adds the ownership gate in front of it: an external·运行中
-// row confirms with the SAME graded table before anything is stamped or navigated.
+// target's ids". F37 (批次十): the opener is gate-free — both open-time dialogs
+// (C24 fork, B4-R4OPEN ownership) were removed after the resume-on-open premise
+// was falsified; the send guard is the single warning point.
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { isChatUnread } from "./derive";
 import { createChatOpener, type ChatOpenTarget, type ChatOpenerDeps } from "./open-agent";
@@ -21,32 +20,13 @@ function harness(latestHostEvent = HOST_EVENT) {
   const markRead = vi.fn();
   const navigateToAgent = vi.fn();
   const lastEventAtOf = vi.fn(() => latestHostEvent);
-  const confirmFork = vi.fn(async () => true);
-  const confirmOwnership = vi.fn(async (_decision: "warn" | "warnWeak") => true);
-  const acked = new Set<string>();
-  const acknowledgeFork = vi.fn((key: string) => {
-    acked.add(key);
-  });
-  const forkAcknowledged = (key: string) => acked.has(key);
   const deps: ChatOpenerDeps = {
     markRead,
     navigateToAgent,
     lastEventAtOf,
-    confirmFork,
-    confirmOwnership,
-    forkAcknowledged,
-    acknowledgeFork,
     section: "chats",
   };
-  return {
-    opener: createChatOpener(deps),
-    markRead,
-    navigateToAgent,
-    lastEventAtOf,
-    confirmFork,
-    confirmOwnership,
-    acked,
-  };
+  return { opener: createChatOpener(deps), markRead, navigateToAgent, lastEventAtOf };
 }
 
 const target: ChatOpenTarget = {
@@ -55,12 +35,6 @@ const target: ChatOpenTarget = {
   agentId: "agent-9",
   workspaceId: "ws-7",
   lastEventAt: HOST_EVENT,
-  imported: false,
-  // A plain paseo-owned row: the R4 gate passes synchronously (the pre-R4OPEN
-  // fixtures all exercise the unchanged path).
-  ownership: "paseo",
-  externalLooksActive: false,
-  provider: "claude",
 };
 
 // The ledger is module-global (like the section bus); every test starts clean.
@@ -105,10 +79,6 @@ describe("createChatOpener", () => {
       markRead,
       navigateToAgent: vi.fn(),
       lastEventAtOf: () => during,
-      confirmFork: async () => true,
-      forkAcknowledged: () => false,
-      acknowledgeFork: () => {},
-      confirmOwnership: async () => true,
       section: "chats",
     });
     await opener.open(target);
@@ -131,10 +101,6 @@ describe("createChatOpener", () => {
       markRead,
       navigateToAgent: vi.fn(),
       lastEventAtOf: () => known,
-      confirmFork: async () => true,
-      forkAcknowledged: () => false,
-      acknowledgeFork: () => {},
-      confirmOwnership: async () => true,
       section: "chats",
     });
     await opener.open(target);
@@ -163,10 +129,6 @@ describe("createChatOpener", () => {
       markRead,
       navigateToAgent: vi.fn(),
       lastEventAtOf: () => fresh,
-      confirmFork: async () => true,
-      forkAcknowledged: () => false,
-      acknowledgeFork: () => {},
-      confirmOwnership: async () => true,
       section: "chats",
     });
     const other: ChatOpenTarget = { ...target, key: "srv-1:agent-2", agentId: "agent-2" };
@@ -220,10 +182,6 @@ describe("createChatOpener", () => {
       markRead,
       navigateToAgent: vi.fn(),
       lastEventAtOf: () => fresh,
-      confirmFork: async () => true,
-      forkAcknowledged: () => false,
-      acknowledgeFork: () => {},
-      confirmOwnership: async () => true,
       section: "chats",
     });
     await opener.open(target);
@@ -259,195 +217,16 @@ describe("createChatOpener", () => {
   });
 });
 
-describe("C24 fork guard (imported chats)", () => {
-  const importedTarget: ChatOpenTarget = { ...target, imported: true };
-
-  it("asks once before the FIRST open, then acks and never asks again", async () => {
-    const { opener, markRead, navigateToAgent, confirmFork, acked } = harness();
-    await opener.open(importedTarget);
-    expect(confirmFork).toHaveBeenCalledTimes(1);
-    expect(acked.has(importedTarget.key)).toBe(true);
-    expect(markRead).toHaveBeenCalledWith(importedTarget.key, HOST_EVENT);
-    expect(navigateToAgent).toHaveBeenCalledTimes(1);
-    // Second open: acknowledged → straight in, no dialog.
-    await opener.open(importedTarget);
-    expect(confirmFork).toHaveBeenCalledTimes(1);
-    expect(navigateToAgent).toHaveBeenCalledTimes(2);
-  });
-
-  it("a cancelled warning stays on the list: no navigation, no read stamp, no ack", async () => {
-    const { opener, markRead, navigateToAgent, confirmFork, acked } = harness();
-    confirmFork.mockResolvedValue(false);
-    await opener.open(importedTarget);
-    expect(confirmFork).toHaveBeenCalledTimes(1);
-    expect(navigateToAgent).not.toHaveBeenCalled();
-    expect(markRead).not.toHaveBeenCalled();
-    expect(acked.size).toBe(0);
-    // Still unacknowledged → the next tap warns again.
-    await opener.open(importedTarget);
-    expect(confirmFork).toHaveBeenCalledTimes(2);
-    expect(navigateToAgent).not.toHaveBeenCalled();
-  });
-
-  it("holds the read stamp and navigation until the dialog resolves", async () => {
-    let release: (proceed: boolean) => void = () => {};
-    const markRead = vi.fn();
-    const navigateToAgent = vi.fn();
-    const opener = createChatOpener({
-      markRead,
-      navigateToAgent,
-      lastEventAtOf: () => HOST_EVENT,
-      confirmFork: () =>
-        new Promise<boolean>((resolve) => {
-          release = resolve;
-        }),
-      forkAcknowledged: () => false,
-      acknowledgeFork: () => {},
-      confirmOwnership: async () => true,
-      section: "chats",
-    });
-    const opening = opener.open(importedTarget);
-    await Promise.resolve();
-    expect(markRead).not.toHaveBeenCalled();
-    expect(navigateToAgent).not.toHaveBeenCalled();
-    release(true);
-    await opening;
-    expect(markRead).toHaveBeenCalledTimes(1);
-    expect(navigateToAgent).toHaveBeenCalledTimes(1);
-  });
-
-  it("native (unstamped) chats never see the warning", async () => {
-    const { opener, navigateToAgent, confirmFork } = harness();
+describe("F37: no open-time dialogs", () => {
+  it("opens an imported chat synchronously — no confirm, no ack, one navigation", async () => {
+    // The C24 fork dialog and the B4-R4OPEN graded confirm are GONE: opening
+    // is read-only browsing (the falsified resume-on-open premise, card F37).
+    // The composer send guard owns the fork warning at the real fork moment.
+    const { opener, markRead, navigateToAgent, lastEventAtOf } = harness();
     await opener.open(target);
-    expect(confirmFork).not.toHaveBeenCalled();
     expect(navigateToAgent).toHaveBeenCalledTimes(1);
-  });
-
-  // R2-10 (FIX-A): the confirm dialog suspends the open — the directory can
-  // advance while the user reads the fork warning. Stamping with the press-time
-  // snapshot then marks activity that happened DURING the dialog as read
-  // without anyone watching it. After the gate passes, the watermark must be
-  // re-read via lastEventAtOf; the snapshot is only the fallback for a row the
-  // directory lost mid-dialog.
-  it("re-reads the watermark after the confirm: dialog-window activity is not silently seen", async () => {
-    let directoryEvent: number | undefined = HOST_EVENT;
-    const markRead = vi.fn();
-    const opener = createChatOpener({
-      markRead,
-      navigateToAgent: vi.fn(),
-      lastEventAtOf: () => directoryEvent,
-      confirmFork: async () => {
-        directoryEvent = HOST_EVENT + 5_000; // activity during the dialog
-        return true;
-      },
-      forkAcknowledged: () => false,
-      acknowledgeFork: () => {},
-      confirmOwnership: async () => true,
-      section: "chats",
-    });
-    await opener.open(importedTarget); // target.lastEventAt = HOST_EVENT (press snapshot)
-    expect(markRead).toHaveBeenCalledWith(importedTarget.key, HOST_EVENT + 5_000);
-  });
-
-  it("falls back to the press snapshot when the directory lost the row mid-confirm", async () => {
-    let directoryEvent: number | undefined = HOST_EVENT;
-    const markRead = vi.fn();
-    const navigateToAgent = vi.fn();
-    const opener = createChatOpener({
-      markRead,
-      navigateToAgent,
-      lastEventAtOf: () => directoryEvent,
-      confirmFork: async () => {
-        directoryEvent = undefined;
-        return true;
-      },
-      forkAcknowledged: () => false,
-      acknowledgeFork: () => {},
-      confirmOwnership: async () => true,
-      section: "chats",
-    });
-    await opener.open(importedTarget);
-    expect(markRead).toHaveBeenCalledWith(importedTarget.key, HOST_EVENT);
-    expect(navigateToAgent).toHaveBeenCalledTimes(1);
-  });
-
-  it("the synchronous non-imported path never re-reads the directory (unchanged F4 open)", async () => {
-    const { opener, markRead, lastEventAtOf } = harness();
-    await opener.open(target);
-    expect(markRead).toHaveBeenCalledWith(target.key, HOST_EVENT);
+    expect(markRead).toHaveBeenCalledWith(target.key, target.lastEventAt);
+    // The synchronous open never consults the directory for a re-stamp.
     expect(lastEventAtOf).not.toHaveBeenCalled();
-  });
-});
-
-// B4-R4OPEN (裁定 18): the R4 check moved to the OPEN moment — the session
-// screen's official resume is the concurrent-spawn risk. The gate reuses the
-// send guard's graded table (ownership.ts), so this suite pins the WIRING:
-// when it asks, what decision it passes, and that a cancel opens nothing.
-describe("B4-R4OPEN pre-open ownership guard", () => {
-  const liveTarget: ChatOpenTarget = {
-    ...target,
-    ownership: "external",
-    externalLooksActive: true,
-    provider: "claude",
-  };
-
-  it("asks 仍要打开 before stamp/navigation; a cancel opens nothing", async () => {
-    const { opener, markRead, navigateToAgent, confirmOwnership } = harness();
-    confirmOwnership.mockResolvedValue(false);
-    await opener.open(liveTarget);
-    expect(confirmOwnership).toHaveBeenCalledTimes(1);
-    expect(confirmOwnership).toHaveBeenCalledWith("warn");
-    expect(markRead).not.toHaveBeenCalled();
-    expect(navigateToAgent).not.toHaveBeenCalled();
-  });
-
-  it("confirming opens as usual and re-reads the watermark (R2-10 rule)", async () => {
-    let directoryEvent = HOST_EVENT;
-    const markRead = vi.fn();
-    const navigateToAgent = vi.fn();
-    const opener = createChatOpener({
-      markRead,
-      navigateToAgent,
-      lastEventAtOf: () => directoryEvent,
-      confirmFork: async () => true,
-      forkAcknowledged: () => false,
-      acknowledgeFork: () => {},
-      confirmOwnership: async () => {
-        directoryEvent = HOST_EVENT + 9_000; // activity during the dialog
-        return true;
-      },
-      section: "chats",
-    });
-    await opener.open(liveTarget);
-    expect(markRead).toHaveBeenCalledWith(liveTarget.key, HOST_EVENT + 9_000);
-    expect(navigateToAgent).toHaveBeenCalledTimes(1);
-  });
-
-  it("grades with the SAME table: codex warnWeak; opencode and dead-external pass", async () => {
-    const { opener, confirmOwnership, navigateToAgent } = harness();
-    await opener.open({ ...liveTarget, provider: "codex" });
-    expect(confirmOwnership).toHaveBeenCalledWith("warnWeak");
-    await opener.open({ ...liveTarget, provider: "opencode" });
-    await opener.open({ ...liveTarget, externalLooksActive: false });
-    expect(confirmOwnership).toHaveBeenCalledTimes(1); // neither variant asks
-    expect(navigateToAgent).toHaveBeenCalledTimes(3); // all three opened
-  });
-
-  it("a pre-go.7 row (undefined facts pair) keeps the unchanged synchronous path", async () => {
-    const { opener, confirmOwnership, navigateToAgent, lastEventAtOf } = harness();
-    await opener.open({ ...target, ownership: undefined, externalLooksActive: undefined });
-    expect(confirmOwnership).not.toHaveBeenCalled();
-    expect(navigateToAgent).toHaveBeenCalledTimes(1);
-    // No gate suspended the open → the directory is never touched (F4 path).
-    expect(lastEventAtOf).not.toHaveBeenCalled();
-  });
-
-  it("runs BEFORE the fork gate: a cancelled check never burns the fork ack", async () => {
-    const { opener, confirmFork, confirmOwnership, acked } = harness();
-    confirmOwnership.mockResolvedValue(false);
-    await opener.open({ ...liveTarget, imported: true });
-    expect(confirmOwnership).toHaveBeenCalledTimes(1);
-    expect(confirmFork).not.toHaveBeenCalled();
-    expect(acked.size).toBe(0);
   });
 });

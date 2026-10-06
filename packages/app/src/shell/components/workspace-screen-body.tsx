@@ -63,10 +63,6 @@ import { WorkspaceFavoriteRow } from "@/shell/components/workspace-favorite-row"
 import { WorkspaceCommandRow } from "@/shell/components/workspace-command-row";
 import { createChatOpener } from "@/shell/chats/open-agent";
 import { chatLastEventAtFromAgent } from "@/shell/chats/derive";
-import { OWNERSHIP_OPEN_DIALOG_KEYS, OWNERSHIP_SEND_BODY_KEY } from "@/shell/chats/ownership";
-import { isImportedProviderSession } from "@getpaseo/protocol/agent-labels";
-import { confirmDialog } from "@/utils/confirm-dialog";
-import { usePaseoGoForkAckStore } from "@/shell/stores/forkAck";
 import { shellNavigateToAgent } from "@/shell/chats/shell-navigate-to-agent";
 import { WorkspaceWorktreeRow } from "@/shell/components/workspace-worktree-row";
 import { WorkspaceSessionRow } from "@/shell/components/workspace-session-row";
@@ -302,7 +298,7 @@ export function WorkspaceScreenBody({ selectedAgentKey = null }: ShellScreenBody
 
   // C26 L3: the 对话 tab's C4 opener verbatim — markRead 双拍 in the chat's own
   // host-clock domain + the official navigateToAgent (workspace route + open intent),
-  // including C24's fork guard: an imported chat's first open confirms once.
+  // F37: no open-time gates (browsing is read-only; send guard owns the warning).
   // R2-02/03: the pending visit lives on the module ledger (this body dying with
   // a section switch no longer loses it); settlement happens at the leave moments.
   const markRead = usePaseoGoReadStateStore((state) => state.markRead);
@@ -317,28 +313,9 @@ export function WorkspaceScreenBody({ selectedAgentKey = null }: ShellScreenBody
           // watermark"; the opener keeps its pending visit, never writes NaN.
           return agent ? (chatLastEventAtFromAgent(agent) ?? undefined) : undefined;
         },
-        confirmFork: () =>
-          confirmDialog({
-            title: t("chats.fork.title"),
-            message: t("chats.fork.message"),
-            confirmLabel: t("chats.fork.confirm"),
-            cancelLabel: t("chats.fork.cancel"),
-          }),
-        forkAcknowledged: (key) => usePaseoGoForkAckStore.getState().ackedKeys.includes(key),
-        acknowledgeFork: (key) => usePaseoGoForkAckStore.getState().ack(key),
-        // B4-R4OPEN (裁定 18): the L3 row shares the 对话 tab's opener verbatim —
-        // external·运行中 → graded confirm before the open (平板分栏 选中即开屏
-        // rides this same chain). Same copy as the send guard.
-        confirmOwnership: (decision) =>
-          confirmDialog({
-            title: t(OWNERSHIP_OPEN_DIALOG_KEYS.title),
-            message: t(OWNERSHIP_SEND_BODY_KEY[decision]),
-            confirmLabel: t(OWNERSHIP_OPEN_DIALOG_KEYS.confirm),
-            cancelLabel: t(OWNERSHIP_OPEN_DIALOG_KEYS.cancel),
-          }),
         section: "workspace",
       }),
-    [markRead, t],
+    [markRead],
   );
   // C31: the L3 return-stamp beat rides the section-focus bus (the body is outside
   // the navigator in its wide position; the tab screen emits on real focus).
@@ -603,10 +580,6 @@ export function WorkspaceScreenBody({ selectedAgentKey = null }: ShellScreenBody
         agentId: session.agent.id,
         workspaceId: session.agent.workspaceId,
         lastEventAt: session.lastEventAt,
-        imported: isImportedProviderSession(session.agent),
-        ownership: session.agent.ownership,
-        externalLooksActive: session.agent.externalLooksActive,
-        provider: session.agent.provider,
       });
     },
     [opener],

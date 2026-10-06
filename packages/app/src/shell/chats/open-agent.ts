@@ -19,27 +19,17 @@
 // React-free and dependency-injected like shellAgentActions, so the markRead timing is
 // unit-testable without a navigator or a store.
 //
-// C24 fork guard (DESIGN §14.10): an imported provider session keeps pointing at the
-// source transcript — if that session still runs on the PC, continuing from the app
-// forks it. The FIRST open of a stamped (and not yet acknowledged) chat therefore
-// awaits an injected confirmation (the screen wires the official confirm dialog):
-// confirm = acknowledge once (persisted store) and enter, cancel = stay on the list
-// with nothing marked read. No "is the source really active" heuristic — there is no
-// reliable signal (card ruling); the warning is the honest, one-time gate.
+// F37 (批次十, 用户拍板 2026-10-06): BOTH open-time gates are GONE. The C24
+// fork dialog and the B4-R4OPEN graded confirm rested on "opening the official
+// session screen resumes the agent" — falsified in production (an app-opened
+// session's journal carries no daemon mount row; the C24 card itself ruled
+// 只读+刷新永不分叉). Opening is read-only browsing; the composer send guard
+// (shell/composer/ownership-send-guard.ts) is the ONE warning point, exactly
+// where the fork actually happens. Imported chats now auto-refresh on open
+// (shell-session-header host), so browsing shows the PC's latest work.
 //
-// B4-R4OPEN (裁定 18) moves the R4 check to the OPEN moment: the session screen's
-// official resume IS the concurrent-spawn risk, so a row whose agent reads
-// external + looks-active now passes the graded confirm (same table, same dialog
-// copy as the composer send guard — ownership.ts) before anything is stamped or
-// navigated. The send guard stays as the secondary line (e.g. a row that is still
-// external after a failed resume).
-//
-// R2-10 (FIX-A): the dialog SUSPENDS the open. Once the user confirms, the
-// entry stamp re-reads the watermark via `lastEventAtOf` — activity that
-// landed while the warning was up must not be marked seen by a press-time
-// snapshot nobody watched. The snapshot stays the fallback for a row the
-// directory lost mid-dialog; the synchronous (non-imported / already-acked)
-// path never touches the directory.
+// R2-10 (FIX-A) watermark re-taking survives ONLY as the ledger's concern:
+// the open is synchronous again, so the press snapshot is the entry stamp.
 //
 // R2-02 (FIX-B): the pending second beat is NO LONGER closure state — it lives
 // on the module visit ledger (multi-slot, survives body remounts, never
@@ -48,7 +38,6 @@
 // moments (rail section switch / next recordVisit / focus beat as compensation).
 
 import type { ShellTab } from "@/shell/stores/settings";
-import { decideOwnershipSendWarning, type OwnershipSendDecision } from "./ownership";
 import { recordVisit, registerVisitLedgerDeps, settleVisits } from "./visit-ledger";
 
 export interface ChatOpenTarget {
@@ -59,14 +48,6 @@ export interface ChatOpenTarget {
   workspaceId: string | null | undefined;
   /** Host-domain last-event stamp (chatLastEventAt) at press time. */
   lastEventAt: number;
-  /** C24: the agent carries `paseo.imported-provider-session` (C22 stamp). */
-  imported: boolean;
-  /** B4-R4OPEN (裁定 18): the row agent's ownership facts, COMPAT read
-   * (`undefined`/`null` = none/false). The pre-open guard grades them with the
-   * same R4 table as the send guard — never a second copy of the rules. */
-  ownership: string | null | undefined;
-  externalLooksActive: boolean | null | undefined;
-  provider: string;
 }
 
 export interface ChatOpenerDeps {
@@ -80,22 +61,12 @@ export interface ChatOpenerDeps {
   /** Fresh host-domain last-event stamp; undefined = the agent is not in the
    *  directory yet — the ledger slot survives to the next settle. */
   lastEventAtOf: (serverId: string, agentId: string) => number | undefined;
-  /** C24: official confirm dialog for the fork warning; true = 继续进入. */
-  confirmFork: () => Promise<boolean>;
-  /** C24: has this row key already acknowledged the fork warning? */
-  forkAcknowledged: (key: string) => boolean;
-  /** C24: persist the acknowledgement so the warning is exactly-once per chat. */
-  acknowledgeFork: (key: string) => void;
-  /** B4-R4OPEN: official confirm dialog for the external-writer warning;
-   * true = 仍要打开. Called ONLY when the R4 table says warn/warnWeak. */
-  confirmOwnership: (decision: Exclude<OwnershipSendDecision, "pass">) => Promise<boolean>;
   /** R2-02: which list recorded the visit (ledger attribution). */
   section: ShellTab;
 }
 
 export interface ChatOpener {
-  /** Warn-then-open: R4 open guard, then the fork guard, then mark read,
-   * record the visit, navigate. A cancelled gate opens nothing. */
+  /** Mark read, record the visit, navigate (F37: no open-time gates). */
   open: (target: ChatOpenTarget) => Promise<void>;
   /** Wire to the screen's focus effect: compensation settle for ledger slots the
    *  leave hooks could not reach (R2-03 — leave moments settle eagerly). */
@@ -109,38 +80,9 @@ export function createChatOpener(deps: ChatOpenerDeps): ChatOpener {
   registerVisitLedgerDeps({ lastEventAtOf: deps.lastEventAtOf, markRead: deps.markRead });
   return {
     async open(target) {
-      // R2-10: the stamp target starts at the press snapshot and is re-taken
-      // below only when a gate actually suspends the open.
-      let at = target.lastEventAt;
-
-      // B4-R4OPEN (裁定 18): the dangerous moment is the OPEN itself — the
-      // official session screen resumes the agent on load, and a resume against
-      // a live external writer is the concurrent spawn. The same graded table
-      // as the send guard decides: cancel = the row stays on the list (no stamp,
-      // no visit, no navigation); confirm = today's path verbatim. Runs BEFORE
-      // the fork gate so a cancelled check never burns the persistent fork ack.
-      const r4 = decideOwnershipSendWarning({
-        ownership: target.ownership,
-        externalLooksActive: target.externalLooksActive,
-        provider: target.provider,
-      });
-      if (r4 !== "pass") {
-        if (!(await deps.confirmOwnership(r4))) return;
-        // R2-10 again: the dialog suspended the open — re-take the watermark.
-        at = deps.lastEventAtOf(target.serverId, target.agentId) ?? target.lastEventAt;
-      }
-
-      // C24: same discipline as the R4 gate — BEFORE the read stamp, a cancelled
-      // open never entered the session. Rows the R4 gate passed synchronously
-      // (and non-imported rows) keep the pre-C24 open path unchanged.
-      if (target.imported && !deps.forkAcknowledged(target.key)) {
-        const proceed = await deps.confirmFork();
-        if (!proceed) return;
-        deps.acknowledgeFork(target.key);
-        // The gate's await suspends the open too — re-take the watermark after it
-        // (same rule as the R4 gate); undefined (row gone) keeps the press snapshot.
-        at = deps.lastEventAtOf(target.serverId, target.agentId) ?? target.lastEventAt;
-      }
+      // F37: synchronous again — no dialog can suspend the open, so the press
+      // snapshot IS the entry stamp.
+      const at = target.lastEventAt;
       deps.markRead(target.key, at);
       // First beat done; the second beat is the ledger's now (R2-02). Recording
       // settles any earlier visit first — on wide the detail swap A→B IS the

@@ -36,11 +36,10 @@ import { clearPaseoGoLocalData, resetShellStores } from "@/shell/stores/clear-lo
 import { usePaseoGoFavoritesStore } from "@/shell/stores/favorites";
 import { usePaseoGoPinsStore } from "@/shell/stores/pins";
 import { usePaseoGoReadStateStore } from "@/shell/stores/readState";
-import { usePaseoGoForkAckStore } from "@/shell/stores/forkAck";
 import { usePaseoGoSettingsStore } from "@/shell/stores/settings";
 import { usePaseoGoUpdateNoticeStore } from "@/shell/stores/updateNotice";
 
-const SHELL_KEYS = ["paseoGo.settings", "paseoGo.favorites", "paseoGo.commands", "paseoGo.forkAck"];
+const SHELL_KEYS = ["paseoGo.settings", "paseoGo.favorites", "paseoGo.commands"];
 const OFFICIAL_KEYS = ["@paseo:app-settings", "@paseo:settings-migrations", "some-foreign-key"];
 
 beforeEach(async () => {
@@ -85,7 +84,6 @@ describe("resetShellStores", () => {
     usePaseoGoPinsStore.getState().setAlias("srv-A:agent-1", "旧对话");
     usePaseoGoArchiveStore.getState().archive("srv-A:agent-2");
     usePaseoGoReadStateStore.getState().markRead("srv-A:agent-1", 123);
-    usePaseoGoForkAckStore.getState().ack("srv-A:agent-1");
     usePaseoGoSettingsStore.getState().setShellMode(true);
     usePaseoGoSettingsStore.getState().setDefaultTab("workspace");
     usePaseoGoUpdateNoticeStore.getState().markSeen("0.10.2-go.9");
@@ -99,7 +97,6 @@ describe("resetShellStores", () => {
     expect(usePaseoGoPinsStore.getState().aliases).toEqual({});
     expect(usePaseoGoArchiveStore.getState().archivedIds).toEqual([]);
     expect(usePaseoGoReadStateStore.getState().lastReadAt).toEqual({});
-    expect(usePaseoGoForkAckStore.getState().ackedKeys).toEqual([]);
     expect(usePaseoGoUpdateNoticeStore.getState().seenVersion).toBeNull();
     expect(state.defaultTab).toBe("chats");
     // false, not null: null defers to the env default, which is ON under dev metro.

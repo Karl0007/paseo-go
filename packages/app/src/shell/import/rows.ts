@@ -12,7 +12,6 @@ import { getSessionTitle } from "@/components/import-session-sheet-view-model";
 import { buildChatRowTitle } from "@/shell/chats/row-title";
 import type { ChatOpenTarget } from "@/shell/chats/open-agent";
 import { chatLastEventAtFromAgent } from "@/shell/chats/derive";
-import { isImportedProviderSession } from "@getpaseo/protocol/agent-labels";
 
 /** 一行的全部渲染事实；key 与官方聚合一致：`providerId:providerHandleId`。 */
 export interface ImportRow {
@@ -799,17 +798,13 @@ export function buildImportRowBadgeMap(
  */
 export interface BadgeOpenAgentSource {
   workspaceId?: string | null;
-  provider: string;
-  labels?: Record<string, string> | null;
   lastActivityAt: Date;
   attentionTimestamp?: Date | null;
-  ownership?: string | null;
-  externalLooksActive?: boolean | null;
 }
 
 /**
- * 「已导入」徽标行主体点击的跳转目标（R4-06：走 createChatOpener 全链——R4 开屏
- * 门→C24 fork 门→markRead→recordVisit，与对话行同一条链，不再裸 navigate）。
+ * 「已导入」徽标行主体点击的跳转目标（R4-06：走 createChatOpener 全链——
+ * markRead→recordVisit，与对话行同一条链，不再裸 navigate；F37 后链上无弹窗）。
  * 目录行=null（徽标渲染后目录被清/agent 已删的竞态）→ null=不开：没有任何一个
  * 「该会话」可进，静默比绕过守卫硬跳诚实。水位线取不到（R2-14 垃圾日期）=floor 0
  * （留点的姿势，同 notify 冷启 tap），绝不写假水位。
@@ -826,9 +821,5 @@ export function buildBadgeOpenTarget(
     agentId,
     workspaceId: agent.workspaceId ?? null,
     lastEventAt: chatLastEventAtFromAgent(agent) ?? 0,
-    imported: isImportedProviderSession(agent),
-    ownership: agent.ownership,
-    externalLooksActive: agent.externalLooksActive,
-    provider: agent.provider,
   };
 }

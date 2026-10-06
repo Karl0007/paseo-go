@@ -7,7 +7,6 @@ import AsyncStorage from "@react-native-async-storage/async-storage";
 import { usePaseoGoArchiveStore } from "@/shell/stores/archive";
 import { usePaseoGoCommandsStore } from "@/shell/stores/commands";
 import { usePaseoGoFavoritesStore } from "@/shell/stores/favorites";
-import { usePaseoGoForkAckStore } from "@/shell/stores/forkAck";
 import { usePaseoGoPinsStore } from "@/shell/stores/pins";
 import { usePaseoGoReadStateStore } from "@/shell/stores/readState";
 import { usePaseoGoSettingsStore } from "@/shell/stores/settings";
@@ -49,7 +48,6 @@ export function resetShellStores(): void {
   usePaseoGoReadStateStore.setState({ lastReadAt: {} });
   usePaseoGoFavoritesStore.setState({ items: [] });
   usePaseoGoCommandsStore.setState({ items: [] });
-  usePaseoGoForkAckStore.setState({ ackedKeys: [] });
   usePaseoGoStickyPreviewStore.setState({ previews: {} });
   usePaseoGoSettingsStore.setState({
     shellMode: false,

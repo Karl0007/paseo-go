@@ -83,12 +83,9 @@ import { chatLastEventAtFromAgent } from "@/shell/chats/derive";
 import { AVATAR_FILL, projectAvatarFor } from "@/shell/chats/project-avatar";
 import { useWechatTimeLabel } from "@/shell/chats/use-wechat-time-label";
 import { deriveProjectKey, deriveProjectName } from "@/utils/agent-grouping";
-import { OWNERSHIP_OPEN_DIALOG_KEYS, OWNERSHIP_SEND_BODY_KEY } from "@/shell/chats/ownership";
 import { requestChatsFilter } from "@/shell/chats/filter-request";
-import { confirmDialog } from "@/utils/confirm-dialog";
 import { useSessionStore } from "@/stores/session-store";
 import { usePaseoGoReadStateStore } from "@/shell/stores/readState";
-import { usePaseoGoForkAckStore } from "@/shell/stores/forkAck";
 import { usePaseoGoPinsStore } from "@/shell/stores/pins";
 
 // B5-IMPORT2 (D20): 60→200=服务端 limit 上限；includeExisting 起列表不再剔除
@@ -669,26 +666,9 @@ export default function ShellImportScreen() {
           // R2-14: null（垃圾日期）= undefined=无水线可取，opener 保压快照。
           return agent ? (chatLastEventAtFromAgent(agent) ?? undefined) : undefined;
         },
-        confirmFork: () =>
-          confirmDialog({
-            title: t("chats.fork.title"),
-            message: t("chats.fork.message"),
-            confirmLabel: t("chats.fork.confirm"),
-            cancelLabel: t("chats.fork.cancel"),
-          }),
-        forkAcknowledged: (key) => usePaseoGoForkAckStore.getState().ackedKeys.includes(key),
-        acknowledgeFork: (key) => usePaseoGoForkAckStore.getState().ack(key),
-        // B4-R4OPEN (裁定 18) 同款分级门: external·运行中 → 弹「仍要打开」。
-        confirmOwnership: (decision) =>
-          confirmDialog({
-            title: t(OWNERSHIP_OPEN_DIALOG_KEYS.title),
-            message: t(OWNERSHIP_SEND_BODY_KEY[decision]),
-            confirmLabel: t(OWNERSHIP_OPEN_DIALOG_KEYS.confirm),
-            cancelLabel: t(OWNERSHIP_OPEN_DIALOG_KEYS.cancel),
-          }),
         section: "chats",
       }),
-    [markRead, t],
+    [markRead],
   );
 
   // B4-IMPORT 裁定 12: 徽标行点主体跳转。已导入→该会话（上面的 opener 全链）；

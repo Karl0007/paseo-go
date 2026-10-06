@@ -100,7 +100,6 @@
       "sendBody": "该会话可能正在外部终端运行，继续将从此会话启动新进程，可能产生分叉。",
       "sendBodyCodex": "该会话可能正在外部终端运行。消息不会丢失，但对方将看不到你这条。",
       "sendConfirm": "仍要发送",
-      "openConfirm": "仍要打开",
       "sendCancel": "取消",
       "sendCancelled": "已取消发送"
     },
@@ -166,12 +165,6 @@
     "errors": {
       "actionFailed": "操作失败",
       "hostOffline": "主机当前离线，无法完成该操作。"
-    },
-    "fork": {
-      "title": "继续该导入对话？",
-      "message": "该对话由电脑端导入。若源会话仍在电脑上运行，从 app 继续会产生分叉。",
-      "confirm": "继续",
-      "cancel": "取消"
     }
   },
   "workspace": {

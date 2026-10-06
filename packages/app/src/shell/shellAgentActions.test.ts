@@ -19,7 +19,6 @@ vi.mock("@react-native-async-storage/async-storage", () => {
   };
 });
 import { usePaseoGoArchiveStore } from "@/shell/stores/archive";
-import { usePaseoGoForkAckStore } from "@/shell/stores/forkAck";
 import { usePaseoGoPinsStore } from "@/shell/stores/pins";
 import { usePaseoGoReadStateStore } from "@/shell/stores/readState";
 import {
@@ -62,7 +61,6 @@ beforeEach(() => {
   usePaseoGoPinsStore.setState({ pinnedIds: [], aliases: {} });
   usePaseoGoArchiveStore.setState({ archivedIds: [] });
   usePaseoGoReadStateStore.setState({ lastReadAt: {} });
-  usePaseoGoForkAckStore.setState({ ackedKeys: [] });
 });
 
 describe("local actions", () => {
@@ -178,13 +176,11 @@ describe("daemon actions", () => {
     usePaseoGoPinsStore.setState({ pinnedIds: ["s1:a1"], aliases: { "s1:a1": "别名" } });
     usePaseoGoArchiveStore.setState({ archivedIds: ["s1:a1"] });
     usePaseoGoReadStateStore.setState({ lastReadAt: { "s1:a1": 123, "s1:keep": 456 } });
-    usePaseoGoForkAckStore.setState({ ackedKeys: ["s1:a1", "s1:keep"] });
 
     await createShellAgentActions(deps).remove(target, "旧对话");
     expect(client.deleteAgent).toHaveBeenCalledWith("a1");
     expect(usePaseoGoArchiveStore.getState().archivedIds).toEqual([]);
     expect(usePaseoGoReadStateStore.getState().lastReadAt).toEqual({ "s1:keep": 456 });
-    expect(usePaseoGoForkAckStore.getState().ackedKeys).toEqual(["s1:keep"]);
     expect(deps.notify).toHaveBeenCalledWith("chats.toast.deleted");
   });
 

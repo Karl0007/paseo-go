@@ -16,7 +16,6 @@ import { confirmDialog, type ConfirmDialogInput } from "@/utils/confirm-dialog";
 import { SHELL_I18N_NAMESPACE } from "@/shell/i18n";
 import { useToast } from "@/contexts/toast-context";
 import { usePaseoGoArchiveStore } from "@/shell/stores/archive";
-import { usePaseoGoForkAckStore } from "@/shell/stores/forkAck";
 import { usePaseoGoPinsStore } from "@/shell/stores/pins";
 import { usePaseoGoReadStateStore } from "@/shell/stores/readState";
 import { usePaseoGoStickyPreviewStore } from "@/shell/stores/stickyPreview";
@@ -190,7 +189,6 @@ export function createShellAgentActions(deps: ShellAgentActionDeps): ShellAgentA
       pins.setAlias(target.key, null);
       usePaseoGoArchiveStore.getState().unarchive(target.key);
       usePaseoGoReadStateStore.getState().clear(target.key);
-      usePaseoGoForkAckStore.getState().clear(target.key);
       usePaseoGoStickyPreviewStore.getState().forget(target.key);
       notify(t("chats.toast.deleted"));
     },

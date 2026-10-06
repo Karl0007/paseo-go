@@ -1130,7 +1130,7 @@ describe("buildBadgeOpenTarget (R4-06)", () => {
     };
   }
 
-  it("maps the directory row into a full open target (key form + gate facts verbatim)", () => {
+  it("maps the directory row into an open target (F37: no gate facts ride it)", () => {
     const target = buildBadgeOpenTarget(
       "srv-1",
       "agent-9",
@@ -1143,10 +1143,6 @@ describe("buildBadgeOpenTarget (R4-06)", () => {
       workspaceId: "ws-1",
       // 水位=max(活动, 求 attention)——F4 同族口径。
       lastEventAt: STAMP,
-      imported: true,
-      ownership: "external",
-      externalLooksActive: true,
-      provider: "omp",
     });
   });
 
@@ -1155,16 +1151,13 @@ describe("buildBadgeOpenTarget (R4-06)", () => {
     expect(buildBadgeOpenTarget("srv-1", "agent-9", null)).toBeNull();
   });
 
-  it("COMPAT: pre-go.7 row (ownership pair absent) passes through as undefined", () => {
+  it("COMPAT: pre-go.7 row (ownership pair absent) still maps (no gate reads it)", () => {
     const target = buildBadgeOpenTarget(
       "srv-1",
       "agent-9",
       agentSource({ ownership: undefined, externalLooksActive: undefined, labels: undefined }),
     );
-    // undefined 对=open-agent 分流单测钉过的静默同步路径（零弹窗零确认）。
-    expect(target?.ownership).toBeUndefined();
-    expect(target?.externalLooksActive).toBeUndefined();
-    expect(target?.imported).toBe(false);
+    expect(target?.key).toBe("srv-1:agent-9");
   });
 
   it("R2-14: garbage host dates floor the watermark to 0, never NaN/fake", () => {

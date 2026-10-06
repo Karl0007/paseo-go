@@ -27,15 +27,6 @@ import { recordVisit } from "@/shell/chats/visit-ledger";
 import { useSessionStore } from "@/stores/session-store";
 import { usePaseoGoReadStateStore } from "@/shell/stores/readState";
 import { decodeAttentionPayload, encodeAttentionPayload, type AttentionPayload } from "./payload";
-import {
-  OWNERSHIP_OPEN_DIALOG_KEYS,
-  OWNERSHIP_SEND_BODY_KEY,
-  decideOwnershipSendWarning,
-  type OwnershipSendDecision,
-} from "@/shell/chats/ownership";
-import { confirmDialog } from "@/utils/confirm-dialog";
-import { i18n } from "@/i18n/i18next";
-import { SHELL_I18N_NAMESPACE } from "@/shell/i18n";
 
 export const SHELL_NOTIFY_CHANNEL_ID = "paseo-go-attention";
 
@@ -82,16 +73,6 @@ function ensurePermission(): Promise<boolean> {
   return permissionReady;
 }
 
-/** The pre-open dialog: same graded decision, same copy as the row-open guard. */
-function confirmOwnershipOpen(decision: Exclude<OwnershipSendDecision, "pass">): Promise<boolean> {
-  return confirmDialog({
-    title: i18n.t(`${SHELL_I18N_NAMESPACE}:${OWNERSHIP_OPEN_DIALOG_KEYS.title}`),
-    message: i18n.t(`${SHELL_I18N_NAMESPACE}:${OWNERSHIP_SEND_BODY_KEY[decision]}`),
-    confirmLabel: i18n.t(`${SHELL_I18N_NAMESPACE}:${OWNERSHIP_OPEN_DIALOG_KEYS.confirm}`),
-    cancelLabel: i18n.t(`${SHELL_I18N_NAMESPACE}:${OWNERSHIP_OPEN_DIALOG_KEYS.cancel}`),
-  });
-}
-
 async function openFromResponse(response: Notifications.NotificationResponse): Promise<void> {
   const identifier = response.notification.request.identifier;
   if (lastHandledIdentifier === identifier) return;
@@ -101,33 +82,10 @@ async function openFromResponse(response: Notifications.NotificationResponse): P
   // listener read the same unconsumed native response, so a duplicate must not
   // raise a second dialog while the first one is still up.
   lastHandledIdentifier = identifier;
-  // R4-32 (开屏=危险时刻覆盖面收口): the session screen resumes the agent on
-  // load, so a notification tap IS a concurrent-spawn moment like a row open —
-  // the SAME graded table (ownership.ts, never a second copy) gates it before
-  // anything is stamped. Facts ride the directory row (COMPAT read, same as the
-  // composer guard's findAgentFacts): no row / pre-go.7 pair = pass, the cold-tap
-  // posture stays byte-identical. The C24 fork gate deliberately does NOT run
-  // here (Main 裁定: a notification tap is 查看, not 续写 — the fork warning
-  // belongs to the explicit open paths). Cancel = nothing is stamped, visited,
-  // navigated or dismissed, the notification stays in the shade — and the dedup
-  // releases so a RE-tap of the same notification re-asks.
-  const agent = useSessionStore.getState().sessions[payload.serverId]?.agents.get(payload.agentId);
-  const decision = decideOwnershipSendWarning({
-    ownership: agent?.ownership,
-    externalLooksActive: agent?.externalLooksActive,
-    provider: agent?.provider ?? "",
-  });
-  let row = agent;
-  if (decision !== "pass") {
-    if (!(await confirmOwnershipOpen(decision))) {
-      lastHandledIdentifier = null;
-      return;
-    }
-    // R2-10 same rule: the dialog suspended the tap — re-read the row so the
-    // entry stamp never marks seen activity that landed while it was up.
-    row =
-      useSessionStore.getState().sessions[payload.serverId]?.agents.get(payload.agentId) ?? agent;
-  }
+  // F37: the tap opens a READ-ONLY view (opening never resumes — the falsified
+  // premise of the R4-32 pre-open gate). No dialog on any open path; the
+  // composer send guard is the single warning point.
+  const row = useSessionStore.getState().sessions[payload.serverId]?.agents.get(payload.agentId);
   // The visit starts at the session itself — the chats row must not stay unread.
   // F4: stamp with the chat's own host-domain event time; an unloaded directory
   // (cold start) leaves the dot instead of writing a device-clock watermark that

@@ -100,7 +100,6 @@
       "sendBody": "This session may be running in an external terminal. Continuing will start a new process from this session, which can fork the conversation.",
       "sendBodyCodex": "This session may be running in an external terminal. Nothing is lost, but the other side won't see this message.",
       "sendConfirm": "Send anyway",
-      "openConfirm": "Open anyway",
       "sendCancel": "Cancel",
       "sendCancelled": "Send cancelled"
     },
@@ -166,12 +165,6 @@
     "errors": {
       "actionFailed": "Action failed",
       "hostOffline": "The host is offline, so this action could not run."
-    },
-    "fork": {
-      "title": "Continue this imported chat?",
-      "message": "This chat was imported from your computer. If the source session is still running there, continuing from the app will fork it.",
-      "confirm": "Continue",
-      "cancel": "Cancel"
     }
   },
   "workspace": {

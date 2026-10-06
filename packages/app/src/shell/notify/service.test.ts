@@ -4,11 +4,9 @@
 // ledger (module-level, survives whatever the tab screens do), and a cold tap with
 // an unloaded directory must keep its no-bogus-watermark posture (no entry stamp),
 // while still tracking the visit for the later settle.
-// R4-32 (开屏=危险时刻覆盖面收口) adds the graded open gate in front of ALL of
-// it: an external·运行中 row confirms with the same table/copy as the row-open
-// guard BEFORE anything is stamped; cancel = no navigate, no dismiss, and the
-// dedup releases so a re-tap re-asks. The fork gate deliberately never runs on
-// this path (Main 裁定: 通知 tap=查看, not 续写).
+// F37 (批次十): the R4-32 pre-open gate is GONE — opening (also via a
+// notification tap) is read-only browsing; the composer send guard is the one
+// fork warning. The tap always stamps, navigates, dismisses; the dedup holds.
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const env = vi.hoisted(() => ({
@@ -122,7 +120,7 @@ describe("notification tap records the visit (R2-02)", () => {
 // this suite pins is the WIRING on the tap path: when it asks, that a cancel is a
 // pure no-op, that a confirm re-takes the watermark, and that the dedup neither
 // double-asks nor strands a cancelled notification.
-describe("notification tap passes the graded open gate (R4-32)", () => {
+describe("F37: notification tap never gates the open", () => {
   function externalRow(overrides: Record<string, unknown> = {}) {
     return {
       lastActivityAt: new Date(HOST_EVENT),
@@ -136,69 +134,23 @@ describe("notification tap passes the graded open gate (R4-32)", () => {
   function setRow(row: unknown | null) {
     env.sessions = row ? { "srv-1": { agents: new Map([["agent-9", row]]) } } : {};
   }
-  // No wall-clock waits: openFromResponse IS an async function, so the promise
-  // the listener call returns resolves exactly when the tap finished — that is
-  // the signal, not a guessed duration.
 
-  it("cancel: the dialog uses the open copy and NOTHING is stamped, visited, navigated or dismissed", async () => {
-    setRow(externalRow());
-    vi.mocked(confirmDialog).mockResolvedValueOnce(false);
-    startShellNotifyService("test-channel");
-    await env.listeners.at(-1)!(responseFor("n-gate-cancel"));
-    expect(confirmDialog).toHaveBeenCalledWith(
-      expect.objectContaining({
-        title: "paseoGo:chats.ownership.sendTitle",
-        message: "paseoGo:chats.ownership.sendBody",
-        confirmLabel: "paseoGo:chats.ownership.openConfirm",
-        cancelLabel: "paseoGo:chats.ownership.sendCancel",
-      }),
-    );
-    expect(usePaseoGoReadStateStore.getState().lastReadAt[KEY]).toBeUndefined();
-    expect(pendingVisits()).toEqual([]);
-    expect(shellNavigateToAgent).not.toHaveBeenCalled();
-    expect(Notifications.dismissNotificationAsync).not.toHaveBeenCalled();
-  });
-
-  it("confirm: the stamp is re-taken after the dialog (R2-10), then the tap completes", async () => {
+  it("an external·运行中 row opens with NO dialog — read-only browsing, stamped and navigated", async () => {
     setRow(externalRow());
     startShellNotifyService("test-channel");
-    const tap = env.listeners.at(-1)!(responseFor("n-gate-confirm"));
-    // Activity lands WHILE the dialog is up — the press-time row must not mark it seen.
-    setRow(externalRow({ lastActivityAt: new Date(HOST_EVENT + 45_000) }));
-    await tap;
-    expect(usePaseoGoReadStateStore.getState().lastReadAt[KEY]).toBe(HOST_EVENT + 45_000);
+    await env.listeners.at(-1)!(responseFor("n-f37-open"));
+    expect(confirmDialog).not.toHaveBeenCalled();
+    expect(usePaseoGoReadStateStore.getState().lastReadAt[KEY]).toBe(HOST_EVENT);
     expect(shellNavigateToAgent).toHaveBeenCalledWith(payload);
-    expect(Notifications.dismissNotificationAsync).toHaveBeenCalledWith("n-gate-confirm");
+    expect(Notifications.dismissNotificationAsync).toHaveBeenCalledWith("n-f37-open");
     expect(pendingVisits().map((slot) => slot.key)).toEqual([KEY]);
   });
 
-  it("opencode external·运行中 goes straight through — same table, no dialog", async () => {
-    setRow(externalRow({ provider: "opencode" }));
-    startShellNotifyService("test-channel");
-    await env.listeners.at(-1)!(responseFor("n-gate-oce"));
-    expect(confirmDialog).not.toHaveBeenCalled();
-    expect(shellNavigateToAgent).toHaveBeenCalledWith(payload);
-  });
-
-  it("re-tap after a cancel re-asks (the dedup released with the cancelled tap)", async () => {
-    setRow(externalRow());
-    vi.mocked(confirmDialog).mockResolvedValue(false);
-    startShellNotifyService("test-channel");
-    await env.listeners.at(-1)!(responseFor("n-gate-retap"));
-    await env.listeners.at(-1)!(responseFor("n-gate-retap"));
-    expect(confirmDialog).toHaveBeenCalledTimes(2);
-    expect(shellNavigateToAgent).not.toHaveBeenCalled();
-  });
-
-  it("a duplicate response while the dialog is up raises no second dialog", async () => {
-    const gate = Promise.withResolvers<boolean>();
-    vi.mocked(confirmDialog).mockImplementationOnce(() => gate.promise);
+  it("the dedup still holds: a duplicate response navigates once", async () => {
     setRow(externalRow());
     startShellNotifyService("test-channel");
-    const first = env.listeners.at(-1)!(responseFor("n-gate-dup"));
-    await env.listeners.at(-1)!(responseFor("n-gate-dup"));
-    expect(confirmDialog).toHaveBeenCalledTimes(1);
-    gate.resolve(true);
+    const first = env.listeners.at(-1)!(responseFor("n-f37-dup"));
+    await env.listeners.at(-1)!(responseFor("n-f37-dup"));
     await first;
     expect(shellNavigateToAgent).toHaveBeenCalledTimes(1);
   });

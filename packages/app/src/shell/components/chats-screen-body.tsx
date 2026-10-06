@@ -77,7 +77,6 @@ import {
   type ChatSectionKind,
 } from "@/shell/chats/derive";
 import { createChatOpener } from "@/shell/chats/open-agent";
-import { OWNERSHIP_OPEN_DIALOG_KEYS, OWNERSHIP_SEND_BODY_KEY } from "@/shell/chats/ownership";
 import { chatGestureBandProps, decidePinDrop, dispatchPinDrop } from "@/shell/chats/drag-drop";
 import {
   RING_SLOT_CHATS_ARCHIVED,
@@ -113,9 +112,6 @@ import { usePaseoGoReadStateStore } from "@/shell/stores/readState";
 import { useShellAgentActions, type ShellChatTarget } from "@/shell/shellAgentActions";
 import { deriveSidebarStateBucket } from "@/utils/sidebar-agent-state";
 import { useShellHostStatuses } from "@/shell/runtime/use-shell-host-statuses";
-import { isImportedProviderSession } from "@getpaseo/protocol/agent-labels";
-import { confirmDialog } from "@/utils/confirm-dialog";
-import { usePaseoGoForkAckStore } from "@/shell/stores/forkAck";
 import { shellNavigateToAgent } from "@/shell/chats/shell-navigate-to-agent";
 import { subscribeSectionFocus } from "@/shell/section-focus";
 import { subscribeRailRetap } from "@/shell/tablet/rail-events";
@@ -306,9 +302,8 @@ export function ChatsScreenBody({ selectedAgentKey = null }: ShellScreenBodyProp
   // return stamp settles at the leave moments — rail section switch, the next open,
   // or this screen's focus beat as compensation (R2-03). F4: both beats stamp with
   // the chat's own host-domain last-event time, never the device wall clock.
-  // C24: an imported chat's FIRST open passes the fork warning (official confirm
-  // dialog); confirming persists a per-row ack in the forkAck store, cancelling
-  // leaves the list untouched (no read stamp — the user never entered).
+  // F37: no open-time dialogs — browsing is read-only; the composer send guard
+  // owns the fork warning. Imported chats auto-refresh when their screen mounts.
   const opener = useMemo(
     () =>
       createChatOpener({
@@ -320,28 +315,9 @@ export function ChatsScreenBody({ selectedAgentKey = null }: ShellScreenBodyProp
           // watermark"; the opener keeps its pending visit, never writes NaN.
           return agent ? (chatLastEventAtFromAgent(agent) ?? undefined) : undefined;
         },
-        confirmFork: () =>
-          confirmDialog({
-            title: t("chats.fork.title"),
-            message: t("chats.fork.message"),
-            confirmLabel: t("chats.fork.confirm"),
-            cancelLabel: t("chats.fork.cancel"),
-          }),
-        forkAcknowledged: (key) => usePaseoGoForkAckStore.getState().ackedKeys.includes(key),
-        acknowledgeFork: (key) => usePaseoGoForkAckStore.getState().ack(key),
-        // B4-R4OPEN (裁定 18): external·运行中 row → graded confirm BEFORE the open
-        // (the resume-on-open IS the concurrent-spawn moment). Same copy as the
-        // send guard; 取消 leaves the row on the list untouched.
-        confirmOwnership: (decision) =>
-          confirmDialog({
-            title: t(OWNERSHIP_OPEN_DIALOG_KEYS.title),
-            message: t(OWNERSHIP_SEND_BODY_KEY[decision]),
-            confirmLabel: t(OWNERSHIP_OPEN_DIALOG_KEYS.confirm),
-            cancelLabel: t(OWNERSHIP_OPEN_DIALOG_KEYS.cancel),
-          }),
         section: "chats",
       }),
-    [markRead, t],
+    [markRead],
   );
   const handleOpenChat = useCallback(
     (agent: ShellChatAgent) =>
@@ -351,10 +327,6 @@ export function ChatsScreenBody({ selectedAgentKey = null }: ShellScreenBodyProp
         agentId: agent.agent.id,
         workspaceId: agent.agent.workspaceId,
         lastEventAt: chatLastEventAt(agent),
-        imported: isImportedProviderSession(agent.agent),
-        ownership: agent.agent.ownership,
-        externalLooksActive: agent.agent.externalLooksActive,
-        provider: agent.agent.provider,
       }),
     [opener],
   );

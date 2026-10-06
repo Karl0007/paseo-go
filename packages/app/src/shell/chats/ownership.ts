@@ -149,14 +149,3 @@ export const OWNERSHIP_SEND_BODY_KEY: Record<Exclude<OwnershipSendDecision, "pas
   warn: "chats.ownership.sendBody",
   warnWeak: "chats.ownership.sendBodyCodex",
 };
-
-/**
- * Locale keys for the pre-OPEN dialog (B4-R4OPEN 口径 1: 复用 send-guard 文案).
- * Title/cancel are the send dialog's strings verbatim (the risk sentence is the
- * same); only the confirm verb differs — 仍要打开 vs 仍要发送.
- */
-export const OWNERSHIP_OPEN_DIALOG_KEYS = {
-  title: "chats.ownership.sendTitle",
-  confirm: "chats.ownership.openConfirm",
-  cancel: "chats.ownership.sendCancel",
-} as const;
