@@ -175,3 +175,10 @@
 - 根因：live-idle 会话的**纯树报告（items=[]）按 R4-04 姿态被当外来证据**升级内存快照；但持有态会话的子进程就是 daemon 自己生的——attach 地板只能退休「attach 前」的孩子，**跨轮次持续写作的自家孩子 mtime 永远新鲜**，地板机制天然覆盖不了。盘上记录仍 paseo（手机看的是 live 快照）。
 - 修复=TranscriptChange 加 `treeOnly`（reportSubagentActivity 置位）；live 路径 treeOnly 且无可见行 → **归属对不动**（已外部者的 running 位照常衰减、徽标计数照常流动）；stored 路径不变（F31-B 终端场景=树即外来，B9-SUBACT 释放态测原样绿）。B9-06 衰减测按新语义重写前提（外来主行升外部→树衰减）。
 - 新测 F36（attach 后自家孩子续写→paseo+徽标=1；修复前红=external 实证）；ownership 48/48+watch 族 266/266+typecheck 0。
+
+## F37 打开即同步+发送才警告（2026-10-06 22:0x，go.15 线）
+
+- 用户拍板：打开导入会话不弹任何窗、直接见电脑最新进展；发送时才警告分叉（形态选「警示条+二次确认」，实施发现守卫弹窗已存在且更优→以其为准，警示条因胶囊 pill 已常驻而裁撤）。
+- 取证定案：①发送守卫 B4-R4 早已实现（包装组合器唯一出口，external·running 弹「仍要发送」）；用户没见过=被打开侧弹窗拦死。②「打开=resume=分叉」前提被 d6484fa journal 零 mount 行实证推翻（daemon 从未因打开拉进程）。③v1 服务器发送门回滚（会与客户端守卫双重拦截）。
+- 实施=纯减法+一增量：删 C24 fork 门+forkAck store+R4-32 通知门+openConfirm 文案；会话屏宿主对 imported 聚焦会话静默 refreshAgent 一次/聚焦；发送守卫原样。
+- 门禁：shell 全套 19 文件 248 测绿+app typecheck 0+oxlint 0（memo 计时测满载 flaky 单跑绿，非回归）。
