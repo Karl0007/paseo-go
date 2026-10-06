@@ -1,3 +1,19 @@
+# Paseo Go v0.10.2-go.16 落档（F36+F37-v2 发布线，2026-10-06）
+
+- 内容=**F36**（server：树观察上报不再把自家子代理树误判成外部——持有态会话的 count/running 位照旧随 tree-only 上报走，B9-06 衰减前提改由外来主行升级）+ **F37**（client：打开导入会话零弹窗，两处开屏门（C24 fork ack / B4-R4OPEN 分级确认 + R4-32 通知闸）在前提被证伪后拆除）+ **F37-v2**（`94f3fa88a`：v1 的「聚焦即静默 refreshAgent」**就是 resume**——装机取证发现它会在用户终端进程还活着时把 omp 拉到同一条 journal 上（`refresh_agent_request` → provider 派生 → `session_exit dispose` → ownership 由 external 翻成 paseo，正是旧弹窗拦的分叉），效应删除；手动「刷新」改用发送守卫同一张判据表分级确认（仍要刷新/取消=静默））。
+- 版本链：F36=`0d39caff6`｜F37=`02d561f80`｜F37-v2=`94f3fa88a`｜VERSION=`6e3bf8988`｜tag `v0.10.2-go.16`（镜像锚 `f795432`，树对账 5399≡5399 EMPTY，format-patch 前 `git show --stat` 核无二进制）。
+- 门禁：`npx vitest run src/shell` 88 文件 **974/974 全绿**（plain run，跑前删 `.expo/types/router.d.ts`）；提交钩子 typecheck 过。
+- 本机 APK sha256=`b625efce0db3cd2a2681c3999558df0f3a0eba29f9ba3a4d587ac75333b6ccc0`（105,842,700 B，hbc go.16×1 / go.15×0 / go.14×0 / 919c737c×1，包名 `app.paseo.shell` 核；一键链 PHASES 0-4 日志 `release/build-go16.log`）。
+- 装机帧 `evidence/B15-RELEASE/g16-*`：①关于页 stamp「当前 0.10.2-go.16」实拍+a11y ②**F37-v2 双证**=打开导入会话（IdleGame 36c33661，=生产 aa4f144 同一条 journal）**无弹窗直进屏**且 pill 保持「外部·运行中」（go.15 打开后翻成 原生=被 resume），devd15 全量日志 grep `refresh_agent_request|Refreshing agent` 在 23:05–23:12 窗口**零命中** + omp 进程快照零 devd 子进程（`g16-no-resume-log-evidence.txt`）③发送守卫弹窗本体帧（标题「该会话可能正在外部运行」+ 仍要发送/取消）。
+- ⚠ 事故如实记（**非包缺陷**，操作面）：拍帧③收尾时注入坐标点错，探针文本 `F37guard-probe` 被真发进导入的 IdleGame journal（多一行 user 消息 + 一轮短回复，由 dev daemon 写）。止损=23:19 `paseo stop` INTERRUPTED → `paseo delete` DELETED → 23:20 omp 快照回到基线 14 且零 devd 子进程；用户自己的终端进程 54884 全程存活未被顶。详见 `evidence/B15-RELEASE/g16-f05-INCIDENT-note.txt`。教训：**external·running 行的发送守卫帧，取消动作必须先用 uiautomator 取到按钮 bounds 再点**（本机 RN 弹层坐标随键盘/流式重排漂移，BUILD.md §4「提交前重新 dump」纪律同样适用于弹层按钮）。
+- CI run=`37484071243`（meta/CLI linux/CLI win/desktop win/desktop linux 全绿；APK job 驱逐十一连=预期红，release job skipped）→ 先手建 release+挂本机 APK+sidecar → assemble dispatch=`37485993448`（集群内组装+WIN-ZIP-MANIFEST-OK+body 全 sha 表）。
+- 生产 go.14→go.16 直切：`.dev/go16-cutover.ps1`（三闸+LISTENER StartTime 双证）走 hub persistent。回滚件=go.14 tgz（sha `1ab6b3f4…aa51b2`，本机 Get-FileHash 已核 ≡ go.14 body 表 win32 行）。
+
+# Paseo Go v0.10.2-go.15 —— 已作废（发布前撤线，2026-10-06）
+
+- 内容=F36+F37（v1）。**作废原因**：装机取证抓到 F37 v1 的「聚焦即 refreshAgent」= resume——打开导入会话时 devd 派生 `omp --session <同一条 journal>`（22:30:52.749 `Refreshing agent … from persistence` → 22:30:53 omp.exe 18236 → journal 落 `session_exit reason=dispose` 22:30:52.817Z → 记录 external/looksActive 翻成 paseo），而用户自己的 omp（pid 54884）当时仍活着=两个写者同一条 transcript。全链证据 `evidence/B15-RELEASE/P1-resume-on-open.md`。
+- 撤线动作：APK 未挂 Releases（CI run=`37478217085`：meta/CLI×2/desktop×2 绿、APK job 驱逐红、release job skipped → 从未产生 release 对象）；远端+本机 tag `v0.10.2-go.15` 已删（`git ls-remote --tags|grep -c go.15`=0）；本机 APK+sidecar 删除（`release/build-go15.log` 留档）。修复以 go.16 出货。
+
 # Paseo Go v0.10.2-go.13 落档（B10 热修线，2026-10-03）
 
 - 内容=**B10-MOUNTNOISE**（server-only）：tail-dedup 按 journal provenance 判身份——外来 resume 的逐字节同 mount 行不再被吞，外部 pill 正确翻转；真重放（同 id）照吞，流式行（ACP randomUUID≠journal id）保留内容兜底，R4-01 语义保真。回归测修复前必红+对照重放例；ownership 46/46+watcher 族 266/266+typecheck/lint 零错。
