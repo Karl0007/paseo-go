@@ -1,3 +1,12 @@
+# Paseo Go v0.10.2-go.16 落档（F36+F37/F37-v2 线，2026-10-07）
+
+- 内容=**F36**（server：持有态会话的自家子代理树不再误判外部）+**F37/F37-v2**（client：打开导入会话零弹窗、只读直见最新；分叉警告收敛到发送守卫与手动刷新确认）。基线 `94f3fa88a`；VERSION=`6e3bf8988`；文档 `b27599805`。
+- 本机 APK sha256=`b625efce…b6ccc0`（105,842,700B，hbc go.16×1/go.14×0）；装机帧+**F37-v2 双证**（打开无弹窗+pill 保持外部·运行中；devd 全量日志窗口零 refresh_agent_request/零 omp 派生）evidence/B15-RELEASE/g16-\*。
+- **装机取证事故（客户端注入操作，非包缺陷）**：发送守卫帧收尾点「取消」坐标打偏，探针文本真发进 IdleGame 源 journal（1 用户行+1 短回复，dev daemon 写）；当场 stop+delete+快照回基线，用户终端进程 54884 全程存活。g16-f05-INCIDENT-note.txt。**教训：弹窗按钮注入前必先 dump 边界核坐标。**
+- **go.15 作废实录**：v1「聚焦即 refreshAgent」被现场证伪=resume=分叉触发（P1-resume-on-open.md 全链证据）；tag/资产/本机包拆净，生产未碰。
+- **生产切换事故+根治（本段最重要）**：go16cutover 以 hub persistent 跑=**编排者会话的子进程**；00:45 Stop-ScheduledTask 杀掉生产 daemon 的同时杀掉了宿主会话→脚本连带夭折于 npm 前→**生产停摆 13 小时**（用户另派 agent 按手册拉起 go.14 自救）。全局安装未损（npm 步未跑到）。根治=**切机脚本必须脱离编排者进程树**：改一次性计划任务（Register-ScheduledTask -Once）重跑原脚本，15:47 二次进场→**DONE OK**：停机 175s，VERSION=go.16+LISTENER=pid83060@切换时刻 双证，无回滚。**入册铁律：凡要重启『自己寄生其上』的 daemon 的操作，一律走计划任务/detached，禁 hub persistent。**
+- 生产=go.16（CLI 兼容绿）；镜像 tag v0.10.2-go.16 树对账 EMPTY；22 资产；现场 devd16/metro17 ready、平板 go.16、stayon 0、百度 IME。
+
 # Paseo Go v0.10.2-go.16 落档（F36+F37-v2 发布线，2026-10-06）
 
 - 内容=**F36**（server：树观察上报不再把自家子代理树误判成外部——持有态会话的 count/running 位照旧随 tree-only 上报走，B9-06 衰减前提改由外来主行升级）+ **F37**（client：打开导入会话零弹窗，两处开屏门（C24 fork ack / B4-R4OPEN 分级确认 + R4-32 通知闸）在前提被证伪后拆除）+ **F37-v2**（`94f3fa88a`：v1 的「聚焦即静默 refreshAgent」**就是 resume**——装机取证发现它会在用户终端进程还活着时把 omp 拉到同一条 journal 上（`refresh_agent_request` → provider 派生 → `session_exit dispose` → ownership 由 external 翻成 paseo，正是旧弹窗拦的分叉），效应删除；手动「刷新」改用发送守卫同一张判据表分级确认（仍要刷新/取消=静默））。
