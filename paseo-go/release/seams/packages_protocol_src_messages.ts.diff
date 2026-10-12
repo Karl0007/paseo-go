@@ -1,0 +1,389 @@
+diff --git a/packages/protocol/src/messages.ts b/packages/protocol/src/messages.ts
+index db72cd3cb..aa0e67c2d 100644
+--- a/packages/protocol/src/messages.ts
++++ b/packages/protocol/src/messages.ts
+@@ -806,6 +806,24 @@ const AgentActiveTurnPayloadSchema = z.object({
+   startedAt: z.string().nullable(),
+ });
+ 
++/**
++ * R2-14 (Paseo Go review): the date fields on the agent/session payloads below
++ * (`createdAt`/`updatedAt`/`lastUserMessageAt`/`attentionTimestamp`/
++ * `archivedAt`, `RecentProviderSessionDescriptorPayload.lastActivityAt`) are
++ * deliberately plain `z.string()` — narrowing them to `z.coerce.date()` (the
++ * ActivityLogPayloadSchema.timestamp precedent) or `z.string().datetime()`
++ * would start REJECTING non-compliant hosts on the wire, which the protocol
++ * compat rule forbids for shipped fields. That makes every date string
++ * untrusted input: `new Date(garbage).getTime()` is NaN, and NaN leaks into
++ * sort comparators, renders "Invalid Date NaN", and fails int/nonnegative
++ * persist schemas — which downstream drops whole stores. Consumers MUST parse
++ * through this helper and treat null as "no trustworthy timestamp".
++ */
++export function parseDateOrNull(value: string): Date | null {
++  const date = new Date(value);
++  return Number.isNaN(date.getTime()) ? null : date;
++}
++
+ export const AgentSnapshotPayloadSchema = z.object({
+   id: z.string(),
+   provider: AgentProviderSchema,
+@@ -816,7 +834,7 @@ export const AgentSnapshotPayloadSchema = z.object({
+   thinkingOptionId: z.string().nullable().optional(),
+   effectiveThinkingOptionId: z.string().nullable().optional(),
+   createdAt: z.string(),
+-  updatedAt: z.string(),
++  updatedAt: z.string(), // R2-14: untrusted date string — parse via parseDateOrNull
+   lastUserMessageAt: z.string().nullable(),
+   status: AgentStatusSchema,
+   activeTurn: AgentActiveTurnPayloadSchema.nullable().optional(),
+@@ -835,6 +853,55 @@ export const AgentSnapshotPayloadSchema = z.object({
+   attentionTimestamp: z.string().nullable().optional(),
+   archivedAt: z.string().nullable().optional(),
+   providerUnavailable: z.boolean().optional(),
++  // COMPAT(agentLastMessagePreview): added 2026-09-30 (Paseo Go B4-PREVIEW, batch-4
++  // F4-Q3=b). Pure-add chat-list projection of the newest message: preview text
++  // (whitespace runs collapsed, trimmed, ≤120 chars) plus that message's role.
++  // New daemons always emit both fields (null = the agent has no message items yet);
++  // daemons older than the Paseo Go build omit them, so the schema stays optional
++  // while clients support those hosts — consumers MUST read `undefined` as "not
++  // reported" and `null` as "no messages". Official clients ignore unknown fields.
++  lastMessagePreview: z.string().nullable().optional(),
++  // COMPAT(agentLastMessagePreview): see lastMessagePreview. `other` covers
++  // message-like timeline items that are neither user nor assistant (errors,
++  // notifications).
++  lastMessageRole: z.enum(["user", "assistant", "other"]).nullable().optional(),
++  // COMPAT(agentOwnership): added 2026-09-30 (Paseo Go B4-OWNERSHIP, batch-4 F8
++  // ruling 13). Pure-add session-ownership axis, orthogonal to the
++  // `paseo.imported-provider-session` birth label: `paseo` = a daemon-owned provider
++  // process holds the session; `external` = that process is gone and the transcript
++  // was written by someone else (watcher-confirmed); `none` = process gone with no
++  // observed external write, or the provider exposes no transcript the daemon can
++  // observe (never escalated to `external`). Daemons older than the Paseo Go build
++  // omit the field, so it stays optional while clients support those hosts —
++  // consumers MUST read `undefined`/`null` as `none`. Official clients ignore
++  // unknown fields.
++  ownership: z.enum(["paseo", "external", "none"]).nullable().optional(),
++  // COMPAT(agentOwnership): the companion of `ownership` — in the `external` state,
++  // does the external writer still look alive (provider-specific probe: claude live
++  // session registry, codex/omp exclusive-open, pi mtime freshness)? Drives the R4
++  // "may be running in an external terminal" send warning and the "external, running"
++  // badge variant. Meaningless outside `external`; current daemons always send
++  // `false` there. Consumers MUST read `undefined`/`null` as `false`.
++  externalLooksActive: z.boolean().nullable().optional(),
++  // COMPAT(agentOrigin): added 2026-10-02 (Paseo Go B6-OWN-HEAL, batch-6 F19/D22).
++  // Pure-add BIRTH axis — how the session came to live in the daemon's storage — and
++  // orthogonal to `ownership`, which only ever answers who holds it RIGHT NOW:
++  // `launch` = a daemon provider process created it, `import` = the import screen
++  // adopted an external CLI session (`paseo.imported-provider-session`). The pill's
++  // third input: with no live writer in evidence (`ownership` none/absent) the shell
++  // answers 原生 for `launch` and 外部 for `import` instead of the pre-B6 「全列表恒
++  // 未知」. Daemons older than this build omit it, so it stays optional while clients
++  // support those hosts — consumers MUST read `undefined`/`null` as "birth not
++  // reported" and keep their own unknown state for it. Official clients ignore it.
++  origin: z.enum(["launch", "import"]).nullable().optional(),
++  // COMPAT(subagentActivity): added 2026-10-02 (Paseo Go B9-SUBACT, F31 ruling B+).
++  // Pure-add live-visibility axis: how many of this agent's CHILD transcripts (omp
++  // spawns them into `<parentStem>/<agentName>.jsonl`) were written inside the
++  // watcher's freshness window — i.e. foreign subagent work running under this
++  // session right now. Only the transcript watcher can answer, so daemons that
++  // never observed the agent omit the field, and consumers MUST read
++  // `undefined`/`null`/`0` as "no badge". The chat row renders 「子任务×N」 with it.
++  activeSubagents: z.number().int().nonnegative().nullable().optional(),
+ });
+ 
+ export type AgentSnapshotPayload = z.infer<typeof AgentSnapshotPayloadSchema>;
+@@ -850,7 +917,7 @@ export const AgentListItemPayloadSchema = z.object({
+   status: AgentStatusSchema,
+   cwd: z.string(),
+   createdAt: z.string(),
+-  updatedAt: z.string(),
++  updatedAt: z.string(), // R2-14: untrusted date string — parse via parseDateOrNull
+   lastUserMessageAt: z.string().nullable(),
+   archivedAt: z.string().nullable().optional(),
+   requiresAttention: z.boolean().optional(),
+@@ -858,6 +925,21 @@ export const AgentListItemPayloadSchema = z.object({
+   attentionTimestamp: z.string().nullable().optional(),
+   labels: z.record(z.string(), z.string()).default({}),
+   providerUnavailable: z.boolean().optional(),
++  // COMPAT(agentLastMessagePreview): added 2026-09-30 (Paseo Go B4-PREVIEW). Same
++  // pure-add fields and semantics as AgentSnapshotPayloadSchema.lastMessagePreview;
++  // carried through toAgentListItemPayload for MCP list_agents consumers.
++  lastMessagePreview: z.string().nullable().optional(),
++  lastMessageRole: z.enum(["user", "assistant", "other"]).nullable().optional(),
++  // COMPAT(agentOwnership): added 2026-09-30 (Paseo Go B4-OWNERSHIP). Same pure-add
++  // pair and semantics as AgentSnapshotPayloadSchema.ownership /
++  // .externalLooksActive; carried through toAgentListItemPayload for MCP
++  // list_agents consumers.
++  ownership: z.enum(["paseo", "external", "none"]).nullable().optional(),
++  externalLooksActive: z.boolean().nullable().optional(),
++  // COMPAT(agentOrigin): added 2026-10-02 (Paseo Go B6-OWN-HEAL). Same pure-add
++  // birth axis and semantics as AgentSnapshotPayloadSchema.origin; carried through
++  // toAgentListItemPayload for MCP list_agents consumers.
++  origin: z.enum(["launch", "import"]).nullable().optional(),
+ });
+ 
+ export type AgentListItemPayload = z.infer<typeof AgentListItemPayloadSchema>;
+@@ -872,7 +954,29 @@ export const RecentProviderSessionDescriptorPayloadSchema = z.object({
+   title: z.string().nullable(),
+   firstPromptPreview: z.string().nullable(),
+   lastPromptPreview: z.string().nullable(),
+-  lastActivityAt: z.string(),
++  lastActivityAt: z.string(), // R2-14: untrusted date string — parse via parseDateOrNull
++  // COMPAT(importDescriptorParentChain): added 2026-09-27 (Paseo Go C25), optional
++  // while clients support older daemons. Providers that have no parent-chain
++  // concept (claude/codex/pi) omit these entirely. `parentHandleId` is
++  // provider-opaque (for omp it is the parent transcript path, falling back to
++  // the raw parent session id when the parent transcript was not scanned);
++  // `parentTitle` is only present when the daemon also parsed the parent.
++  // `looksActive` is a freshness heuristic, never a liveness proof.
++  parentHandleId: z.string().optional(),
++  parentTitle: z.string().optional(),
++  // COMPAT(importDescriptorLooksActive): added 2026-09-27 (Paseo Go C25).
++  // Absent means the provider offers no activity signal at all; false means
++  // the provider checked and the transcript looks idle.
++  looksActive: z.boolean().optional(),
++  // COMPAT(importSessionExistingMark): added 2026-10-01 (Paseo Go B5-IMPORT2),
++  // optional while clients support older daemons (drop the optional when the
++  // supported client floor is >= the daemon version that ships it;
++  // target: 2026-12-01). Only present when the request asked
++  // `includeExisting: true` and this transcript is already a managed agent
++  // (native launch, import, or archived — resume-chain ancestors included).
++  // The shell renders 已导入/已归档 badges, disables the checkbox and routes the
++  // row tap to that agent. Absent = not existing, or a pre-B5 daemon.
++  existing: z.object({ agentId: z.string(), archived: z.boolean() }).optional(),
+ });
+ 
+ export type RecentProviderSessionDescriptorPayload = z.infer<
+@@ -1337,6 +1441,17 @@ export const FetchRecentProviderSessionsRequestMessageSchema = z.object({
+   since: z.string().optional(),
+   limit: z.number().int().positive().max(200).optional(),
+   query: z.string().optional(),
++  // COMPAT(importSessionIncludeExisting): added 2026-10-01 (Paseo Go B5-IMPORT2),
++  // optional while clients support older daemons (drop the optional when the
++  // supported client floor is >= the daemon version that ships it;
++  // target: 2026-12-01). Absent/false keeps the pre-B5 verdict RULE: sessions
++  // already managed as agents are filtered out and `filteredAlreadyImportedCount`
++  // reports how many were dropped. The claim set itself grew in B5 — resume-chain
++  // ancestors of a managed transcript are filtered (and counted) here too, so the
++  // false-mode row set is not byte-identical to pre-B5.
++  // true = keep every candidate row and mark already-existing ones per entry via
++  // `existing` (D20: 导入页覆盖面对齐 omp resume，废除「已存在即剔除」).
++  includeExisting: z.boolean().optional(),
+ });
+ 
+ export const FetchAgentRequestMessageSchema = z.object({
+@@ -2280,6 +2395,64 @@ export const CheckoutCommitsListRequestSchema = z.object({
+   requestId: z.string(),
+ });
+ 
++// COMPAT(checkoutHistoryList): added 2026-09-29 (Paseo Go KI-7). Pure-add
++// RPC pair; daemons older than the Paseo Go commit-history build reject this
++// type at inbound validation, so clients must gate the request (rpc_error on
++// older hosts is expected and non-fatal). Lists the full commit history
++// reachable from HEAD in topological order, paged by commit count. Each entry
++// carries Git-Graph-style lane geometry computed server-side so the shell
++// draws the DAG without running any layout algorithm of its own.
++export const CheckoutHistoryRefSchema = z.object({
++  name: z.string(),
++  // "head": the ref HEAD points at — name is the branch name (prefix stripped),
++  // or the literal "HEAD" when detached. "local"/"remote"/"tag": the other
++  // decorate tokens with refs/heads/, refs/remotes/, refs/tags/ stripped.
++  kind: z.enum(["head", "local", "remote", "tag"]),
++});
++
++export const CheckoutHistoryEdgeSchema = z.object({
++  // Lanes are 0-based. "fork": a curve leaving THIS entry's dot and arriving
++  // at column toLane on the next row (a second parent continuing down its own
++  // lane). "merge": a curve descending in column fromLane and terminating on
++  // THIS entry's dot (a lane converging at its branch point).
++  fromLane: z.number().int().min(0),
++  toLane: z.number().int().min(0),
++  kind: z.enum(["fork", "merge"]),
++});
++
++export const CheckoutHistoryEntrySchema = z.object({
++  sha: z.string(),
++  shortSha: z.string(),
++  subject: z.string(),
++  authorName: z.string(),
++  // Author date, ISO 8601 with offset (git --date=iso-strict).
++  dateISO: z.string(),
++  refs: z.array(CheckoutHistoryRefSchema),
++  // Column of this commit's dot; lane 0 = HEAD's mainline. Allocation is a
++  // pure function of HEAD's history walked from the top, so lane numbers are
++  // stable across pages (the server re-walks the prefix for every page).
++  lane: z.number().int().min(0),
++  // "merge": >=2 parents (dot drawn as a merge marker; fork edges depart here).
++  // "edge": single-parent commit where another lane converges (branch point).
++  // "dot": plain commit with the lane continuing straight through.
++  topology: z.enum(["dot", "merge", "edge"]),
++  edges: z.array(CheckoutHistoryEdgeSchema),
++  // True when this commit's own lane terminates at this row (root commit).
++  // Lets the shell stop drawing the vertical segment without knowing parents.
++  laneEnds: z.boolean(),
++});
++
++export const CheckoutHistoryListRequestSchema = z.object({
++  type: z.literal("checkout.history.list.request"),
++  cwd: z.string(),
++  // Page window over the topological commit list. skip counts commits, not
++  // graph rows (rows and entries correspond 1:1). The server clamps limit to
++  // <=200 and defaults it to 50.
++  limit: z.number().int().min(1).max(200).optional(),
++  skip: z.number().int().min(0).optional(),
++  requestId: z.string(),
++});
++
+ export const CheckoutCommitFileDiffRequestSchema = z.object({
+   type: z.literal("checkout.commits.file_diff.request"),
+   cwd: z.string(),
+@@ -2455,6 +2628,19 @@ export const DirectorySuggestionsRequestSchema = z.object({
+   requestId: z.string(),
+ });
+ 
++// COMPAT(workspaceContentSearch): added 2026-09-29 (Paseo Go KI-6S). Pure-add
++// RPC pair; daemons older than the Paseo Go content-search build reject this
++// type at inbound validation, so clients must gate the request (rpc_error on
++// older hosts is expected and non-fatal). Searches file contents under `cwd`
++// for a case-insensitive substring; `limit` caps returned matches.
++export const WorkspaceContentSearchRequestSchema = z.object({
++  type: z.literal("workspace.content_search.request"),
++  cwd: z.string(),
++  query: z.string(),
++  limit: z.number().int().min(1).max(60).optional(),
++  requestId: z.string(),
++});
++
+ export const PaseoWorktreeListRequestSchema = z.object({
+   type: z.literal("paseo_worktree_list_request"),
+   cwd: z.string().optional(),
+@@ -3270,6 +3456,7 @@ export const SessionInboundMessageSchema = z.discriminatedUnion("type", [
+   CheckoutForgeSetAutoMergeRequestSchema,
+   CheckoutGithubSetAutoMergeRequestSchema,
+   CheckoutCommitsListRequestSchema,
++  CheckoutHistoryListRequestSchema,
+   CheckoutCommitFileDiffRequestSchema,
+   CheckoutForgeGetCheckDetailsRequestSchema,
+   CheckoutGithubGetCheckDetailsRequestSchema,
+@@ -3285,6 +3472,7 @@ export const SessionInboundMessageSchema = z.discriminatedUnion("type", [
+   ForgeSearchRequestSchema,
+   GitHubSearchRequestSchema,
+   DirectorySuggestionsRequestSchema,
++  WorkspaceContentSearchRequestSchema,
+   PaseoWorktreeListRequestSchema,
+   PaseoWorktreeArchiveRequestSchema,
+   CreatePaseoWorktreeRequestSchema,
+@@ -4145,6 +4333,13 @@ export const FetchRecentProviderSessionsResponseMessageSchema = z.object({
+     requestId: z.string(),
+     entries: z.array(RecentProviderSessionDescriptorPayloadSchema),
+     filteredAlreadyImportedCount: z.number().int().nonnegative().optional(),
++    // COMPAT(importClaimedTotal): added 2026-10-02 (Paseo Go B8-COUNT, F24), optional
++    // while clients support older daemons. How many in-register agents claim a
++    // provider transcript at all — counted over the daemon's FULL claim index, so
++    // unlike `entries` it does not shrink with the return window (limit/search).
++    // The import screen renders 「共 N 个会话已是你的 agent」 from it; absent =
++    // pre-B8 daemon (or zero claims) and the line is not rendered.
++    claimedTotal: z.number().int().nonnegative().optional(),
+     providerErrors: z
+       .array(
+         z.object({
+@@ -5512,6 +5707,33 @@ export const CheckoutCommitsListResponseSchema = z.object({
+   }),
+ });
+ 
++export const CheckoutHistoryListResponseSchema = z.object({
++  type: z.literal("checkout.history.list.response"),
++  payload: z.object({
++    cwd: z.string(),
++    // False when cwd is not inside a git work tree. A git repo with no commits
++    // yet is isGit:true with an empty entries list — an empty repo is not
++    // "not git".
++    isGit: z.boolean(),
++    entries: z.array(CheckoutHistoryEntrySchema),
++    // True when commits remain after this page (the shell may request the next
++    // one). Walking is capped server-side; a capped walk reports false.
++    hasMore: z.boolean(),
++    // Branch/remote sync state, mirroring checkout_status so the history pane
++    // is self-describing. The Paseo Go shell header reads the EXISTING
++    // checkout_status query instead, keeping the wire at zero extra RPCs.
++    currentBranch: z.string().nullable(),
++    // Full upstream ref as checkout_status reports it ("refs/remotes/origin/
++    // main"); null when the branch has no upstream.
++    upstreamRef: z.string().nullable(),
++    aheadOfOrigin: z.number().nullable(),
++    behindOfOrigin: z.number().nullable(),
++    hasRemote: z.boolean(),
++    error: CheckoutErrorSchema.nullable(),
++    requestId: z.string(),
++  }),
++});
++
+ export const CheckoutCommitFileDiffResponseSchema = z.object({
+   type: z.literal("checkout.commits.file_diff.response"),
+   payload: z.object({
+@@ -5886,6 +6108,27 @@ export const DirectorySuggestionsResponseSchema = z.object({
+   }),
+ });
+ 
++export const WorkspaceContentSearchMatchSchema = z.object({
++  // Path relative to the request cwd, "/"-separated.
++  path: z.string(),
++  // 1-based line number of the match.
++  line: z.number().int().positive(),
++  // Matched line, trimmed, at most 120 characters.
++  preview: z.string(),
++});
++
++export const WorkspaceContentSearchResponseSchema = z.object({
++  type: z.literal("workspace.content_search.response"),
++  payload: z.object({
++    matches: z.array(WorkspaceContentSearchMatchSchema),
++    // True when the scan stopped early (match limit, byte budget, or
++    // deadline); the result set is then incomplete, never a total.
++    truncated: z.boolean(),
++    elapsedMs: z.number(),
++    requestId: z.string(),
++  }),
++});
++
+ const PaseoWorktreeSchema = z.object({
+   worktreePath: z.string(),
+   createdAt: z.string(),
+@@ -6873,6 +7116,7 @@ export const SessionOutboundMessageSchema = z.discriminatedUnion("type", [
+   CheckoutForgeSetAutoMergeResponseSchema,
+   CheckoutGithubSetAutoMergeResponseSchema,
+   CheckoutCommitsListResponseSchema,
++  CheckoutHistoryListResponseSchema,
+   CheckoutCommitFileDiffResponseSchema,
+   CheckoutForgeGetCheckDetailsResponseSchema,
+   CheckoutGithubGetCheckDetailsResponseSchema,
+@@ -6888,6 +7132,7 @@ export const SessionOutboundMessageSchema = z.discriminatedUnion("type", [
+   ForgeSearchResponseSchema,
+   GitHubSearchResponseSchema,
+   DirectorySuggestionsResponseSchema,
++  WorkspaceContentSearchResponseSchema,
+   PaseoWorktreeListResponseSchema,
+   PaseoWorktreeArchiveResponseSchema,
+   CreatePaseoWorktreeResponseSchema,
+@@ -7231,6 +7476,11 @@ export type CheckoutCommitFile = z.infer<typeof CheckoutCommitFileSchema>;
+ export type CheckoutCommit = z.infer<typeof CheckoutCommitSchema>;
+ export type CheckoutCommitsListRequest = z.infer<typeof CheckoutCommitsListRequestSchema>;
+ export type CheckoutCommitsListResponse = z.infer<typeof CheckoutCommitsListResponseSchema>;
++export type CheckoutHistoryRef = z.infer<typeof CheckoutHistoryRefSchema>;
++export type CheckoutHistoryEdge = z.infer<typeof CheckoutHistoryEdgeSchema>;
++export type CheckoutHistoryEntry = z.infer<typeof CheckoutHistoryEntrySchema>;
++export type CheckoutHistoryListRequest = z.infer<typeof CheckoutHistoryListRequestSchema>;
++export type CheckoutHistoryListResponse = z.infer<typeof CheckoutHistoryListResponseSchema>;
+ export type CheckoutCommitFileDiffRequest = z.infer<typeof CheckoutCommitFileDiffRequestSchema>;
+ export type CheckoutCommitFileDiffResponse = z.infer<typeof CheckoutCommitFileDiffResponseSchema>;
+ export type ParsedDiffFile = z.infer<typeof ParsedDiffFileSchema>;
+@@ -7301,6 +7551,9 @@ export type ChangeRequestCheckoutSource = z.infer<typeof ChangeRequestCheckoutSo
+ export type CreatePaseoWorktreeRequest = z.infer<typeof CreatePaseoWorktreeRequestSchema>;
+ export type DirectorySuggestionsRequest = z.infer<typeof DirectorySuggestionsRequestSchema>;
+ export type DirectorySuggestionsResponse = z.infer<typeof DirectorySuggestionsResponseSchema>;
++export type WorkspaceContentSearchRequest = z.infer<typeof WorkspaceContentSearchRequestSchema>;
++export type WorkspaceContentSearchMatch = z.infer<typeof WorkspaceContentSearchMatchSchema>;
++export type WorkspaceContentSearchResponse = z.infer<typeof WorkspaceContentSearchResponseSchema>;
+ export type PaseoWorktreeListRequest = z.infer<typeof PaseoWorktreeListRequestSchema>;
+ export type PaseoWorktreeListResponse = z.infer<typeof PaseoWorktreeListResponseSchema>;
+ export type PaseoWorktreeArchiveRequest = z.infer<typeof PaseoWorktreeArchiveRequestSchema>;

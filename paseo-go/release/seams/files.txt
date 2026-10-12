@@ -1,0 +1,12 @@
+packages/app/app.config.js
+packages/app/src/app/index.tsx
+packages/app/src/app/_layout.tsx
+packages/app/src/file-explorer/state-keys.ts
+packages/app/src/hooks/use-file-explorer-actions.ts
+packages/app/src/components/file-explorer-pane.tsx
+packages/client/src/daemon-client.ts
+packages/protocol/src/messages.ts
+packages/server/src/server/session.ts
+packages/server/src/server/authorization/operation-permissions.ts
+CLAUDE.md
+README.md

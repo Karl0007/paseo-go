@@ -1,0 +1,13 @@
+diff --git a/README.md b/README.md
+index 120672746..2821f535a 100644
+--- a/README.md
++++ b/README.md
+@@ -4,6 +4,8 @@
+ 
+ <h1 align="center">Paseo</h1>
+ 
++> **Fork note — Paseo Go.** This branch is a _modified build_ of [getpaseo/paseo](https://github.com/getpaseo/paseo) (Apache-2.0): an additive, phone-first 3-tab shell (`app.paseo.shell`). All fork changes are confined to `packages/app/src/shell/**`, `packages/app/src/app/(shell|detail)/**`, and the enumerated upstream touchpoints; upstream stays the source of truth for the base product. Shell docs: [`paseo-go/README.md`](paseo-go/README.md). Re-stick this note after every `git merge upstream/main` (BUILD.md §6.4).
++
+ <p align="center">
+   <a href="README.md">English</a> ·
+   <a href="README.zh-CN.md">简体中文</a> ·

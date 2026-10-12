@@ -1,0 +1,97 @@
+diff --git a/packages/client/src/daemon-client.ts b/packages/client/src/daemon-client.ts
+index 46194ada8..d29e9678c 100644
+--- a/packages/client/src/daemon-client.ts
++++ b/packages/client/src/daemon-client.ts
+@@ -72,6 +72,8 @@ import type {
+   GitHubSearchResponse,
+   GitHubSearchRequest,
+   DirectorySuggestionsResponse,
++  WorkspaceContentSearchResponse,
++  CheckoutHistoryListResponse,
+   PaseoWorktreeListResponse,
+   PaseoWorktreeArchiveResponse,
+   ProjectIconSource,
+@@ -519,6 +521,8 @@ type BranchSuggestionsPayload = BranchSuggestionsResponse["payload"];
+ type ForgeSearchPayload = ForgeSearchResponse["payload"];
+ type GitHubSearchPayload = GitHubSearchResponse["payload"];
+ type DirectorySuggestionsPayload = DirectorySuggestionsResponse["payload"];
++type WorkspaceContentSearchPayload = WorkspaceContentSearchResponse["payload"];
++type CheckoutHistoryListPayload = CheckoutHistoryListResponse["payload"];
+ type PaseoWorktreeListPayload = PaseoWorktreeListResponse["payload"];
+ type PaseoWorktreeArchivePayload = PaseoWorktreeArchiveResponse["payload"];
+ type CreatePaseoWorktreePayload = Extract<
+@@ -2417,6 +2421,9 @@ export class DaemonClient {
+       ...(options?.since ? { since: options.since } : {}),
+       ...(options?.limit ? { limit: options.limit } : {}),
+       ...(options?.query !== undefined ? { query: options.query } : {}),
++      ...(options?.includeExisting !== undefined
++        ? { includeExisting: options.includeExisting }
++        : {}),
+     });
+     return this.sendRequest({
+       requestId: resolvedRequestId,
+@@ -4243,6 +4250,34 @@ export class DaemonClient {
+     return { file: payload.file };
+   }
+ 
++  // COMPAT(Paseo Go KI-7): pure-add method for checkout.history.list.request
++  // (protocol added 2026-09-29, Paseo Go KI-7). Daemons older than that answer
++  // rpc_error{requestType:"checkout.history.list.request"}; the Paseo Go shell
++  // treats that as "host has no full-history RPC" and falls back to the
++  // ahead-of-base CommitsSection (shell/files/commit-history.ts capability
++  // gate). The server caps its walk at 10k commits; 30s covers the 15s log
++  // budget plus the plumbing probes.
++  async listCheckoutHistory(
++    options: { cwd: string; limit?: number; skip?: number },
++    requestId?: string,
++  ): Promise<CheckoutHistoryListPayload> {
++    const payload =
++      await this.sendNamespacedCorrelatedSessionRequest<"checkout.history.list.response">({
++        requestId,
++        message: {
++          type: "checkout.history.list.request",
++          cwd: options.cwd,
++          limit: options.limit,
++          skip: options.skip,
++        },
++        timeout: 30_000,
++      });
++    if (payload.error) {
++      throw new Error(payload.error.message);
++    }
++    return payload;
++  }
++
+   async checkoutPrCreate(
+     cwd: string,
+     input: { title?: string; body?: string; baseRef?: string },
+@@ -4663,6 +4698,29 @@ export class DaemonClient {
+     });
+   }
+ 
++  // COMPAT(Paseo Go KI-6): pure-add method for workspace.content_search.request
++  // (protocol added 2026-09-29, Paseo Go KI-6S). Daemons older than that answer
++  // rpc_error{requestType:"workspace.content_search.request"}; callers treat that
++  // as "host has no content search" and degrade silently (Paseo Go shell
++  // workspace-search.ts capability gate). Server-side scan caps itself at ~5s;
++  // the 15s client timeout leaves headroom past the deadline + transport.
++  async searchWorkspaceContent(
++    options: { cwd: string; query: string; limit?: number },
++    requestId?: string,
++  ): Promise<WorkspaceContentSearchPayload> {
++    return this.sendCorrelatedSessionRequest({
++      requestId,
++      message: {
++        type: "workspace.content_search.request",
++        cwd: options.cwd,
++        query: options.query,
++        limit: options.limit,
++      },
++      responseType: "workspace.content_search.response",
++      timeout: 15_000,
++    });
++  }
++
+   // ============================================================================
+   // File Explorer
+   // ============================================================================

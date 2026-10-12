@@ -213,7 +213,9 @@ CI=ubuntu runner（JDK21+镜像自带 Android SDK，AGP 自动补组件）：`PA
 
 **go.6 新增 CI 事实**：镜像根来自 Windows tarball 快照 → 全仓文件 git mode=100644（无 100755），linux desktop 构建 EACCES on `resources/bin/paseo`——workflow 已在 linux job 内 `chmod +x packages/desktop/bin/paseo`、APK job `chmod +x gradlew`（CI 侧修，不动仓内文件）。CLI 打包顺序=上游 Dockerfile 证明过的依赖序（bare `npm ci` 无 workspace dist，cli 先 pack 必死 TS2307）。
 
-**keystore 保管纪律**：签名=RN 模板 debug keystore（cert SHA-256 `fac61745dc…91033b9c`，与 M1 装机包同源=可 `-r` 升级）。⚠ 注意 `~/.android/debug.keystore` 是**另一把**（cert `5E8F…`），别混。保管三处：① public 仓 secret `PASEO_DEBUG_KEYSTORE`（base64，CI 写回 `android/app/debug.keystore`——gradle 模板 release 块本就指 `file('debug.keystore')`，**零 gradle 改动**）；② 本机副本 `C:/work/paseo-go-keystore/debug.keystore`（仓外，不入库）；③ 源头=prebuild 模板自带（`packages/app/android/app/debug.keystore`，android/ gitignored）。正式签名 keystore 仍是发布前待办（换 keystore 会断装机升级链，需配合卸载重装）。
+**keystore 保管纪律（2026-10-12 外部审计轮：正式签名落地）**：release APK 现签**正式 Paseo Go keystore**（cert SHA-256 `22:4B3CEC…4E:A6`，alias `paseo-go`，RSA2048，有效期 10000 天；keystore 文件 sha256 `13f3387f…369ecb`）。⚠ **换签断链**：go.16 及以前=RN 模板 debug keystore（cert `fac61745dc…`，私钥是模板公开常识=可被伪造同签名包），正式签名后**装机升级需卸载重装**一次，此后升级链稳定。⚠ 另有 `~/.android/debug.keystore`（cert `5E8F…`）=第三把，仅 dev 用，勿混。正式 keystore 保管三处（**均不入库**）：① public 仓 secret `PASEO_RELEASE_KEYSTORE` + `PASEO_RELEASE_KEYSTORE_PROPS`（base64；CI 写回 `android/app/{release.keystore,keystore.properties}` 并注入 `paseoGoRelease` 签名块——fork-release.yml 已内联，因 prebuild --clean 会抹 phase0 补丁）；② 本机副本 `C:/work/paseo-go-keystore/{release.keystore,keystore.properties}`（仓外）；③ 本地构建=build-release-wsl.sh phase0 从 `PASEO_GO_KEYSTORE_DIR`（默认 ②）复制 + 追加 `PASEO_GO_SIGNING` gradle 补丁。缺 keystore 时 phase0 打 WARN 回落 debug 签名（仅自用），**发布轮必须核 phase0 输出无 WARN**。旧 `PASEO_DEBUG_KEYSTORE` secret 保留仅供复现历史 go 包。
+
+**上游 rebase 节奏（审计轮 #1 入册）**：缝隙压在上游高频改的 `_layout.tsx`（两周 6 改）上，漂移只增不追=贴缝债复利。纪律：**每发布轮起手**跑 `gh api repos/getpaseo/paseo/compare/<anchor>...main --jq .total_commits` 记进发布卡；累计 >80 commit 或 `_layout.tsx`/任一缝隙文件有新动 → 本轮内做一次 `git merge upstream/main` + 重贴缝 + `seam-diff-check.sh --bless`。漂移基线（2026-10-12）：fork 基点→main=**330**，同步锚 919c737c→main=**294**。
 
 ### 6.4 上游 workflow 冲突处置（零触点原则）
 
@@ -230,7 +232,17 @@ gh api repos/Karl0007/paseo-go/actions/workflows --jq '.workflows[] | select(.st
 
 任何多出的 active=上游管线可被本仓事件触发，立即 `PUT …/workflows/<id>/disable`。注意：树里有但**未注册**的 6 个（ci/nix/nix-update-hash/desktop-packages/desktop-rollout/deploy-relay）**不可作为防线**——未注册是服务端状态、机制未查实（疑与镜像 force-push/默认分支重写有关），注册复活无感知，所以 active 对账是唯一可复现闸。
 
-**贴缝断言（上游漂移闸）**：漂移基线=**330 commits**（fork 基点 db4fd334→upstream/main，2026-10-08 实测；_layout.tsx 两周 6 改=最热点）。每次 merge upstream 后，除壳套件外逐缝核 `git diff upstream/main -- packages/app/app.config.js packages/app/index.tsx` 输出**必须只剩我们的壳块**（缝隙=贴上去的增块）；漂移数用 `gh api repos/getpaseo/paseo/compare/<anchor>...main --jq .total_commits` 现取并写进当轮发布卡。
+**贴缝断言（上游漂移闸）**：漂移基线=**330 commits**（fork 基点 db4fd334→upstream/main，2026-10-08 实测；\_layout.tsx 两周 6 改=最热点）。每次 merge upstream 后，除壳套件外逐缝核 `git diff upstream/main -- packages/app/app.config.js packages/app/index.tsx` 输出**必须只剩我们的壳块**（缝隙=贴上去的增块）；漂移数用 `gh api repos/getpaseo/paseo/compare/<anchor>...main --jq .total_commits` 现取并写进当轮发布卡。
+
+**机械闸脚本清单（审计轮 #6：纪律→代码，全部 git-bash 直跑；PATH 里 `bash`=WSL shim 坑⑦，用 `sh <script>`）**：
+
+| 脚本                                     | 何时跑                 | 闸什么                                                                                                                                                                 |
+| ---------------------------------------- | ---------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `release/check-workflows.sh`             | 每次同步/发布后        | active workflow 必须**仅** fork-release.yml，多出的自动 disable+复验（「未注册」的 6 个不可信=服务端状态）                                                             |
+| `release/seam-diff-check.sh`             | 每次 merge upstream 后 | 12 个触点文件（`release/seams/files.txt`，对 `seams/anchor` 种子）的 diff 必须逐一等于 blessed 快照；重贴缝=人工复核后 `--bless` 并把新快照随 merge commit 入库        |
+| `release/create-release.sh`              | 开任何 release 线      | **唯一合法入口**：硬编码 `--prerelease`（go.13 手搓漏 flag 实锤）+ body 头带 Apache-2.0 §4(b) modified-build 归因 + 建后回读断言                                       |
+| `release/cutover-via-task.sh`            | 每次生产切机           | 把切机 .ps1 注册成一次性计划任务脱离本会话进程树执行（go.16 事故：脚本寄生在被重启的 daemon 上=自杀 13h），tail 日志到 DONE OK/ABORT/ROLLBACK；`WATCH_ONLY=1` 断点续盯 |
+| `release/safe-tap.sh <x> <y> <期望文本>` | 任何真机注入点击       | 先 uiautomator dump，取 (x,y) 处**最小可点节点**的 text/content-desc，不含期望文本=拒点退出 2（g16-f05 事故：坐标猜偏把探针文本发进用户 journal）                      |
 
 ### 6.5 镜像全量重建 runbook（本轮实测版）
 

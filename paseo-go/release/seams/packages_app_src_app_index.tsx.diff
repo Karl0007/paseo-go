@@ -1,0 +1,34 @@
+diff --git a/packages/app/src/app/index.tsx b/packages/app/src/app/index.tsx
+index e0649f65a..a8d1fc389 100644
+--- a/packages/app/src/app/index.tsx
++++ b/packages/app/src/app/index.tsx
+@@ -1,5 +1,5 @@
+ import React from "react";
+-import { Redirect, usePathname } from "expo-router";
++import { Redirect, usePathname, type Href } from "expo-router";
+ import { StartupSplashScreen } from "@/screens/startup-splash-screen";
+ import { useEarliestOnlineHostServerId, useHostRuntimeBootstrapState } from "@/app/_layout";
+ import {
+@@ -13,6 +13,8 @@ import {
+   useLastWorkspaceSelection,
+ } from "@/stores/navigation-active-workspace-store";
+ import { shouldUseDesktopDaemon } from "@/desktop/daemon/desktop-daemon";
++import { useShellSeam } from "@/shell/use-shell-seam";
++import { SHELL } from "@/shell/routes";
+ 
+ const isDesktop = shouldUseDesktopDaemon();
+ 
+@@ -32,6 +34,13 @@ export default function Index() {
+     workspaceSelectionWorkspaceId,
+   );
+ 
++  const shellSeam = useShellSeam();
++  // F2: branch only after settings rehydrate — the Redirect unmounts Index on its
++  // first frame, stranding a persisted shellMode off-switch. C8: group root, and
++  // (shell)/_layout's initialRouteName (last focused tab, else 默认启动) picks the tab.
++  if (shellSeam.pending) return <StartupSplashScreen />;
++  if (shellSeam.active) return <Redirect href={SHELL.root as Href} />;
++
+   const startupRoute = resolveStartupRoute({
+     route: { kind: "index", pathname },
+     startupBlocker: bootstrapState.startupBlocker,

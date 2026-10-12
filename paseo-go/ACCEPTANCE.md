@@ -31,6 +31,19 @@
 
 **除上述外上游零改动**；全部纯增或 shellMode 门控，merge upstream 走"重新贴缝"。**同步上游解法口径**：messages.ts/session.ts/permissions 冲突取上游后重跑 `generate:validators` 重贴；workspace-screen.tsx 四处门+inset 按 §16.5 重贴（保留上游正文，重贴门表达式与 insetStyle 消费）。
 
+### 1a 审计轮触点+闸（2026-10-12，外部审计后落地）
+
+| 项          | 内容                                                                                                                                                                                                                                               | 卡        |
+| ----------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------- |
+| 触点 +1     | 根 `README.md` 顶部 fork 归因说明（Apache-2.0 §4(b)「已修改」声明，纯增一段；merge 时随 CLAUDE.md 重贴）                                                                                                                                           | 审计#5    |
+| 触点机器闸  | `release/seams/{anchor,files.txt}`（12 文件对种子 9ce29a1）+ `sh release/seam-diff-check.sh`——每个上游触点 diff 必须等于 blessed 快照，重贴缝后 `--bless` 随 merge commit 入库；这是"除清单外零改动"的**唯一可复现**核对（旧口径靠人工 diff 清点） | 审计#1/#4 |
+| workflow 闸 | `sh release/check-workflows.sh`：active 必须**仅** fork-release.yml，多者自动 disable+复验；deploy-website.yml 已补禁（第 6 个，go.13 手搓 release 漏 prerelease→release:published 真跑 failure 实锤）                                             | 审计#3/#4 |
+| release 闸  | `sh release/create-release.sh <tag>`=开 release 线唯一入口，硬编码 `--prerelease`+body 带 modified-build 归因+建后回读断言                                                                                                                         | 审计#3/#5 |
+| 正式签名    | release APK 换正式 Paseo Go keystore（cert `22:4B3CEC…`，替代公开常识的 RN debug key）；phase0+CI 双注入签名块；**换签断装机升级链=需卸载重装一次**（见 BUILD.md §6.3 保管纪律）                                                                   | 审计#2    |
+| 运维闸脚本  | `cutover-via-task.sh`（切机脱离被重启 daemon 的进程树，治 13h 停机根因）+`safe-tap.sh`（注入点击前 dump bounds 核 label，治探针文本误发根因）——两条已从"文档纪律"升级为"代码前置条件"                                                              | 审计#6    |
+
+QQ 邮箱 commit author 匿名化：用户裁定**本轮不动**（需 filter-repo 重写 300 commit→全 tag/镜像推倒，代价>收益）。
+
 ## 2. 用户拍板核对（§1）
 
 | #   | 拍板                   | 结果                                                                                                                                         | 证据                                                |

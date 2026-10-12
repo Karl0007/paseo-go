@@ -8,7 +8,7 @@
 #
 # Products (mac intentionally absent — no Apple credentials this cycle):
 #   - CLI npm tarball per platform (fully vendored; `npm i -g <url>.tgz`)
-#   - shell APK (app.paseo.shell, arm64-v8a, RN-template debug keystore)
+#   - shell APK (app.paseo.shell, arm64-v8a, formal Paseo Go keystore)
 #   - desktop Windows zip + NSIS (unsigned), desktop Linux deb/tar.gz/AppImage
 #   - release body = latest-pointer asset manifest with sha256 for every file
 name: Fork Release (paseo-go)
@@ -186,14 +186,35 @@ jobs:
           grep -q "applicationId 'app.paseo.shell'" packages/app/android/app/build.gradle \
             || { echo "::error::applicationId drifted (expected app.paseo.shell)"; grep -n applicationId packages/app/android/app/build.gradle; exit 1; }
 
-      - name: Restore signing keystore (RN-template debug keystore; BUILD.md custody note)
+      - name: Restore signing keystore + inject signing block (formal key, cert SHA256 22:4B3CEC…4E:A6)
         env:
-          KS_B64: ${{ secrets.PASEO_DEBUG_KEYSTORE }}
+          KS_B64: ${{ secrets.PASEO_RELEASE_KEYSTORE }}
+          KSP_B64: ${{ secrets.PASEO_RELEASE_KEYSTORE_PROPS }}
         run: |
           set -euo pipefail
-          [ -n "${KS_B64:-}" ] || { echo "::error::secret PASEO_DEBUG_KEYSTORE not set on this repo"; exit 1; }
-          printf '%s' "$KS_B64" | base64 -d > packages/app/android/app/debug.keystore
-          sha256sum packages/app/android/app/debug.keystore
+          [ -n "${KS_B64:-}" ] && [ -n "${KSP_B64:-}" ] || { echo "::error::PASEO_RELEASE_KEYSTORE(_PROPS) secrets not set"; exit 1; }
+          printf '%s' "$KS_B64"  | base64 -d > packages/app/android/app/release.keystore
+          printf '%s' "$KSP_B64" | base64 -d > packages/app/android/app/keystore.properties
+          sha256sum packages/app/android/app/release.keystore
+          # prebuild --clean wiped any phase0 patch; re-append the same signing
+          # block release/build-release-wsl.sh phase0 uses (marker-guarded).
+          G=packages/app/android/app/build.gradle
+          grep -q "PASEO_GO_SIGNING" "$G" || cat >> "$G" <<'KSPATCH'
+
+          // Paseo Go formal signing (CI inject; mirrors build-release-wsl.sh phase0).
+          if (file("keystore.properties").exists()) {
+              def ksProps = new Properties()
+              file("keystore.properties").withInputStream { ksProps.load(it) }
+              android.signingConfigs.create("paseoGoRelease") {
+                  storeFile = file(ksProps.getProperty("storeFile"))
+                  storePassword = ksProps.getProperty("storePassword")
+                  keyAlias = ksProps.getProperty("keyAlias")
+                  keyPassword = ksProps.getProperty("keyPassword")
+              }
+              android.buildTypes.release.signingConfig = android.signingConfigs.paseoGoRelease
+          }
+          KSPATCH
+          grep -q "PASEO_GO_SIGNING" "$G" || { echo "::error::signing block not injected"; exit 1; }
 
       - name: Assemble release APK
         working-directory: packages/app/android
@@ -355,7 +376,7 @@ jobs:
             echo "## 说明"
             echo "- macOS 产物：本轮不出（无 Apple 公证凭据）。上游 docker.yml 因 tag 版本约定冲突（test package.json.version == tag）已仓库级禁用，GHCR 镜像本轮无。"
             echo "- Windows/Linux 桌面产物未签名（上游本就不签 win/linux；SmartScreen/包管理器警告预期内）。"
-            echo "- APK 签名 = React Native 模板 debug keystore（与既往 go 构建升级兼容；正式 keystore 待办见 BUILD.md）。"
+            echo "- APK 签名 = 正式 Paseo Go keystore（cert SHA256 22:4B3CEC…4E:A6；go.16 及以前为 RN 模板 debug 签名，**换签后需卸载重装**，升级链自此稳定）。"
             echo "- CLI tarball 为全量 vendored 平台包：安装不访问 registry、不跑编译脚本。"
           } > release-body.md
           cat release-body.md

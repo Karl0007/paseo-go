@@ -1,0 +1,13 @@
+diff --git a/CLAUDE.md b/CLAUDE.md
+index b1f8a294e..eea33b6ec 100644
+--- a/CLAUDE.md
++++ b/CLAUDE.md
+@@ -4,6 +4,8 @@ Paseo is a mobile app for monitoring and controlling your local AI coding agents
+ 
+ **Supported agents:** Claude Code, Codex, GitHub Copilot, OpenCode, and Pi.
+ 
++**Fork note — Paseo Go.** This checkout carries an additive shell fork ("Paseo Go", a phone-first 3-tab client) on branch `paseo-go/v0.1.0`, upstream at `919c737c` (v0.10.2, merged 2026-09-30; fork base `db4fd334`). Its docs live in [`paseo-go/README.md`](paseo-go/README.md) (entry point), `paseo-go/DESIGN.md` (frozen spec), `paseo-go/BUILD.md` (device/build runbook), `paseo-go/ACCEPTANCE.md` (live ledger). Shell code is confined to `packages/app/src/shell/**`, `packages/app/src/app/(shell|detail)/**`, plus the enumerated upstream touchpoints (seams + micro-seams + batch-2 feature-surface files — the authoritative list is ACCEPTANCE.md "批次二增补" B2 row 1a). Before touching anything shell-related, or merging `upstream/main`, read those. Upstream files outside the enumerated touchpoints must stay untouched by shell work.
++
+ ## Repository map
+ 
+ This is an npm workspace monorepo:

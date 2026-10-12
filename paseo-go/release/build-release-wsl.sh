@@ -54,6 +54,45 @@ PGPATCH
   else
     echo "patch already present"
   fi
+  # ---- Formal release signing (external-audit round; BUILD.md §3.5 custody) ----
+  # The RN-template debug keystore's private key is public knowledge (anyone can
+  # forge a same-signature APK), so release builds sign with the project keystore
+  # held OUTSIDE the repo. Source of truth = C:/work/paseo-go-keystore/ (never
+  # committed; android/ is gitignored). CI restores the same two files from the
+  # PASEO_RELEASE_KEYSTORE/PASEO_RELEASE_KEYSTORE_PROPS secrets before assemble.
+  KS_SRC="${PASEO_GO_KEYSTORE_DIR:-C:/work/paseo-go-keystore}"
+  if [ -f "$KS_SRC/release.keystore" ] && [ -f "$KS_SRC/keystore.properties" ]; then
+    cp "$KS_SRC/release.keystore" "$ANDROID/app/release.keystore"
+    cp "$KS_SRC/keystore.properties" "$ANDROID/app/keystore.properties"
+    echo "release keystore staged from $KS_SRC"
+  else
+    echo "WARN: no release keystore at $KS_SRC -> APK falls back to debug signing (self-use only)"
+  fi
+  if ! grep -q "PASEO_GO_SIGNING" "$ANDROID/app/build.gradle"; then
+    cat >> "$ANDROID/app/build.gradle" <<'KSPATCH'
+
+// Paseo Go formal signing — appended by release/build-release-wsl.sh phase0
+// (marker PASEO_GO_SIGNING). When keystore.properties sits next to this file
+// (staged from the out-of-repo custody dir, or restored by CI), the release
+// build type signs with that key instead of the public RN debug key. Absent
+// file => leave the template's debug signing so a dev still gets an installable
+// APK (the phase0 WARN above is the only signal; release ritual must check).
+if (file("keystore.properties").exists()) {
+    def ksProps = new Properties()
+    file("keystore.properties").withInputStream { ksProps.load(it) }
+    android.signingConfigs.create("paseoGoRelease") {
+        storeFile = file(ksProps.getProperty("storeFile"))
+        storePassword = ksProps.getProperty("storePassword")
+        keyAlias = ksProps.getProperty("keyAlias")
+        keyPassword = ksProps.getProperty("keyPassword")
+    }
+    android.buildTypes.release.signingConfig = android.signingConfigs.paseoGoRelease
+}
+KSPATCH
+    echo "signing patch appended"
+  else
+    echo "signing patch already present"
+  fi
   # entry stub for gradle @InputFile (ENTRY_FILE resolution side effect).
   # Content is the lint-clean version (oxlint-disable on the side-effect import)
   # so a clean build's `npm run lint` stays green — the generator is the single

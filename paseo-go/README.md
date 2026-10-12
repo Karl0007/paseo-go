@@ -20,7 +20,7 @@
 ## 关键事实速查
 
 - 上游同步：`git merge upstream/main`；缝隙两文件冲突时"重新贴缝"（DESIGN §2.7）；`src/shell/**` 与 `(shell)/**` 永不冲突
-- ⚠ 上游触点终账（批次二后，唯一真相=ACCEPTANCE.md 批次二 B2 行 1a）=3 缝隙（index.tsx/app.config.js/\_layout.tsx+3 行）+ 1 组键契约微缝（3 文件）+ 功能面 4 文件（layout.ts/workspace-identity.ts/validated-persist-storage.ts/test-stub）+ 协议 2 + server 8 + 根 CLAUDE.md fork 指路；v0.1.0 旧口径"2 缝隙+微缝 6 文件"已被该行取代
+- ⚠ 上游触点终账（批次二后，唯一真相=ACCEPTANCE.md 批次二 B2 行 1a）=3 缝隙（index.tsx/app.config.js/\_layout.tsx+3 行）+ 1 组键契约微缝（3 文件）+ 功能面 4 文件（layout.ts/workspace-identity.ts/validated-persist-storage.ts/test-stub）+ 协议 2 + server 8 + 根 CLAUDE.md fork 指路；v0.1.0 旧口径"2 缝隙+微缝 6 文件"已被该行取代。**（2026-10-12 审计轮）** 再 +1 触点=根 `README.md` 顶部 fork 归因说明（Apache-2.0 §4(b)「已修改」声明，纯增一段，merge 时随 CLAUDE.md 一起重贴）；**触点全清单+快照闸=`release/seams/files.txt` + `sh release/seam-diff-check.sh`**（12 文件，对种子 `seams/anchor`），这是唯一机器可核对真相
 - 壳包名 `app.paseo.shell`（debug=`.debug` 后缀），scheme `paseogo://`（与官方 `paseo://` 已分叉）；与官方 app 可共存安装
 - 本地态：zustand persist 前缀 `paseoGo.` 六 store；"我的→壳设置→清除本地数据"一键复位；不加密是裁定（DESIGN §6 威胁模型）
 - 测试基线：app 套件失败集=W1 环境项（`todo/W1-suite-baseline.md`），改动验收=失败集合不变而非零失败

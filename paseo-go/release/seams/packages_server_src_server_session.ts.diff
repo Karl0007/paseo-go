@@ -1,0 +1,83 @@
+diff --git a/packages/server/src/server/session.ts b/packages/server/src/server/session.ts
+index c69033ab3..08639a08f 100644
+--- a/packages/server/src/server/session.ts
++++ b/packages/server/src/server/session.ts
+@@ -29,6 +29,7 @@ import {
+   type WorkspaceScriptStopRequest,
+   type CloseItemsRequest,
+   type DirectorySuggestionsRequest,
++  type WorkspaceContentSearchRequest,
+   type ProjectPlacementPayload,
+   type WorkspaceSetupSnapshot,
+   type WorkspaceDescriptorPayload,
+@@ -213,6 +214,8 @@ import {
+   searchDirectoryEntries,
+   WORKSPACE_SEARCH_HIDDEN_DIRECTORIES,
+ } from "../utils/directory-suggestions.js";
++import { searchWorkspaceContent } from "./workspace/content-search.js";
++import { handleCheckoutHistoryListRequest } from "./workspace/commit-history.js";
+ import type { CheckoutDiffManager } from "./checkout-diff-manager.js";
+ import type { Resolvable } from "./speech/provider-resolver.js";
+ import type { SpeechReadinessSnapshot } from "./speech/speech-runtime.js";
+@@ -2800,6 +2803,8 @@ export class Session {
+         return this.checkoutSession.handleStatusRequest(msg);
+       case "checkout.commits.list.request":
+         return this.checkoutSession.handleCommitsListRequest(msg);
++      case "checkout.history.list.request":
++        return handleCheckoutHistoryListRequest({ emit: (message) => this.emit(message) }, msg);
+       case "checkout.commits.file_diff.request":
+         return this.checkoutSession.handleCommitFileDiffRequest(msg);
+       case "validate_branch_request":
+@@ -2956,6 +2961,8 @@ export class Session {
+         return this.handleProjectIconGetRequest(msg.projectId, msg.requestId);
+       case "file_download_token_request":
+         return this.workspaceFilesSession.handleFileDownloadTokenRequest(msg);
++      case "workspace.content_search.request":
++        return this.handleWorkspaceContentSearchRequest(msg);
+       case "file.upload.request":
+         this.workspaceFilesSession.handleFileUploadRequest(msg, this.delivery);
+         return undefined;
+@@ -5078,6 +5085,25 @@ export class Session {
+     }
+   }
+ 
++  private async handleWorkspaceContentSearchRequest(
++    msg: WorkspaceContentSearchRequest,
++  ): Promise<void> {
++    const result = await searchWorkspaceContent({
++      root: expandTilde(msg.cwd),
++      query: msg.query,
++      limit: msg.limit,
++    });
++    this.emit({
++      type: "workspace.content_search.response",
++      payload: {
++        matches: result.matches,
++        truncated: result.truncated,
++        elapsedMs: result.elapsedMs,
++        requestId: msg.requestId,
++      },
++    });
++  }
++
+   private async handlePaseoWorktreeListRequest(
+     msg: Extract<SessionInboundMessage, { type: "paseo_worktree_list_request" }>,
+   ): Promise<void> {
+@@ -6193,6 +6219,7 @@ export class Session {
+         agentManager: this.agentManager,
+         agentStorage: this.agentStorage,
+         providerSnapshotManager: this.providerSnapshotManager,
++        logger: this.sessionLogger,
+       });
+       this.emit({
+         type: "fetch_recent_provider_sessions_response",
+@@ -6202,6 +6229,9 @@ export class Session {
+           ...(result.filteredAlreadyImportedCount > 0
+             ? { filteredAlreadyImportedCount: result.filteredAlreadyImportedCount }
+             : {}),
++          // B8-COUNT (F24): always sent by a B8 daemon — the shell tells "old daemon"
++          // from "no claims" by presence, and hides the summary line on either.
++          claimedTotal: result.claimedTotal,
+           ...(result.providerErrors.length > 0 ? { providerErrors: result.providerErrors } : {}),
+         },
+       });
