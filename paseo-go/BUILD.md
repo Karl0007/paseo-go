@@ -219,6 +219,19 @@ CI=ubuntu runner（JDK21+镜像自带 Android SDK，AGP 自动补组件）：`PA
 
 上游 12 个 workflow 逐个核 triggers：与 `v*.*.*-go.*` 撞 tag 且缺凭据必红的 4 个——`android-apk-release.yml`(`EXPO_TOKEN`)、`deploy-app.yml`(`CLOUDFLARE_API_TOKEN`)、`desktop-release.yml`(`APPLE_*`)、`release-notes-sync.yml`(GITHUB_TOKEN 够用但会用 CHANGELOG 覆写我们的 release 说明)——在 **public 仓仓库级禁用**（`gh api -X PUT …/workflows/<id>/disable`，不改文件=不扩触点；禁用态是服务端属性，镜像 force-push 不复原）。第 5 个禁用=`docker.yml`：纯 GITHUB_TOKEN 本可用，但其 setup 断言 `package.json.version == tag去v`，与我们的 `0.10.2-go.N` 系列天然冲突（go.1-3 三轮 publish 全红实锤），不改上游文件只能禁。其余 7 个 trigger=main/PR/manual，镜像分支 `paseo-go/v0.1.0` 上天然休眠。安全面：public 仓非 owner 不能推 tag，secrets 只在 owner 推 tag 时可达；`allowed_actions=local` **未设**（会连 actions/checkout 一起禁掉，本仓 workflow 全瘫）。
 
+**（2026-10-08 外部审计轮增补）** 第 6 个禁用=`deploy-website.yml`（此前漏禁，state=active）：它被**实证唤醒过**——release:published 触发，go.13 发布 run=failure（10-02 另有 2 红）。此前「prerelease 自然 skip」的论证只对 flag 已置的 go.14/16 成立：**发布瞬间忘置 prerelease 就会真跑**=守卫依赖操作正确性，不可依赖；服务端禁用才是闸。
+
+**同步/发布后的机械对账（写死命令，替代一切口头结论）**：
+
+```
+gh api repos/Karl0007/paseo-go/actions/workflows --jq '.workflows[] | select(.state=="active") | .path'
+# 期望输出仅一行： .github/workflows/fork-release.yml
+```
+
+任何多出的 active=上游管线可被本仓事件触发，立即 `PUT …/workflows/<id>/disable`。注意：树里有但**未注册**的 6 个（ci/nix/nix-update-hash/desktop-packages/desktop-rollout/deploy-relay）**不可作为防线**——未注册是服务端状态、机制未查实（疑与镜像 force-push/默认分支重写有关），注册复活无感知，所以 active 对账是唯一可复现闸。
+
+**贴缝断言（上游漂移闸）**：漂移基线=**330 commits**（fork 基点 db4fd334→upstream/main，2026-10-08 实测；_layout.tsx 两周 6 改=最热点）。每次 merge upstream 后，除壳套件外逐缝核 `git diff upstream/main -- packages/app/app.config.js packages/app/index.tsx` 输出**必须只剩我们的壳块**（缝隙=贴上去的增块）；漂移数用 `gh api repos/getpaseo/paseo/compare/<anchor>...main --jq .total_commits` 现取并写进当轮发布卡。
+
 ### 6.5 镜像全量重建 runbook（本轮实测版）
 
 `make-public-mirror.sh` 的 bash 路线在本机已不可依赖，两个环境级坑：
