@@ -3,10 +3,10 @@
 > 本机实测通过（2026-09-25，Windows 11 / Node v24.13.0 / 华为 MatePad BRT-W09）。
 > 后续所有卡按此闭环执行：改代码 → metro 热更或重打 APK → adb 装机 → adb 截图 → 读图。
 
-## 证据与仓库纪律（2026-09-29 起）
+## 证据与仓库纪律
 
-- **证据（截图/帧/dump）= 本地档案**：仍存 `paseo-go/evidence/<卡号>/` 并在报告引用路径，但**不入库**（目录已 gitignore；历史里的证据已于同日从公开面剥离）。审计=本机磁盘 + 报告 JSON。
-- **仓库**：`github.com/Karl0007/paseo-go`（public）是唯一开发与发布仓；本地 `origin` 直连，`upstream=getpaseo/paseo` 仅用于合并。evidence 仍只存本地、不入库；不再有镜像仓/单向重放。
+- **证据（截图/帧/dump）= 本地档案**：存 `paseo-go/evidence/<卡号>/` 并在报告引用路径，**不入库**（gitignore）。审计=本机磁盘 + 报告 JSON。
+- **仓库**：`github.com/Karl0007/paseo-go`（public）是唯一开发与发布仓；本地 `origin` 直连，`upstream=getpaseo/paseo` 仅用于合并。evidence 只存本地、不入库。
 - 临时产物（`.tmp/`、`packages/app/.tmp/`、`packages/app/packages/`）已 gitignore，禁止再入库。
 
 ## 0. 本机环境事实（先读，省一半坑）
@@ -203,25 +203,25 @@ $ADB = "$env:LOCALAPPDATA\Android\platform-tools\adb.exe"
 
 ### 6.2 CLI tarball 口径（为何不是裸 npm pack）
 
-裸 `npm pack -w @getpaseo/cli` 的 tarball 里 `@getpaseo/{client,protocol,server,...}` 依赖会去 **公共 npm registry 拉上游 0.10.2**——fork 的 server 改动（188 文件）全丢。且 npm 11 拒绝 bundle workspace 链接依赖；半 bundle（只 bundle 壳包、外部依赖留给 registry）在 `npm i -g` 全局布局下**确定性失败**（嵌套 lifecycle 依赖 bin-link 缺失，win11/npm 11.6 复现两次）。定稿=`paseo-go/release/pack-cli-bundle.mjs`：7 个壳包 `npm pack` → 全新 staging `npm install --omit=dev <7 tgz>`（外部依赖走 registry、node-pty 按宿主平台出预编译产物）→ 整棵 production node_modules 以 `bundleDependencies` 全量 vendored 进最终包。**终用户 `npm i -g <url>.tgz` = 纯解包+bin 链接，零 registry、零脚本**；代价=tarball 平台特定（win-x64/linux-x64 各一，release 说明分列）。脚本内置三道防呆：fork 血统标记（server dist 里 fork-only 文件）、web-ui 导出探针、node-pty 原生模块探针。
+裸 `npm pack -w @getpaseo/cli` 的 tarball 里 `@getpaseo/{client,protocol,server,...}` 依赖会去 **公共 npm registry 拉上游 0.10.2**——fork 的 server 改动全丢。且 npm 11 拒绝 bundle workspace 链接依赖；半 bundle（只 bundle 壳包、外部依赖留给 registry）在 `npm i -g` 全局布局下**确定性失败**（嵌套 lifecycle 依赖 bin-link 缺失）。定稿=`paseo-go/release/pack-cli-bundle.mjs`：壳包 `npm pack` → 全新 staging `npm install --omit=dev <各 tgz>`（外部依赖走 registry、node-pty 按宿主平台出预编译产物）→ 整棵 production node_modules 以 `bundleDependencies` 全量 vendored 进最终包。**终用户 `npm i -g <url>.tgz` = 纯解包+bin 链接，零 registry、零脚本**；代价=tarball 平台特定（win-x64/linux-x64 各一，release 说明分列）。脚本内置防呆：fork 血统标记（server dist 里 fork-only 文件）、web-ui 导出探针、node-pty 原生模块探针。
 
 ### 6.3 APK 口径（CI 与本机 §3.5 的差异）
 
 CI=ubuntu runner（JDK21+镜像自带 Android SDK，AGP 自动补组件）：`PASEO_GO=1 EXPO_PUBLIC_PASEO_GO_SHELL=1 EXPO_PUBLIC_PASEO_GO_UPSTREAM=<上游短sha> ENTRY_FILE=packages/app/index.ts` + 壳侧桩（§3.5 坑①同物，workflow 内联生成）+ `expo prebuild --clean` + `gradlew :app:assembleRelease`（arm64-v8a 单 ABI）。**linux hermesc=Optimized，§3.5 坑②(win64 debug OOM)整套不存在，无需 afterEvaluate 补丁/外部 hermesc/WSL**——本机一键链的 phase0-4 在 CI 全部不需要。prebuild 后断言 `applicationId 'app.paseo.shell'`（坑⑥漂移防线）。
 
-**go.4-6 实锤：16GB 托管 runner 打不出本 APK**——`Assemble release APK` 三连被宿主驱逐（`The runner has received a shutdown signal`，均发生在 metro bundle 写完瞬间，java 6g + metro node 8g cap + linux hermesc 48MB bundle 编译三者叠加超 16GB 宿主压力；`gh run rerun --failed` 一次同点死）。go.6 的 APK=本机 `build-release-wsl.sh` 全链重打（见 RELEASE.md go.6 行）。CI 化下轮候选：**A**=NODE_OPTIONS 降 6144 + `-Dorg.gradle.workers.max=2` 压峰值；**B**=self-hosted runner（用户另一台 Linux 机，DEPLOY-NOTES 同规范）。
+**APK runner 约束**：16GB 托管 runner 打不出本 APK（java 6g + metro node 8g + linux hermesc 48MB 叠加超宿主压力）。APK 由本机 `build-release-wsl.sh` 出包。CI 化候选：**A**=NODE_OPTIONS 降 6144 + `-Dorg.gradle.workers.max=2` 压峰值；**B**=self-hosted runner。
 
-**go.6 新增 CI 事实**：镜像根来自 Windows tarball 快照 → 全仓文件 git mode=100644（无 100755），linux desktop 构建 EACCES on `resources/bin/paseo`——workflow 已在 linux job 内 `chmod +x packages/desktop/bin/paseo`、APK job `chmod +x gradlew`（CI 侧修，不动仓内文件）。CLI 打包顺序=上游 Dockerfile 证明过的依赖序（bare `npm ci` 无 workspace dist，cli 先 pack 必死 TS2307）。
+**CI 文件模式与 CLI 打包顺序**：仓库树来自 Windows tarball 快照，文件 git mode=100644（无 100755）；linux desktop 构建前 workflow `chmod +x packages/desktop/bin/paseo`，APK job `chmod +x gradlew`。CLI 打包顺序=上游 Dockerfile 依赖序（bare `npm ci` 无 workspace dist，cli 先 pack 必败 TS2307）。
 
-**keystore 保管纪律（2026-10-12 外部审计轮：正式签名落地）**：release APK 现签**正式 Paseo Go keystore**（cert SHA-256 `22:4B3CEC…4E:A6`，alias `paseo-go`，RSA2048，有效期 10000 天；keystore 文件 sha256 `13f3387f…369ecb`）。⚠ **换签断链**：go.16 及以前=RN 模板 debug keystore（cert `fac61745dc…`，私钥是模板公开常识=可被伪造同签名包），正式签名后**装机升级需卸载重装**一次，此后升级链稳定。⚠ 另有 `~/.android/debug.keystore`（cert `5E8F…`）=第三把，仅 dev 用，勿混。正式 keystore 保管三处（**均不入库**）：① public 仓 secret `PASEO_RELEASE_KEYSTORE` + `PASEO_RELEASE_KEYSTORE_PROPS`（base64；CI 写回 `android/app/{release.keystore,keystore.properties}` 并注入 `paseoGoRelease` 签名块——fork-release.yml 已内联，因 prebuild --clean 会抹 phase0 补丁）；② 本机副本 `C:/work/paseo-go-keystore/{release.keystore,keystore.properties}`（仓外）；③ 本地构建=build-release-wsl.sh phase0 从 `PASEO_GO_KEYSTORE_DIR`（默认 ②）复制 + 追加 `PASEO_GO_SIGNING` gradle 补丁。缺 keystore 时 phase0 打 WARN 回落 debug 签名（仅自用），**发布轮必须核 phase0 输出无 WARN**。旧 `PASEO_DEBUG_KEYSTORE` secret 保留仅供复现历史 go 包。
+**keystore 保管纪律**：release APK 现签**正式 Paseo Go keystore**（cert SHA-256 `22:4B3CEC…4E:A6`，alias `paseo-go`，RSA2048，有效期 10000 天；keystore 文件 sha256 `13f3387f…369ecb`）。⚠ **换签断链**：go.16 及以前=RN 模板 debug keystore（cert `fac61745dc…`，私钥是模板公开常识=可被伪造同签名包），正式签名后**装机升级需卸载重装**一次，此后升级链稳定。⚠ 另有 `~/.android/debug.keystore`（cert `5E8F…`）=第三把，仅 dev 用，勿混。正式 keystore 保管三处（**均不入库**）：① public 仓 secret `PASEO_RELEASE_KEYSTORE` + `PASEO_RELEASE_KEYSTORE_PROPS`（base64；CI 写回 `android/app/{release.keystore,keystore.properties}` 并注入 `paseoGoRelease` 签名块——fork-release.yml 已内联，因 prebuild --clean 会抹 phase0 补丁）；② 本机副本 `C:/work/paseo-go-keystore/{release.keystore,keystore.properties}`（仓外）；③ 本地构建=build-release-wsl.sh phase0 从 `PASEO_GO_KEYSTORE_DIR`（默认 ②）复制 + 追加 `PASEO_GO_SIGNING` gradle 补丁。缺 keystore 时 phase0 打 WARN 回落 debug 签名（仅自用），**发布轮必须核 phase0 输出无 WARN**。旧 `PASEO_DEBUG_KEYSTORE` secret 保留仅供复现历史 go 包。
 
-**上游 rebase 节奏（审计轮 #1 入册）**：缝隙压在上游高频改的 `_layout.tsx`（两周 6 改）上，漂移只增不追=贴缝债复利。纪律：**每发布轮起手**跑 `gh api repos/getpaseo/paseo/compare/<anchor>...main --jq .total_commits` 记进发布卡；累计 >80 commit 或 `_layout.tsx`/任一缝隙文件有新动 → 本轮内做一次 `git merge upstream/main` + 重贴缝 + `seam-diff-check.sh --bless`。漂移基线（2026-10-12）：fork 基点→main=**330**，同步锚 919c737c→main=**294**。
+**上游 rebase 节奏**：缝隙压在上游高频改的 `_layout.tsx`（两周 6 改）上，漂移只增不追=贴缝债复利。纪律：**每发布轮起手**跑 `gh api repos/getpaseo/paseo/compare/<anchor>...main --jq .total_commits` 记进发布卡；累计 >80 commit 或 `_layout.tsx`/任一缝隙文件有新动 → 本轮内做一次 `git merge upstream/main` + 重贴缝 + `seam-diff-check.sh --bless`。漂移基线（2026-10-12）：fork 基点→main=**330**，同步锚 919c737c→main=**294**。
 
 ### 6.4 上游 workflow 冲突处置（零触点原则）
 
-上游 12 个 workflow 逐个核 triggers：与 `v*.*.*-go.*` 撞 tag 且缺凭据必红的 4 个——`android-apk-release.yml`(`EXPO_TOKEN`)、`deploy-app.yml`(`CLOUDFLARE_API_TOKEN`)、`desktop-release.yml`(`APPLE_*`)、`release-notes-sync.yml`(GITHUB_TOKEN 够用但会用 CHANGELOG 覆写我们的 release 说明)——在 **public 仓仓库级禁用**（`gh api -X PUT …/workflows/<id>/disable`，不改文件=不扩触点；禁用态是服务端属性，镜像 force-push 不复原）。第 5 个禁用=`docker.yml`：纯 GITHUB_TOKEN 本可用，但其 setup 断言 `package.json.version == tag去v`，与我们的 `0.10.2-go.N` 系列天然冲突（go.1-3 三轮 publish 全红实锤），不改上游文件只能禁。其余 7 个 trigger=main/PR/manual，镜像分支 `paseo-go/v0.1.0` 上天然休眠。安全面：public 仓非 owner 不能推 tag，secrets 只在 owner 推 tag 时可达；`allowed_actions=local` **未设**（会连 actions/checkout 一起禁掉，本仓 workflow 全瘫）。
+上游 workflow 逐个核 triggers：与 `v*.*.*-go.*` 撞 tag 且缺凭据的——`android-apk-release.yml`(`EXPO_TOKEN`)、`deploy-app.yml`(`CLOUDFLARE_API_TOKEN`)、`desktop-release.yml`(`APPLE_*`)、`release-notes-sync.yml`(GITHUB_TOKEN 够用但会用 CHANGELOG 覆写我们的 release 说明)——在 **public 仓仓库级禁用**（`gh api -X PUT …/workflows/<id>/disable`，不改文件=不扩触点；禁用态是服务端属性，分支 force-push 不复原）。`docker.yml` 也禁用：纯 GITHUB_TOKEN 本可用，但其 setup 断言 `package.json.version == tag去v`，与 `0.10.2-go.N` 系列冲突，不改上游文件只能禁。其余 workflow trigger=main/PR/manual，`paseo-go/v0.1.0` 分支上天然休眠。安全面：public 仓非 owner 不能推 tag，secrets 只在 owner 推 tag 时可达；`allowed_actions=local` **未设**（会连 actions/checkout 一起禁掉，本仓 workflow 全瘫）。
 
-**（2026-10-08 外部审计轮增补）** 第 6 个禁用=`deploy-website.yml`（此前漏禁，state=active）：它被**实证唤醒过**——release:published 触发，go.13 发布 run=failure（10-02 另有 2 红）。此前「prerelease 自然 skip」的论证只对 flag 已置的 go.14/16 成立：**发布瞬间忘置 prerelease 就会真跑**=守卫依赖操作正确性，不可依赖；服务端禁用才是闸。
+`deploy-website.yml` 也禁用：release:published 会触发它；`--prerelease` 一旦漏置就会真跑。服务端禁用才是闸，不依赖发布参数。
 
 **同步/发布后的机械对账（写死命令，替代一切口头结论）**：
 
@@ -230,11 +230,11 @@ gh api repos/Karl0007/paseo-go/actions/workflows --jq '.workflows[] | select(.st
 # 期望输出仅一行： .github/workflows/fork-release.yml
 ```
 
-任何多出的 active=上游管线可被本仓事件触发，立即 `PUT …/workflows/<id>/disable`。注意：树里有但**未注册**的 6 个（ci/nix/nix-update-hash/desktop-packages/desktop-rollout/deploy-relay）**不可作为防线**——未注册是服务端状态、机制未查实（疑与分支 force-push/默认分支重写有关），注册复活无感知，所以 active 对账是唯一可复现闸。
+任何多出的 active=上游管线可被本仓事件触发，立即 `PUT …/workflows/<id>/disable`。注意：树里有但**未注册**的（ci/nix/nix-update-hash/desktop-packages/desktop-rollout/deploy-relay）**不可作为防线**——未注册是服务端状态、机制未查实（疑与分支 force-push/默认分支重写有关），注册复活无感知，所以 active 对账是唯一可复现闸。
 
-**贴缝断言（上游漂移闸）**：漂移基线=**330 commits**（fork 基点 db4fd334→upstream/main，2026-10-08 实测；\_layout.tsx 两周 6 改=最热点）。每次 merge upstream 后，除壳套件外逐缝核 `git diff upstream/main -- packages/app/app.config.js packages/app/index.tsx` 输出**必须只剩我们的壳块**（缝隙=贴上去的增块）；漂移数用 `gh api repos/getpaseo/paseo/compare/<anchor>...main --jq .total_commits` 现取并写进当轮发布卡。
+**贴缝断言（上游漂移闸）**：每次 merge upstream 后，除壳套件外逐缝核 `git diff upstream/main -- packages/app/app.config.js packages/app/index.tsx` 输出**必须只剩我们的壳块**（缝隙=贴上去的增块）；漂移数用 `gh api repos/getpaseo/paseo/compare/<anchor>...main --jq .total_commits` 现取并写进当轮发布卡。
 
-**机械闸脚本清单（审计轮 #6：纪律→代码，全部 git-bash 直跑；PATH 里 `bash`=WSL shim 坑⑦，用 `sh <script>`）**：
+**机械闸脚本清单**（git-bash 直跑；PATH 里 `bash`=WSL shim 坑⑦，用 `sh <script>`）：
 
 | 脚本                                     | 何时跑                 | 闸什么                                                                                                                                                                 |
 | ---------------------------------------- | ---------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -248,7 +248,7 @@ gh api repos/Karl0007/paseo-go/actions/workflows --jq '.workflows[] | select(.st
 
 ### 6.5 单一仓库
 
-不再有镜像重建/增量同步。开发、tag、CI、Releases 都在同一个 `Karl0007/paseo-go` 仓；出包直接从当前 HEAD 打 tag，见 §6.6。
+开发、tag、CI、Releases 都在 `Karl0007/paseo-go` 一个仓；出包直接从当前 HEAD 打 tag，见 §6.6。
 
 ### 6.6 出包→换装→任务重启 全链
 

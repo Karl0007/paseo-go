@@ -224,10 +224,7 @@ intake 原话与取证=`todo/NEXT-requirements.md`（Q1-Q10）；执行细节=�
    `operation-permissions.ts` +2 行、新模块文件（content-search.ts / commit-history.ts）；
    `packages/client/src/daemon-client.ts` 纯增发送方法。**纪律**：只增不改、不动任何既有签名、
    壳侧一律配能力闸（旧 daemon `rpc_error{requestType}` 静默降级），探针实证代替真机帧先行。
-2. **证据本地档案制 + 公开镜像**：证据树 `paseo-go/evidence/` gitignore 不入库（历史已于
-   2026-09-29 从公开面剥离）；公开镜像 `github.com/Karl0007/paseo-go` 单向重放
-   （`release/make-public-mirror.sh`：tarball 根 + 排除证据的 patch replay），merge upstream 只在
-   dev 仓做，永不反向 push。（2026-10-19 起废止：单仓化见 §17。）
+2. **证据本地档案制**：证据树 `paseo-go/evidence/` gitignore 不入库；仓库与发布面见 §17。
 3. **代码优先模式 + 补证轮**（设备供电事故应急裁定）：平板 PC USB 协商仅 2.5W 喂不动常亮测试
    负载（BUILD 坑 6d），KI 批各卡真机帧统一 deferred，墙充 ≥30% 后一次补证轮（脚本化
    dump-based 取证）；「恰一次 commit + 全部门禁 + WS 探针/单测」先行成立，设备帧是增项非豁免项。
@@ -243,6 +240,6 @@ intake 原话与取证=`todo/NEXT-requirements.md`（Q1-Q10）；执行细节=�
 
 ---
 
-## 17. 单一仓库（2026-10-19）
+## 17. 仓库与发布
 
-公开镜像/单向重放已退役。`Karl0007/paseo-go` 是唯一开发与发布仓：本地 `origin` 直连，`upstream=getpaseo/paseo` 仅用于合并；CI/Releases 与开发提交在同一历史；`paseo-go/evidence/` 仍只存本地、不入库。§16.2 的镜像裁定及 M2/M3 记录仅作历史。
+`Karl0007/paseo-go` 是唯一开发与发布仓：本地 `origin` 直连，`upstream=getpaseo/paseo` 仅用于合并；CI/Releases 与开发提交在同一历史。`paseo-go/evidence/` 只存本地、gitignore、不入库。

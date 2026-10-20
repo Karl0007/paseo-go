@@ -1,16 +1,15 @@
 # Paseo Go — 接手入口（先读这页）
 
-> 手机优先的 Paseo 壳 app。当前状态：**已交付 v0.10.2-go.16**（F36 树归属+F37 打开即同步/发送才警告；生产 daemon=go.16）——批次六：列表标题=项目(worktree) 默认+备注只认壳重命名、所有权 pill 出生轴+活写者自愈（重启后全「未知」数秒清零）、导入页=resume 全量+已导入/已归档徽标、小字恒显、置顶往返不丢项、长按拖动不误触刷新；批次四微信化对话栏/单行顶栏与 M1-M4 发布链全就绪。分支 `paseo-go/v0.1.0`。
-> 发布物：Releases `v0.10.2-go.16` = 22 资产（APK sha256=`b625efce…b6ccc0`+CLI win32/linux+desktop win/linux+全 sha256 表+latest 指针）。生产 daemon=`0.10.2-go.16`（升级/回滚仪式+清洁房部署=DEPLOY.md；**切机脚本必含版本断言闸**，回滚件 go.14 tgz sha 在 release/RELEASE.md）。
-> 仓库：`github.com/Karl0007/paseo-go`（唯一开发与发布仓；本地 `origin` 直连，CI/Releases 在此；evidence 仅本地、不入库）。
-> 开放项：①置顶拖拽真人手指复验（ACCEPTANCE §5 首行，自动化 26 样本已全绿）；②语音端到端待用户部署 STT/TTS 端点（VOICE-DEPLOY.md）；③Q10 平板设计事后审（预授权落地，留档待审）。
+> 手机优先的 Paseo 壳 app。当前版本见 `VERSION`；发布包在 `Karl0007/paseo-go` Releases。分支 `paseo-go/v0.1.0`。
+> 仓库：`github.com/Karl0007/paseo-go`（唯一开发与发布仓；本地 `origin` 直连，CI/Releases 在此；evidence 仅本地、不入库）。生产 daemon 版本与地址用 `paseo daemon status` 查；升级/回滚与清洁房部署见 `DEPLOY.md`。
+> 开放项：①置顶拖拽真人手指复验（ACCEPTANCE §5 首行，自动化注入无法触发）；②语音端到端待用户部署 STT/TTS 端点（VOICE-DEPLOY.md）；③Q10 平板设计事后审（预授权落地，留档待审）。
 
 ## 阅读顺序（按意图选）
 
 | 你想干什么                    | 读什么                                                                                                                                                       |
 | ----------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| 了解产品/架构/什么不能动      | `DESIGN.md`（**冻结的唯一真相**；§2 铁律=改动前必读：缝隙恰好两个、新代码只进 `src/shell/**`+`src/app/(shell)/**`、路由串收敛 `routes.ts`、i18n/主题零缝隙） |
-| 跑起来（构建/装机/调试/门禁） | `BUILD.md`（§0 本机环境事实+内存坑 → §1-4 闭环 runbook → §3.5 release 构建五坑+一键脚本 → 已知问题表）                                                       |
+| 了解产品/架构/什么不能动      | `DESIGN.md`（**冻结的唯一真相**；改动前读 §2 铁律与 §17 仓库/证据）                                                                                          |
+| 跑起来（构建/装机/调试/门禁） | `BUILD.md`（§0 本机环境事实+内存坑 → §1-4 闭环 runbook → §3.5 release 构建与一键脚本 → 已知问题表）                                                          |
 | 修 bug / 加功能               | 先 `ACCEPTANCE.md` §5 看是否已立案 → 领 known_issue 卡或按 `todo/` 卡式写新卡（口径+证据契约四项）→ 照 BUILD.md 闭环执行                                     |
 | 查验收证据/历史决策           | `ACCEPTANCE.md`（总对照表）→ `todo/<卡号>-*.md`（**归档只读**：每卡=口径+裁定+勘误，勿改历史，新决策写新卡）→ `evidence/<卡号>/` 截图                        |
 | 通知/推送相关                 | `NOTIFY.md`（含 EAS/FCM 不可达裁定）                                                                                                                         |
@@ -20,9 +19,9 @@
 ## 关键事实速查
 
 - 上游同步：`git merge upstream/main`；缝隙两文件冲突时"重新贴缝"（DESIGN §2.7）；`src/shell/**` 与 `(shell)/**` 永不冲突
-- ⚠ 上游触点终账（批次二后，唯一真相=ACCEPTANCE.md 批次二 B2 行 1a）=3 缝隙（index.tsx/app.config.js/\_layout.tsx+3 行）+ 1 组键契约微缝（3 文件）+ 功能面 4 文件（layout.ts/workspace-identity.ts/validated-persist-storage.ts/test-stub）+ 协议 2 + server 8 + 根 CLAUDE.md fork 指路；v0.1.0 旧口径"2 缝隙+微缝 6 文件"已被该行取代。**（2026-10-12 审计轮）** 再 +1 触点=根 `README.md` 顶部 fork 归因说明（Apache-2.0 §4(b)「已修改」声明，纯增一段，merge 时随 CLAUDE.md 一起重贴）；**触点全清单+快照闸=`release/seams/files.txt` + `sh release/seam-diff-check.sh`**（12 文件，对种子 `seams/anchor`），这是唯一机器可核对真相
+- 上游触点清单与快照闸：`release/seams/files.txt`；跑法见 `BUILD.md` §6.4（anchor 见 `release/seams/anchor`）
 - 壳包名 `app.paseo.shell`（debug=`.debug` 后缀），scheme `paseogo://`（与官方 `paseo://` 已分叉）；与官方 app 可共存安装
-- 本地态：zustand persist 前缀 `paseoGo.` 六 store；"我的→壳设置→清除本地数据"一键复位；不加密是裁定（DESIGN §6 威胁模型）
+- 本地态：zustand persist 前缀 `paseoGo.`；"我的→壳设置→清除本地数据"一键复位；不加密是裁定（DESIGN §6 威胁模型）
 - 测试基线：app 套件失败集=W1 环境项（`todo/W1-suite-baseline.md`），改动验收=失败集合不变而非零失败
 - 设备真值：华为 MatePad 坐标/adb 路径/IME 注入坑（**测输入框必用 ADBKeyboard**，百度输入法会吞改注入文本，BUILD.md §4）
 
