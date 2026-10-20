@@ -11,6 +11,11 @@ set -euo pipefail
 cd "$(git rev-parse --show-toplevel)"
 DIR=paseo-go/release/seams
 ANCHOR=$(cat "$DIR/anchor")
+if ! git cat-file -e "$ANCHOR^{commit}" 2>/dev/null; then
+  echo "ANCHOR-MISSING: $ANCHOR"
+  echo "fetch it once: git fetch upstream refs/tags/v0.10.2"
+  exit 2
+fi
 FILES=$(cat "$DIR/files.txt")
 MODE="${1:-check}"
 fail=0

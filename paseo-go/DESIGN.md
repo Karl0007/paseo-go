@@ -227,7 +227,7 @@ intake 原话与取证=`todo/NEXT-requirements.md`（Q1-Q10）；执行细节=�
 2. **证据本地档案制 + 公开镜像**：证据树 `paseo-go/evidence/` gitignore 不入库（历史已于
    2026-09-29 从公开面剥离）；公开镜像 `github.com/Karl0007/paseo-go` 单向重放
    （`release/make-public-mirror.sh`：tarball 根 + 排除证据的 patch replay），merge upstream 只在
-   dev 仓做，永不反向 push。
+   dev 仓做，永不反向 push。（2026-10-19 起废止：单仓化见 §17。）
 3. **代码优先模式 + 补证轮**（设备供电事故应急裁定）：平板 PC USB 协商仅 2.5W 喂不动常亮测试
    负载（BUILD 坑 6d），KI 批各卡真机帧统一 deferred，墙充 ≥30% 后一次补证轮（脚本化
    dump-based 取证）；「恰一次 commit + 全部门禁 + WS 探针/单测」先行成立，设备帧是增项非豁免项。
@@ -240,3 +240,9 @@ intake 原话与取证=`todo/NEXT-requirements.md`（Q1-Q10）；执行细节=�
    同时门 header 带、tab 行、gate 态头，官方模式零变化（门在 shellMode）。动机：顶部带真塌矮
    - 关 tab→归档原生不可达（替代 Portal 盖条 hack，`shell/session-header/tab-row-cover.*` 退役）。
      卡=`todo/KI14-hide-official-session-chrome.md`；解缝=重新贴缝（保留上游正文重贴条件）。
+
+---
+
+## 17. 单一仓库（2026-10-19）
+
+公开镜像/单向重放已退役。`Karl0007/paseo-go` 是唯一开发与发布仓：本地 `origin` 直连，`upstream=getpaseo/paseo` 仅用于合并；CI/Releases 与开发提交在同一历史；`paseo-go/evidence/` 仍只存本地、不入库。§16.2 的镜像裁定及 M2/M3 记录仅作历史。

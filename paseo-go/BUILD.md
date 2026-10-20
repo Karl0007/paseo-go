@@ -3,10 +3,10 @@
 > 本机实测通过（2026-09-25，Windows 11 / Node v24.13.0 / 华为 MatePad BRT-W09）。
 > 后续所有卡按此闭环执行：改代码 → metro 热更或重打 APK → adb 装机 → adb 截图 → 读图。
 
-## 证据与发布镜像纪律（2026-09-29 起）
+## 证据与仓库纪律（2026-09-29 起）
 
-- **证据（截图/帧/dump）= 本地档案**：仍存 `paseo-go/evidence/<卡号>/` 并在报告引用路径，但**不入库**（目录已 gitignore；历史里的证据已于同日从公开镜像剥离）。审计=本机磁盘 + 报告 JSON。
-- **公开镜像**：`github.com/Karl0007/paseo-go`（public）。**单向重放**：dev 仓 → `release/make-public-mirror.sh`（tarball 根 + `format-patch --binary -- . ':(exclude)paseo-go/evidence'` 重放）→ push。**永不反向 push 镜像**；merge upstream 只在 dev 仓做。发布前重跑脚本=镜像与 dev 同步且自动无证据。
+- **证据（截图/帧/dump）= 本地档案**：仍存 `paseo-go/evidence/<卡号>/` 并在报告引用路径，但**不入库**（目录已 gitignore；历史里的证据已于同日从公开面剥离）。审计=本机磁盘 + 报告 JSON。
+- **仓库**：`github.com/Karl0007/paseo-go`（public）是唯一开发与发布仓；本地 `origin` 直连，`upstream=getpaseo/paseo` 仅用于合并。evidence 仍只存本地、不入库；不再有镜像仓/单向重放。
 - 临时产物（`.tmp/`、`packages/app/.tmp/`、`packages/app/packages/`）已 gitignore，禁止再入库。
 
 ## 0. 本机环境事实（先读，省一半坑）
@@ -193,7 +193,7 @@ $ADB = "$env:LOCALAPPDATA\Android\platform-tools\adb.exe"
 
 ## 6. M2 fork CI 全平台出包流水线（tag → Actions → Releases 唯一分发源）
 
-**终态**：dev 仓 → `make-public-mirror.sh` 单向重放 → public 仓（Karl0007/paseo-go）打 tag → GitHub Actions（`.github/workflows/fork-release.yml`，fork 专属新文件=壳侧资产非上游触点）出全平台包 → Releases 为唯一分发/更新源。
+**终态**：单仓（Karl0007/paseo-go）提交 → 打 tag → GitHub Actions（`.github/workflows/fork-release.yml`，fork 专属新文件=壳侧资产非上游触点）出全平台包 → Releases 为唯一分发/更新源。
 
 ### 6.1 触发与产物
 
@@ -230,7 +230,7 @@ gh api repos/Karl0007/paseo-go/actions/workflows --jq '.workflows[] | select(.st
 # 期望输出仅一行： .github/workflows/fork-release.yml
 ```
 
-任何多出的 active=上游管线可被本仓事件触发，立即 `PUT …/workflows/<id>/disable`。注意：树里有但**未注册**的 6 个（ci/nix/nix-update-hash/desktop-packages/desktop-rollout/deploy-relay）**不可作为防线**——未注册是服务端状态、机制未查实（疑与镜像 force-push/默认分支重写有关），注册复活无感知，所以 active 对账是唯一可复现闸。
+任何多出的 active=上游管线可被本仓事件触发，立即 `PUT …/workflows/<id>/disable`。注意：树里有但**未注册**的 6 个（ci/nix/nix-update-hash/desktop-packages/desktop-rollout/deploy-relay）**不可作为防线**——未注册是服务端状态、机制未查实（疑与分支 force-push/默认分支重写有关），注册复活无感知，所以 active 对账是唯一可复现闸。
 
 **贴缝断言（上游漂移闸）**：漂移基线=**330 commits**（fork 基点 db4fd334→upstream/main，2026-10-08 实测；\_layout.tsx 两周 6 改=最热点）。每次 merge upstream 后，除壳套件外逐缝核 `git diff upstream/main -- packages/app/app.config.js packages/app/index.tsx` 输出**必须只剩我们的壳块**（缝隙=贴上去的增块）；漂移数用 `gh api repos/getpaseo/paseo/compare/<anchor>...main --jq .total_commits` 现取并写进当轮发布卡。
 
@@ -244,19 +244,15 @@ gh api repos/Karl0007/paseo-go/actions/workflows --jq '.workflows[] | select(.st
 | `release/cutover-via-task.sh`            | 每次生产切机           | 把切机 .ps1 注册成一次性计划任务脱离本会话进程树执行（go.16 事故：脚本寄生在被重启的 daemon 上=自杀 13h），tail 日志到 DONE OK/ABORT/ROLLBACK；`WATCH_ONLY=1` 断点续盯 |
 | `release/safe-tap.sh <x> <y> <期望文本>` | 任何真机注入点击       | 先 uiautomator dump，取 (x,y) 处**最小可点节点**的 text/content-desc，不含期望文本=拒点退出 2（g16-f05 事故：坐标猜偏把探针文本发进用户 journal）                      |
 
-### 6.5 镜像全量重建 runbook（本轮实测版）
+> `seam-diff-check.sh` anchor=upstream `v0.10.2` (`919c737c`)；新 clone 首次跑前 `git fetch upstream refs/tags/v0.10.2`。
 
-`make-public-mirror.sh` 的 bash 路线在本机已不可依赖，两个环境级坑：
+### 6.5 单一仓库
 
-1. **PATH 里的 `bash` = `C:\Windows\system32\bash.exe`（WSL 残留 shim，坑⑦）**——任何 `bash xxx.sh` 直接弹"未安装发行版"。git-bash 在 `C:\Program Files\Git\bin\bash.exe`，或按本轮做法用 node 编排等价步骤。
-2. **git 2.43.win 的 `format-patch --binary` + pathspec 组合静默产出空文件**（打印文件名、rc=0、文件不存在；node fs 实锤）。定稿=逐 commit `format-patch --binary -1`（无 pathspec）→ 文本层剥除 `paseo-go/evidence/` 段（剥完补 `-- ` 签名，否则 am 报 corrupt）。
-3. 根提交=tarball 解包时 **`git archive` 产物无前缀目录**，不要 `--strip-components=1`；bsdtar 撞 symlink-vs-dir 报错可容忍（symlink 用 `git ls-tree db4fd334` 的 120000 条目写桩+`update-index --cacheinfo` 修 mode）；`git add -A` 必须带 `-f`（上游有被 ignore 但已跟踪的文件，如 `app.json` 样例）；`.gitignore` blob 上游存的是 CRLF，add 会被 `core.autocrlf=input`(全局) 归一成 LF——最终树对账前用 `cat-file blob` 原字节回写+amend。
-4. **树对账（必做，空=过）**：`git fetch <mirror> +HEAD:refs/mirror-check && git diff --stat HEAD refs/mirror-check -- . ':(exclude)paseo-go/evidence'` 必须零输出（本轮 `v0.10.2-go.2` 时=EMPTY）。
-5. 增量同步（修 workflow 后重出包）：`format-patch -1 HEAD` → 镜像 `git am` → `push --force` 分支 → 删旧 tag 重打 `go.N+1`（Actions 不重跑已失败 tag）。
+不再有镜像重建/增量同步。开发、tag、CI、Releases 都在同一个 `Karl0007/paseo-go` 仓；出包直接从当前 HEAD 打 tag，见 §6.6。
 
 ### 6.6 出包→换装→任务重启 全链
 
-1. 出包：dev 仓提交 → 镜像重建/增量（§6.5）→ `git tag v0.10.2-go.N && git push origin <tag>` → `gh run watch`（public 仓）。
+1. 出包：单仓提交 → `git tag v0.10.2-go.N && git push origin <tag>` → `gh run watch`（public 仓）。
 2. 换装：CLI=本机 `npm i -g --prefix <测试前缀> <win32 tarball>` → `paseo --version` 应为 `<ver>` → 隔离 `PASEO_HOME`+config.json `daemon.listen` 指第三端口 → `daemon start/stop`；APK=`adb -s 192.168.31.14:5555 install -r <apk>`（签名同源可直接覆盖）→ 冷启三 tab；win zip=解包+清单核对（本机禁忌#1 不实跑）。
 3. 任务重启：新包验证过 → RELEASE.md 记 go.N 行（产物 sha256+run 链接）→ 后续任务按新成品包口径验收。
 

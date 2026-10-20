@@ -371,3 +371,13 @@ QQ 邮箱 commit author 匿名化：用户裁定**本轮不动**（需 filter-re
 - 在途新案：**F34 mount 噪音行毒化 tail-dedup**（`349d0cf95`，卡 B10-MOUNTNOISE）+用户补充证据「预览在刷新但 pill 死咬原生」——go.12 的 live-idle/attach 基线是首个判别实验，手机装 go.12 后观察该 IdleGame 会话是否翻外部。
 - 过程事故账（全在册）：G1 探针 worktree 连坐删 node_modules/.bin（修复+2599 复绿）；**go.12 切机三连**（脚本谎报 DONE OK→三闸补丁→自动回滚→缓存根因→三跑成功 201.9s）——版本断言闸自此为切机脚本模板硬项。
 - 终态门禁（HEAD=e530f2dd8）：app 6522 绿/server 6254 绿/protocol 747 绿，失败集⊆环境基线（git.exe 段错误两例 -t 隔离复跑转绿实锤负载性）。
+
+---
+
+# 单一仓库切换（2026-10-19；只增不改上文）
+
+- 用户拍板：历史不重要；退役 dev/public 双仓与单向重放，`Karl0007/paseo-go` 成为唯一开发+发布仓。
+- 本地 `C:\work\paseo-go` 现为公开仓 clone：`origin=Karl0007/paseo-go`，`upstream=getpaseo/paseo`；HEAD `85a44ec`，tree `8ffb16114064cf59d15a1a5f8bbd6c7c71006adc` 与原 dev HEAD 逐字节一致。
+- evidence（约 222 MiB）、本地 release 日志/APK（约 305 MiB）、dev home 已迁入新工作树并保持 gitignore；旧 dev 仓及重放 tag 线已删除。
+- 退役 `release/make-public-mirror.sh`；不再有 `paseo-go-public`、镜像 force-push、重放历史。
+- 历史 M2/M3 镜像条目仅作历史记录，不再描述现行流程。

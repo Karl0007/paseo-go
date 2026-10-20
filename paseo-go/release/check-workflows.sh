@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Mechanical gate (external-audit round): the ONLY workflow allowed to be active
-# on the public mirror is our own fork-release.yml. Upstream workflows that are
+# on the public repo is our own fork-release.yml. Upstream workflows that are
 # "unregistered" (6 files, mechanism never root-caused) are NOT a defense —
 # registration is server state that can silently come back. Run after every
 # upstream sync AND every release; see BUILD.md §6.4.
